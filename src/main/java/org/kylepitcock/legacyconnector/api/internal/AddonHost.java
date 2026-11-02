@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.ServiceConfigurationError;
 import java.util.ServiceLoader;
-import net.neoforged.bus.api.Event;
+import net.minecraftforge.eventbus.api.Event;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.ModList;
 import net.neoforged.fml.event.IModBusEvent;
