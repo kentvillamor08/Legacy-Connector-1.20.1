@@ -61,6 +61,8 @@ final class Forge1201MetadataTransformerTest {
         assertTrue(result.contains("versionRange=\"[21.1.258,)\""));
         assertTrue(result.contains("modId=\"minecraft\""));
         assertTrue(result.contains("versionRange=\"[1.21.1,1.22)\""));
+        assertTrue(result.contains("type=\"required\""));
+        assertFalse(result.contains("mandatory="));
         assertFalse(result.contains("modId=\"forge\""));
         assertFalse(result.contains("[47,)"));
         assertFalse(result.contains("[1.20.1,1.21)"));
@@ -77,7 +79,8 @@ final class Forge1201MetadataTransformerTest {
         assertTrue(result.contains("authors=\"kitigawa\""));
         assertTrue(result.contains("description=\"A # remains part of this quoted description\""));
         assertTrue(result.contains("modId=\"curios\""));
-        assertTrue(result.contains("mandatory=false"));
+        assertTrue(result.contains("type=\"optional\""));
+        assertFalse(result.contains("mandatory="));
         assertTrue(result.contains("versionRange=\"[5.11,)\""));
         assertTrue(result.contains("ordering=\"AFTER\""));
         assertTrue(result.contains("side=\"BOTH\""));
