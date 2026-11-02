@@ -2,7 +2,7 @@ package org.kylepitcock.legacyconnector.v1_7_10.client;
 
 import java.lang.reflect.Field;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.neoforged.bus.api.IEventBus;
+import net.minecraftforge.eventbus.api.IEventBus;
 import net.neoforged.neoforge.event.level.LevelEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
