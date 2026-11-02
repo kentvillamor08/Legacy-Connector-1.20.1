@@ -7,7 +7,7 @@ import net.minecraft.client.sounds.SoundManager;
 import net.minecraft.client.sounds.WeighedSoundEvents;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundSource;
-import net.neoforged.bus.api.IEventBus;
+import net.minecraftforge.eventbus.api.IEventBus;
 import net.neoforged.neoforge.client.event.sound.PlaySoundEvent;
 import org.kylepitcock.legacyconnector.v1_7_10.bridge.DimensionPhysics1710;
 
