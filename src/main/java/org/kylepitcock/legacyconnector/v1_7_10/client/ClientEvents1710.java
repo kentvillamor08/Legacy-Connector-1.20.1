@@ -12,7 +12,7 @@ import legacyconnector.v1_7_10.net.minecraftforge.common.MinecraftForge;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.texture.OverlayTexture;
-import net.neoforged.bus.api.IEventBus;
+import net.minecraftforge.eventbus.api.IEventBus;
 import org.kylepitcock.legacyconnector.v1_7_10.bridge.BlockBridge;
 import org.kylepitcock.legacyconnector.v1_7_10.bridge.EntityBridge;
 import org.slf4j.Logger;
