@@ -46,6 +46,22 @@ final class Forge1201MappingCatalogTest {
     }
 
     @Test
+    void pilotTypesMissingFromNeoForgeTargetRequireManualMigration() {
+        for (String type : java.util.List.of(
+                "net/minecraftforge/fml/common/Mod$EventBusSubscriber",
+                "net/minecraftforge/fml/common/Mod$EventBusSubscriber$Bus",
+                "net/minecraftforge/event/entity/living/LivingAttackEvent",
+                "net/minecraftforge/event/entity/living/MobSpawnEvent$FinalizeSpawn",
+                "net/minecraftforge/network/NetworkHooks",
+                "net/minecraftforge/registries/IForgeRegistry")) {
+            var decision = Forge1201MappingCatalog.classify(type);
+            assertEquals(Forge1201MappingCatalog.Kind.MANUAL_ADAPTER_REQUIRED, decision.kind(), type);
+            assertNull(decision.targetInternalName(), type);
+            assertNotNull(decision.reason(), type);
+        }
+    }
+
+    @Test
     void leavesUnreviewedForgeNamespacesUnmapped() {
         var decision = Forge1201MappingCatalog.classify("net/minecraftforge/example/UnknownApi");
 
