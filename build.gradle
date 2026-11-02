@@ -117,9 +117,7 @@ dependencies {
     compileOnly(fg.deobf("com.github.glitchfiend:TerraBlender-forge:${terrablender_version}")) { transitive = false }
 
     // Pehkui provides entity scaling used by the legacy Entity.setSize / eyeHeight bridge.
-    jarJar(implementation(fg.deobf("maven.modrinth:pehkui:${pehkui_version}"))) {
-        version { strictly pehkui_version }
-    }
+    jarJar(implementation(fg.deobf("maven.modrinth:pehkui:${pehkui_version}")))
 
     // Libraries shipped by Forge 1.7.10 / 1.12.2 but absent from the Java 21 runtime.
     // They are plain resources rather than unconditional Jar-in-Jar modules: the loader only offers a library
