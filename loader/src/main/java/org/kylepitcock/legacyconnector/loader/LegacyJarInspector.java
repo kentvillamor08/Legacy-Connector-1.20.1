@@ -161,66 +161,55 @@ public final class LegacyJarInspector {
 
     private static String stripTomlComment(String line) {
         char quote = 0;
-        boolean escaped = false;
         for (int i = 0; i < line.length(); i++) {
             char ch = line.charAt(i);
-            if (quote == '"' && ch == '\\\\' && !escaped) {
-                escaped = true;
-                continue;
+            if ((ch == '"' || ch == '\'') && (quote == 0 || quote == ch)) {
+                quote = quote == 0 ? ch : 0;
+            } else if (ch == '#' && quote == 0) {
+                return line.substring(0, i);
             }
-            if ((ch == '"' || ch == '\\'') && !escaped) {
-                if (quote == 0) quote = ch;
-                else if (quote == ch) quote = 0;
-            }
-            if (ch == '#' && quote == 0) return line.substring(0, i);
-            escaped = false;
         }
         return line;
     }
 
     private static int findTomlEquals(String line) {
         char quote = 0;
-        boolean escaped = false;
         for (int i = 0; i < line.length(); i++) {
             char ch = line.charAt(i);
-            if (quote == '"' && ch == '\\\\' && !escaped) {
-                escaped = true;
-                continue;
-            }
-            if ((ch == '"' || ch == '\\'') && !escaped) {
-                if (quote == 0) quote = ch;
-                else if (quote == ch) quote = 0;
+            if ((ch == '"' || ch == '\'') && (quote == 0 || quote == ch)) {
+                quote = quote == 0 ? ch : 0;
             } else if (ch == '=' && quote == 0) {
                 return i;
             }
-            escaped = false;
         }
         return -1;
     }
 
     private static String parseTomlString(String value) {
-        if (value.length() < 2) return null;
+        if (value.length() < 2) return value;
         char quote = value.charAt(0);
-        if ((quote != '"' && quote != '\\'') || value.charAt(value.length() - 1) != quote) return null;
+        if (quote != '"' && quote != '\'') return value;
+        if (value.charAt(value.length() - 1) != quote) return null;
         String body = value.substring(1, value.length() - 1);
-        if (quote == '\\'') return body;
+        if (quote == '\'') return body;
+
         StringBuilder out = new StringBuilder(body.length());
         boolean escaped = false;
         for (int i = 0; i < body.length(); i++) {
             char ch = body.charAt(i);
-            if (!escaped && ch == '\\\\') {
+            if (!escaped && ch == '\\') {
                 escaped = true;
                 continue;
             }
             if (escaped) {
                 out.append(switch (ch) {
-                    case 'b' -> '\\b';
-                    case 't' -> '\\t';
-                    case 'n' -> '\\n';
-                    case 'f' -> '\\f';
-                    case 'r' -> '\\r';
+                    case 'b' -> '\b';
+                    case 't' -> '\t';
+                    case 'n' -> '\n';
+                    case 'f' -> '\f';
+                    case 'r' -> '\r';
                     case '"' -> '"';
-                    case '\\\\' -> '\\\\';
+                    case '\\' -> '\\';
                     default -> ch;
                 });
                 escaped = false;
@@ -228,7 +217,7 @@ public final class LegacyJarInspector {
                 out.append(ch);
             }
         }
-        if (escaped) out.append('\\\\');
+        if (escaped) out.append('\\');
         return out.toString();
     }
 
