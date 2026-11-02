@@ -77,10 +77,13 @@ public final class Forge1201MetadataTransformer {
                 }
             }
 
-            if ("forge".equalsIgnoreCase(dependencyId) && isMandatoryDependency(lines, section)) {
+            boolean mandatory = isMandatoryDependency(lines, section);
+            rewriteDependencyType(lines, section, mandatory);
+
+            if ("forge".equalsIgnoreCase(dependencyId)) {
                 rewriteDependency(lines, section, "forge", "neoforge", neoForgeVersionRange);
-                foundForgeDependency = true;
-            } else if ("minecraft".equalsIgnoreCase(dependencyId) && isMandatoryDependency(lines, section)) {
+                foundForgeDependency |= mandatory;
+            } else if ("minecraft".equalsIgnoreCase(dependencyId) && mandatory) {
                 rewriteDependency(lines, section, "minecraft", "minecraft", minecraftVersionRange);
                 foundMinecraftDependency = true;
             }
@@ -111,6 +114,45 @@ public final class Forge1201MetadataTransformer {
             }
         }
         return true;
+    }
+
+    /**
+     * Forge 1.20.1 expresses dependency optionality through {@code mandatory};
+     * NeoForge 1.21.1 expresses it through {@code type}.
+     */
+    private static void rewriteDependencyType(String[] lines, Section section, boolean mandatory) {
+        boolean foundType = false;
+        for (int line = section.start() + 1; line < section.end(); line++) {
+            Assignment assignment = assignment(lines[line]);
+            if (assignment == null) continue;
+
+            if (assignment.key().equals("mandatory")) {
+                lines[line] = replaceAssignment(lines[line], assignment, "type",
+                        mandatory ? "required" : "optional");
+                foundType = true;
+            } else if (assignment.key().equals("type")) {
+                foundType = true;
+                String expected = mandatory ? "required" : "optional";
+                if (!assignment.value().equalsIgnoreCase(expected)) {
+                    throw new IllegalArgumentException(
+                            "Conflicting dependency type in section " + section.name());
+                }
+            }
+        }
+        // NeoForge defaults an omitted dependency type to "required". Retaining that
+        // default is equivalent to Forge's default mandatory=true when no key exists.
+    }
+
+    private static String replaceAssignment(
+            String line, Assignment assignment, String key, String value) {
+        int equals = line.indexOf('=');
+        if (equals < 0) throw new IllegalArgumentException("Invalid TOML assignment: " + line);
+        int keyStart = 0;
+        while (keyStart < equals && Character.isWhitespace(line.charAt(keyStart))) keyStart++;
+        int keyEnd = equals;
+        while (keyEnd > keyStart && Character.isWhitespace(line.charAt(keyEnd - 1))) keyEnd--;
+        return line.substring(0, keyStart) + key + line.substring(keyEnd, assignment.valueStart())
+                + quote(value) + line.substring(assignment.valueEnd());
     }
 
     private static void rewriteDependency(
