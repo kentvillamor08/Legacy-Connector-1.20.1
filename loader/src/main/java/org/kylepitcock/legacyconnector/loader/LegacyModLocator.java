@@ -28,7 +28,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import net.minecraftforge.fml.loading.FMLPaths;
 import net.minecraftforge.fml.loading.FMLLoader;
-import net.minecraftforge.fml.loading.moddiscovery.AbstractModProvider;
+import net.minecraftforge.fml.loading.moddiscovery.AbstractJarFileModProvider;
 import net.minecraftforge.forgespi.locating.IModLocator;
 import net.minecraftforge.forgespi.locating.ModFileLoadingException;
 import org.kylepitcock.legacyconnector.loader.shim.ClassInfo;
@@ -47,7 +47,7 @@ import org.slf4j.LoggerFactory;
  * Forge's built-in mods-folder locator ignores unknown jars, allowing this locator to handle old jars without
  * relying on NeoForge's candidate-priority or located-path APIs.</p>
  */
-public final class LegacyModLocator extends AbstractModProvider implements IModLocator {
+public final class LegacyModLocator extends AbstractJarFileModProvider implements IModLocator {
     private static final Logger LOG = LoggerFactory.getLogger("Legacy Connector");
     /** Nested runtime (shim) mod inside the distributed loader jar. Absent in development. */
     static final String EMBEDDED_RUNTIME = "/META-INF/legacyconnector/legacyconnector-runtime.jar";
