@@ -98,6 +98,33 @@ final class Forge1201TargetApiVerifierTest {
     }
 
     @Test
+    void reportsManualAdapterTypesEmbeddedInCandidateMemberDescriptors() throws Exception {
+        String targetFactory = "net/neoforged/neoforge/network/IContainerFactory";
+        Map<String, byte[]> classes = Map.of(
+                targetFactory, targetModClass("java/lang/Object", false, false));
+
+        Forge1201TargetApiVerifier.Result result = verify(
+                analysis(
+                        List.of(
+                                "net/minecraftforge/network/IContainerFactory",
+                                "net/minecraftforge/registries/RegistryObject"),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                "net/minecraftforge/network/IContainerFactory",
+                                "create",
+                                "(Lnet/minecraftforge/registries/RegistryObject;)V",
+                                1)),
+                        List.of()),
+                classes);
+
+        assertEquals(1, result.candidateClassCount());
+        assertEquals(1, result.verifiedClassCount());
+        assertEquals(0, result.verifiedMethodReferences());
+        assertEquals(1, result.methodIssues().size());
+        assertEquals(Forge1201TargetApiVerifier.MemberStatus.REQUIRES_MANUAL_DESCRIPTOR_ADAPTER,
+                result.methodIssues().get(0).status());
+    }
+
+    @Test
     void ignoresManualAdapterOwnersBecauseTheyAreNotPackageMoves() throws Exception {
         Forge1201TargetApiVerifier.Result result = Forge1201TargetApiVerifier.verify(
                 analysis(
