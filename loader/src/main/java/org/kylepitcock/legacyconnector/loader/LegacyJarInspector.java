@@ -93,12 +93,35 @@ public final class LegacyJarInspector {
                 mods.add(new Forge1201JarInfo.Mod(
                         modId,
                         section.values().getOrDefault("version", "unspecified"),
-                        section.values().getOrDefault("displayName", modId)));
+                        section.values().getOrDefault("displayName", modId),
+                        dependenciesForMod(sections, modId)));
             }
             if (mods.isEmpty()) return null;
 
             return new Forge1201JarInfo(path, modLoader, loaderVersion, minecraftRange, forgeRange, mods);
         }
+    }
+
+    private static List<Forge1201JarInfo.Dependency> dependenciesForMod(
+            List<TomlSection> sections, String ownerModId) {
+        List<Forge1201JarInfo.Dependency> dependencies = new ArrayList<>();
+        String prefix = "dependencies.";
+        for (TomlSection section : sections) {
+            if (!section.name().startsWith(prefix)
+                    || !section.name().substring(prefix.length()).equals(ownerModId)) {
+                continue;
+            }
+            Map<String, String> values = section.values();
+            String dependencyId = values.get("modId");
+            if (dependencyId == null || dependencyId.isBlank()) continue;
+            dependencies.add(new Forge1201JarInfo.Dependency(
+                    dependencyId,
+                    values.getOrDefault("versionRange", "*"),
+                    !"false".equalsIgnoreCase(values.getOrDefault("mandatory", "true")),
+                    values.getOrDefault("ordering", "NONE"),
+                    values.getOrDefault("side", "BOTH")));
+        }
+        return List.copyOf(dependencies);
     }
 
     private static String dependencyRange(List<TomlSection> sections, String dependencyId) {
