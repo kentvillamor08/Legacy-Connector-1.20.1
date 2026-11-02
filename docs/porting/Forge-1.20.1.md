@@ -8,13 +8,14 @@ The upstream `master` branch remains the source reference and is not modified by
 - Minecraft: 1.20.1
 - Loader: Minecraft Forge 47.3.0 baseline
 - Legacy mod formats: Forge 1.7.10 and Forge 1.12.2
-- Java: use JDK 21 for development when useful; prefer Java 17-compatible bytecode/runtime requirements where the source and Forge toolchain permit it. Do not change the Java target without checking language/API usage first.
+- Build toolchain: JDK 21.
+- Runtime bytecode target: Java 17, matching Forge 1.20.1's Java baseline.
 
 ## Architecture that must be preserved
 
 Legacy Connector has two distinct halves:
 
-1. **Loader/service layer**: discovers legacy jars before ordinary mod discovery, inspects their metadata, translates bytecode and resources, synthesizes missing legacy API types, caches translations, and emits translated mod candidates.
+1. **Loader/service layer**: discovers legacy jars in the versioned input folders, inspects their metadata, translates bytecode and resources, synthesizes missing legacy API types, caches translations, and emits translated mod candidates.
 2. **Runtime/shim layer**: recreates the old Minecraft/Forge/FML APIs and bridges legacy registrations and behavior into the modern game's registries, events, rendering, networking, world generation, menus, entities, and capabilities.
 
 This is not a normal mod recompile. The aim is to run unmodified legacy mod jars, with their original files left unchanged.
@@ -33,15 +34,17 @@ The Forge-side loader therefore needs to:
 - create proper Forge `ModFile` candidates for the runtime jar, translated legacy jars, synthesized API jars, shared-package jars, and any required bundled libraries;
 - report translation failures through Forge's candidate/error contract and the log;
 - preserve the existing scan, transform, link, synthesize, cache, split-package, and report behavior;
-- rely on Forge's normal mods-folder discovery ignoring unknown jars, while confirming edge cases for legacy jars with manifest mod-type markers.
+- for the initial Forge implementation, read legacy jars from `mods/1.7.10/` and `mods/1.12.2/`. Forge's top-level mods-folder locator scans independently and the Forge SPI does not offer NeoForge's `addLocated` exclusion mechanism; top-level legacy jars are therefore not supported yet.
 
 The current NeoForge implementation must not be changed in-place until the Forge path is isolated and can be tested.
 
 ## Port sequence
 
 ### A. Forge bootstrap and discovery
-- [ ] Add a Forge 1.20.1 build/runtime target without removing the upstream NeoForge reference.
-- [ ] Implement and register the Forge `IModLocator` service.
+- [x] Add an isolated standalone Gradle build for the Forge loader module.
+- [x] Implement and register the Forge `IModLocator` service.
+- [x] Generate Forge `META-INF/mods.toml` metadata and Forge `@Mod` entrypoint descriptors for translated jars.
+- [ ] Build/compile the loader against the Forge 1.20.1 dependencies.
 - [ ] Load the runtime mod and return translated jars as Forge mod candidates.
 - [ ] Prove discovery with a tiny legacy fixture jar before adding the full compatibility matrix.
 
@@ -69,6 +72,8 @@ The current NeoForge implementation must not be changed in-place until the Forge
 - [x] Dedicated branch created: `port/forge-1.20.1`.
 - [x] Upstream loader/runtime architecture inspected.
 - [x] Forge 1.20.1 discovery contract inspected against Forge source.
-- [ ] No Forge port code has been merged or claimed as buildable yet.
+- [x] Added the Forge `IModLocator` adapter and initial Forge metadata generation.
+- [x] Added a standalone loader Gradle project with Java 17 bytecode output.
+- [ ] Compile and test the Forge loader locally/CI; no successful build has been recorded yet.
 
 This status file is intentionally explicit: a branch and a migration plan are not evidence of a successful build. Update the checklist as code and in-game tests are completed.
