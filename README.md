@@ -14,9 +14,9 @@ The goal is to bring the original project's legacy-mod translation approach to F
 | Target Minecraft | 1.20.1 |
 | Target mod loader | Minecraft Forge 47.3.x |
 | Legacy versions being targeted | Forge 1.7.10 and Forge 1.12.2 |
-| Development JDK | Java 21 (provisional toolchain choice) |
-| Legacy jar discovery on Forge | In progress |
-| Translation pipeline on Forge | Not yet ported/verified |
+| Development JDK | JDK 21 toolchain; Java 17 bytecode target |
+| Legacy jar discovery on Forge | Forge `IModLocator` adapter implemented; build/runtime verification pending |
+| Translation pipeline on Forge | Reused pipeline with Forge metadata output; verification pending |
 | Runtime API bridges | Not yet ported/verified |
 | Player release | Not available |
 
@@ -36,6 +36,15 @@ The original Legacy Connector addresses that problem by inspecting legacy mod ja
 - **Translation cache and reports:** avoids repeating completed translation work and records unresolved references or skipped mods.
 
 The goal of this fork is to preserve and adapt that architecture for **Forge 1.20.1**, not to replace it with a simple remapping-only loader.
+
+## Legacy mod input folders
+
+For the current Forge port, place old mods in the matching subfolder:
+
+- `mods/1.7.10/` for Forge 1.7.10 mods.
+- `mods/1.12.2/` for Forge 1.12.2 mods.
+
+Do not place original legacy jars directly in the top-level `mods/` folder yet. Forge's normal folder locator scans that location independently and may reject old Forge metadata before our translated copy is loaded. The Forge SPI used here does not provide the same path-exclusion hook as the upstream NeoForge locator. This folder limitation is temporary and will be revisited after the first loader tests.
 
 ## What carries over from upstream
 
