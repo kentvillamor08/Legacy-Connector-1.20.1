@@ -92,7 +92,7 @@ final class Forge1201JarInspectorTest {
                 [[dependencies.alien_evolution]]
                 modId="forge"
                 mandatory=true
-                versionRange="[47,)"
+                versionRange="[47.3.0,)"
                 ordering="NONE"
                 side="BOTH"
                 """;
