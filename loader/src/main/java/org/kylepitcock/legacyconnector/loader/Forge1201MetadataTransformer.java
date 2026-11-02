@@ -18,9 +18,10 @@ public final class Forge1201MetadataTransformer {
     private Forge1201MetadataTransformer() {}
 
     /**
-     * Rewrites only the root loader version and mandatory Minecraft/Forge dependency
-     * declarations. All other lines, including mod declarations, optional dependencies,
-     * ordering, side restrictions, comments and license text, are preserved.
+     * Rewrites the root loader version, platform dependency IDs/ranges, and Forge's
+     * {@code mandatory} dependency flag into NeoForge's {@code type} property.
+     * Mod declarations, unrelated dependency IDs/ranges, ordering, sides, comments,
+     * optionality, and license text are preserved semantically.
      *
      * @param forgeToml source {@code META-INF/mods.toml} text
      * @param neoForgeLoaderRange host JavaFML loader range, e.g. {@code [4,)}
@@ -121,16 +122,25 @@ public final class Forge1201MetadataTransformer {
      * NeoForge 1.21.1 expresses it through {@code type}.
      */
     private static void rewriteDependencyType(String[] lines, Section section, boolean mandatory) {
+        boolean foundMandatory = false;
         boolean foundType = false;
         for (int line = section.start() + 1; line < section.end(); line++) {
             Assignment assignment = assignment(lines[line]);
             if (assignment == null) continue;
 
             if (assignment.key().equals("mandatory")) {
+                if (foundType) {
+                    throw new IllegalArgumentException(
+                            "Dependency section " + section.name() + " declares both mandatory and type");
+                }
                 lines[line] = replaceAssignment(lines[line], assignment, "type",
                         mandatory ? "required" : "optional");
-                foundType = true;
+                foundMandatory = true;
             } else if (assignment.key().equals("type")) {
+                if (foundMandatory) {
+                    throw new IllegalArgumentException(
+                            "Dependency section " + section.name() + " declares both mandatory and type");
+                }
                 foundType = true;
                 String expected = mandatory ? "required" : "optional";
                 if (!assignment.value().equalsIgnoreCase(expected)) {
@@ -139,8 +149,8 @@ public final class Forge1201MetadataTransformer {
                 }
             }
         }
-        // NeoForge defaults an omitted dependency type to "required". Retaining that
-        // default is equivalent to Forge's default mandatory=true when no key exists.
+        // NeoForge defaults an omitted dependency type to "required". That matches
+        // Forge's default mandatory=true when the source omits the mandatory key.
     }
 
     private static String replaceAssignment(
