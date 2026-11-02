@@ -12,6 +12,10 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.objectweb.asm.AnnotationVisitor;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.Opcodes;
 
 final class Forge1201JarInspectorTest {
     @TempDir
@@ -85,6 +89,25 @@ final class Forge1201JarInspectorTest {
     }
 
     @Test
+    void analyzesForgeApiClassAndMemberReferencesWithoutLoadingTheMod() throws IOException {
+        Path jar = createJarWithClass("META-INF/mods.toml", forge1201Metadata(),
+                "sample/AlienEvoMod.class", sampleForgeModClass());
+
+        Forge1201ApiUsageAnalyzer.Analysis analysis = Forge1201ApiUsageAnalyzer.analyze(jar);
+
+        assertEquals(1, analysis.classCount());
+        assertEquals(java.util.List.of("sample/AlienEvoMod (alien_evolution)"), analysis.modEntrypoints());
+        org.junit.jupiter.api.Assertions.assertTrue(analysis.referencedApiClasses()
+                .contains("net/minecraftforge/fml/ModList"));
+        org.junit.jupiter.api.Assertions.assertTrue(analysis.methodReferences().stream()
+                .anyMatch(reference -> reference.owner().equals("net/minecraftforge/fml/ModList")
+                        && reference.name().equals("get")));
+        org.junit.jupiter.api.Assertions.assertTrue(analysis.fieldReferences().stream()
+                .anyMatch(reference -> reference.owner().equals("net/minecraftforge/registries/ForgeRegistries")
+                        && reference.name().equals("ITEMS")));
+    }
+
+    @Test
     void ignoresNeoForgeMetadata() throws IOException {
         Path jar = createJar("META-INF/neoforge.mods.toml", forge1201Metadata());
 
@@ -112,6 +135,43 @@ final class Forge1201JarInspectorTest {
         Path jar = createJar("META-INF/mods.toml", metadata);
 
         assertNull(LegacyJarInspector.inspectForge1201(jar));
+    }
+
+    private Path createJarWithClass(String metadataPath, String metadata, String classPath, byte[] classBytes)
+            throws IOException {
+        Path jar = Files.createTempFile(tempDir, "forge-1.20.1-analysis-", ".jar");
+        try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(jar))) {
+            out.putNextEntry(new ZipEntry(metadataPath));
+            out.write(metadata.getBytes(StandardCharsets.UTF_8));
+            out.closeEntry();
+            out.putNextEntry(new ZipEntry(classPath));
+            out.write(classBytes);
+            out.closeEntry();
+        }
+        return jar;
+    }
+
+    private static byte[] sampleForgeModClass() {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "sample/AlienEvoMod", null, "java/lang/Object", null);
+        AnnotationVisitor mod = writer.visitAnnotation("Lnet/minecraftforge/fml/common/Mod;", true);
+        mod.visit("value", "alien_evolution");
+        mod.visitEnd();
+
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "sample",
+                "()V", null, null);
+        method.visitCode();
+        method.visitMethodInsn(Opcodes.INVOKESTATIC, "net/minecraftforge/fml/ModList",
+                "get", "()Lnet/minecraftforge/fml/ModList;", false);
+        method.visitInsn(Opcodes.POP);
+        method.visitFieldInsn(Opcodes.GETSTATIC, "net/minecraftforge/registries/ForgeRegistries",
+                "ITEMS", "Lnet/minecraftforge/registries/IForgeRegistry;");
+        method.visitInsn(Opcodes.POP);
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(1, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
     }
 
     private Path createJar(String metadataPath, String metadata) throws IOException {
