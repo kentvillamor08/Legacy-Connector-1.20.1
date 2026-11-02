@@ -8,8 +8,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import net.minecraft.world.level.LevelAccessor;
-import net.neoforged.bus.api.EventPriority;
-import net.neoforged.bus.api.IEventBus;
+import net.minecraftforge.eventbus.api.EventPriority;
+import net.minecraftforge.eventbus.api.IEventBus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
