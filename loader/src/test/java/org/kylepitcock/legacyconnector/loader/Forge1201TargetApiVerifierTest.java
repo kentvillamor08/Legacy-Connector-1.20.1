@@ -23,7 +23,7 @@ final class Forge1201TargetApiVerifierTest {
                 TARGET_BUS, targetInterface(TARGET_BUS),
                 "net/neoforged/fml/Base", targetBaseClass());
 
-        Forge1201TargetApiVerifier.Result result = Forge1201TargetApiVerifier.verify(
+        Forge1201TargetApiVerifier.Result result = verify(
                 analysis(
                         List.of("net/minecraftforge/fml/common/Mod", "net/minecraftforge/eventbus/api/IEventBus"),
                         List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
@@ -56,7 +56,7 @@ final class Forge1201TargetApiVerifierTest {
                 TARGET_BUS, targetInterface(TARGET_BUS),
                 "java/lang/Object", targetEmptyClass("java/lang/Object", null));
 
-        Forge1201TargetApiVerifier.Result result = Forge1201TargetApiVerifier.verify(
+        Forge1201TargetApiVerifier.Result result = verify(
                 analysis(
                         List.of("net/minecraftforge/fml/common/Mod", "net/minecraftforge/eventbus/api/IEventBus"),
                         List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
@@ -78,7 +78,7 @@ final class Forge1201TargetApiVerifierTest {
                 TARGET_MOD, targetModClass("net/neoforged/fml/UnseenParent", false, false),
                 TARGET_BUS, targetInterface(TARGET_BUS));
 
-        Forge1201TargetApiVerifier.Result result = Forge1201TargetApiVerifier.verify(
+        Forge1201TargetApiVerifier.Result result = verify(
                 analysis(
                         List.of(
                                 "net/minecraftforge/fml/common/Mod",
@@ -126,7 +126,7 @@ final class Forge1201TargetApiVerifierTest {
 
     @Test
     void ignoresManualAdapterOwnersBecauseTheyAreNotPackageMoves() throws Exception {
-        Forge1201TargetApiVerifier.Result result = Forge1201TargetApiVerifier.verify(
+        Forge1201TargetApiVerifier.Result result = verify(
                 analysis(
                         List.of("net/minecraftforge/network/simple/SimpleChannel"),
                         List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
