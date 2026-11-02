@@ -182,3 +182,22 @@ tasks.register('transformForge1201Metadata', JavaExec) {
         ])
     }
 }
+
+// Read-only API mapping audit for the Forge 1.20.1 compatibility pilot.
+// This reports package relocation candidates and semantic adapters; it does not rewrite the JAR.
+tasks.register('auditForge1201Mappings', JavaExec) {
+    group = 'verification'
+    description = 'Audits Forge 1.20.1 API references against the reviewed NeoForge 1.21.1 mapping catalog.'
+    dependsOn tasks.named('classes')
+    classpath = sourceSets.main.runtimeClasspath + sourceSets.main.compileClasspath
+    mainClass = 'org.kylepitcock.legacyconnector.loader.Forge1201MappingAudit'
+
+    doFirst {
+        def jarPath = project.findProperty('forge1201Jar')
+        if (jarPath == null || jarPath.toString().isBlank()) {
+            throw new GradleException('Supply -Pforge1201Jar=<path-to-forge-1.20.1-jar>')
+        }
+        setArgs([jarPath.toString()])
+    }
+}
+
