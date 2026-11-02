@@ -77,10 +77,10 @@ public final class Forge1201MetadataTransformer {
                 }
             }
 
-            if ("forge".equalsIgnoreCase(dependencyId)) {
+            if ("forge".equalsIgnoreCase(dependencyId) && isMandatoryDependency(lines, section)) {
                 rewriteDependency(lines, section, "forge", "neoforge", neoForgeVersionRange);
                 foundForgeDependency = true;
-            } else if ("minecraft".equalsIgnoreCase(dependencyId)) {
+            } else if ("minecraft".equalsIgnoreCase(dependencyId) && isMandatoryDependency(lines, section)) {
                 rewriteDependency(lines, section, "minecraft", "minecraft", minecraftVersionRange);
                 foundMinecraftDependency = true;
             }
@@ -101,6 +101,16 @@ public final class Forge1201MetadataTransformer {
         }
 
         return String.join("\n", lines);
+    }
+
+    private static boolean isMandatoryDependency(String[] lines, Section section) {
+        for (int line = section.start() + 1; line < section.end(); line++) {
+            Assignment assignment = assignment(lines[line]);
+            if (assignment != null && assignment.key().equals("mandatory")) {
+                return !"false".equalsIgnoreCase(assignment.value());
+            }
+        }
+        return true;
     }
 
     private static void rewriteDependency(
