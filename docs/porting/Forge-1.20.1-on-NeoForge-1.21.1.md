@@ -96,7 +96,7 @@ The loader now includes an offline bytecode inventory tool. It does not define, 
 After placing the actual Forge 1.20.1 jar somewhere accessible on disk, run from the project root:
 
 ```powershell
-.\gradlew.bat :loader:inspectForge1201 -Pforge1201Jar="F:\path\to\AlienEvo-1.1.3-forge.jar"
+.\gradlew.bat :loader:inspectForge1201 -Pforge1201Jar="F:\path\to\symbiote-1.1.3.jar"
 ```
 
 The report is printed to the Gradle console. The exact jar and dependency versions used for the pilot should be recorded; do not assume the mod's latest release or a dependency page alone defines the bytecode API surface.
