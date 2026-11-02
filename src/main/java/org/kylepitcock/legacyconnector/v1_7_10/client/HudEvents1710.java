@@ -51,7 +51,7 @@ public final class HudEvents1710 {
         });
         // 1.7.10 posted RenderTickEvent END and the ALL overlay after the whole HUD: lowest priority and a raised depth keep legacy
         // overlays (ChromatiCraft's progress cards, Thaumcraft's warp text) above the HUD of modern mods (minimaps draw at a raised z).
-        NeoForge.EVENT_BUS.addListener(net.neoforged.bus.api.EventPriority.LOWEST, (RenderGuiEvent.Post e) -> {
+        NeoForge.EVENT_BUS.addListener(net.minecraftforge.eventbus.api.EventPriority.LOWEST, (RenderGuiEvent.Post e) -> {
             e.getGuiGraphics().pose().pushPose();
             e.getGuiGraphics().pose().translate(0, 0, LEGACY_OVERLAY_Z);
             try {
