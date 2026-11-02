@@ -5,7 +5,7 @@ A development fork of [Legacy Connector](https://github.com/kylepitcock/Legacy-C
 The goal is to bring the original project's legacy-mod translation approach to Forge 1.20.1, with support targeted at Forge 1.7.10 and Forge 1.12.2 mods.
 
 > [!WARNING]
-> **Work in progress — not ready for players.** This branch is an active porting effort. The Forge 1.20.1 loader, runtime bridges, build configuration, and compatibility layer are not yet complete. There is no usable release jar at this stage. Do not treat the upstream NeoForge compatibility results as proof that a mod works in this port.
+> **Work in progress — not ready for players.** This branch is an active porting effort. The Forge 1.20.1 loader now compiles and passes its unit tests, and the main runtime/build setup has begun its Forge migration. The runtime bridges and complete compatibility layer are not yet complete. There is no usable release jar at this stage. Do not treat the upstream NeoForge compatibility results as proof that a mod works in this port.
 
 ## Project status
 
@@ -14,10 +14,11 @@ The goal is to bring the original project's legacy-mod translation approach to F
 | Target Minecraft | 1.20.1 |
 | Target mod loader | Minecraft Forge 47.3.x |
 | Legacy versions being targeted | Forge 1.7.10 and Forge 1.12.2 |
-| Development JDK | JDK 21 toolchain; Java 17 bytecode target |
-| Legacy jar discovery on Forge | Forge `IModLocator` adapter implemented; build/runtime verification pending |
+| Development JDK | JDK 21 toolchain |
+| Runtime Java requirement (current port) | Java 21; the loader itself remains Java 17 bytecode |
+| Legacy jar discovery on Forge | Forge `IModLocator` adapter implemented; standalone loader build and unit tests passed locally |
 | Translation pipeline on Forge | Reused pipeline with Forge metadata output; verification pending |
-| Runtime API bridges | Not yet ported/verified |
+| Runtime API bridges | Main Forge entry point and some event-bus/registry imports migrated; broad API migration and compile verification still pending |
 | Player release | Not available |
 
 Track the implementation milestones in the [Forge 1.20.1 port roadmap](docs/porting/Forge-1.20.1.md).
@@ -58,7 +59,7 @@ For the original project's compatibility history, see the [upstream compatibilit
 
 This port is being developed on the `port/forge-1.20.1` branch.
 
-The build system is still being migrated from the upstream NeoForge 1.21.1 setup to Forge 1.20.1. Consequently, the upstream Gradle run and build instructions are not yet valid for this branch.
+The build system has been switched from the upstream NeoForge ModDev setup to an initial ForgeGradle 6 configuration. The standalone loader has passed a local build, but the new root runtime build has not yet been verified. Use the Forge port roadmap and the current Gradle files; do not assume the upstream NeoForge run instructions apply.
 
 Once the Forge build is ready, this section will document:
 
