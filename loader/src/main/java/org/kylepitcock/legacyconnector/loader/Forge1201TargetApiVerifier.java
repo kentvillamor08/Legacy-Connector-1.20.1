@@ -205,7 +205,9 @@ public final class Forge1201TargetApiVerifier {
         return new Remapper() {
             @Override
             public String map(String internalName) {
-                return mapType(internalName);
+                // Qualify the verifier helper explicitly: Remapper itself has an instance mapType()
+                // that delegates back to map(), so an unqualified call here would recurse forever.
+                return Forge1201TargetApiVerifier.mapType(internalName);
             }
         };
     }
