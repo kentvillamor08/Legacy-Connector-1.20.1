@@ -146,7 +146,12 @@ tasks.register('inspectForge1201', JavaExec) {
         if (jarPath == null || jarPath.toString().isBlank()) {
             throw new GradleException('Supply -Pforge1201Jar=<path-to-forge-1.20.1-jar>')
         }
-        setArgs([jarPath.toString()])
+        def traceMethods = project.findProperty('forge1201TraceMethods')
+        def taskArgs = [jarPath.toString()]
+        if (traceMethods != null && !traceMethods.toString().isBlank()) {
+            taskArgs.add(traceMethods.toString())
+        }
+        setArgs(taskArgs)
     }
 }
 
