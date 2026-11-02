@@ -310,10 +310,84 @@ public final class Forge1201ApiUsageAnalyzer {
 
     private static String opcodeName(int opcode) {
         return switch (opcode) {
+            case Opcodes.NOP -> "NOP";
+            case Opcodes.ACONST_NULL -> "ACONST_NULL";
+            case Opcodes.ICONST_M1 -> "ICONST_M1";
+            case Opcodes.ICONST_0 -> "ICONST_0";
+            case Opcodes.ICONST_1 -> "ICONST_1";
+            case Opcodes.ICONST_2 -> "ICONST_2";
+            case Opcodes.ICONST_3 -> "ICONST_3";
+            case Opcodes.ICONST_4 -> "ICONST_4";
+            case Opcodes.ICONST_5 -> "ICONST_5";
+            case Opcodes.BIPUSH -> "BIPUSH";
+            case Opcodes.SIPUSH -> "SIPUSH";
+            case Opcodes.ILOAD -> "ILOAD";
+            case Opcodes.LLOAD -> "LLOAD";
+            case Opcodes.FLOAD -> "FLOAD";
+            case Opcodes.DLOAD -> "DLOAD";
+            case Opcodes.ALOAD -> "ALOAD";
+            case Opcodes.ISTORE -> "ISTORE";
+            case Opcodes.LSTORE -> "LSTORE";
+            case Opcodes.FSTORE -> "FSTORE";
+            case Opcodes.DSTORE -> "DSTORE";
+            case Opcodes.ASTORE -> "ASTORE";
+            case Opcodes.POP -> "POP";
+            case Opcodes.POP2 -> "POP2";
+            case Opcodes.DUP -> "DUP";
+            case Opcodes.DUP_X1 -> "DUP_X1";
+            case Opcodes.DUP_X2 -> "DUP_X2";
+            case Opcodes.DUP2 -> "DUP2";
+            case Opcodes.IADD -> "IADD";
+            case Opcodes.LADD -> "LADD";
+            case Opcodes.FADD -> "FADD";
+            case Opcodes.DADD -> "DADD";
+            case Opcodes.ISUB -> "ISUB";
+            case Opcodes.LSUB -> "LSUB";
+            case Opcodes.FSUB -> "FSUB";
+            case Opcodes.DSUB -> "DSUB";
+            case Opcodes.IMUL -> "IMUL";
+            case Opcodes.LMUL -> "LMUL";
+            case Opcodes.FMUL -> "FMUL";
+            case Opcodes.DMUL -> "DMUL";
+            case Opcodes.IRETURN -> "IRETURN";
+            case Opcodes.LRETURN -> "LRETURN";
+            case Opcodes.FRETURN -> "FRETURN";
+            case Opcodes.DRETURN -> "DRETURN";
+            case Opcodes.ARETURN -> "ARETURN";
+            case Opcodes.RETURN -> "RETURN";
+            case Opcodes.GETSTATIC -> "GETSTATIC";
+            case Opcodes.PUTSTATIC -> "PUTSTATIC";
+            case Opcodes.GETFIELD -> "GETFIELD";
+            case Opcodes.PUTFIELD -> "PUTFIELD";
             case Opcodes.INVOKEVIRTUAL -> "INVOKEVIRTUAL";
             case Opcodes.INVOKESPECIAL -> "INVOKESPECIAL";
             case Opcodes.INVOKESTATIC -> "INVOKESTATIC";
             case Opcodes.INVOKEINTERFACE -> "INVOKEINTERFACE";
+            case Opcodes.INVOKEDYNAMIC -> "INVOKEDYNAMIC";
+            case Opcodes.NEW -> "NEW";
+            case Opcodes.NEWARRAY -> "NEWARRAY";
+            case Opcodes.ANEWARRAY -> "ANEWARRAY";
+            case Opcodes.ARRAYLENGTH -> "ARRAYLENGTH";
+            case Opcodes.ATHROW -> "ATHROW";
+            case Opcodes.CHECKCAST -> "CHECKCAST";
+            case Opcodes.INSTANCEOF -> "INSTANCEOF";
+            case Opcodes.IFEQ -> "IFEQ";
+            case Opcodes.IFNE -> "IFNE";
+            case Opcodes.IFLT -> "IFLT";
+            case Opcodes.IFGE -> "IFGE";
+            case Opcodes.IFGT -> "IFGT";
+            case Opcodes.IFLE -> "IFLE";
+            case Opcodes.IF_ICMPEQ -> "IF_ICMPEQ";
+            case Opcodes.IF_ICMPNE -> "IF_ICMPNE";
+            case Opcodes.IF_ICMPLT -> "IF_ICMPLT";
+            case Opcodes.IF_ICMPGE -> "IF_ICMPGE";
+            case Opcodes.IF_ICMPGT -> "IF_ICMPGT";
+            case Opcodes.IF_ICMPLE -> "IF_ICMPLE";
+            case Opcodes.IF_ACMPEQ -> "IF_ACMPEQ";
+            case Opcodes.IF_ACMPNE -> "IF_ACMPNE";
+            case Opcodes.GOTO -> "GOTO";
+            case Opcodes.IFNULL -> "IFNULL";
+            case Opcodes.IFNONNULL -> "IFNONNULL";
             default -> "OPCODE_" + opcode;
         };
     }
@@ -356,10 +430,177 @@ public final class Forge1201ApiUsageAnalyzer {
     }
 
     public static void main(String[] args) throws IOException {
-        if (args.length != 1) {
+        if (args.length < 1 || args.length > 2) {
             throw new IllegalArgumentException(
-                    "Usage: inspectForge1201 -Pforge1201Jar=<path-to-forge-1.20.1-jar>");
+                    "Usage: inspectForge1201 <path-to-forge-1.20.1-jar> [comma-separated-class#method-trace-filter]");
         }
-        print(analyze(Path.of(args[0])));
+        Path jarPath = Path.of(args[0]);
+        print(analyze(jarPath));
+        if (args.length == 2 && !args[1].isBlank()) {
+            printSelectedMethodBytecode(jarPath, parseTraceFilter(args[1]));
+        }
+    }
+
+    private static Set<String> parseTraceFilter(String value) {
+        Set<String> result = new LinkedHashSet<>();
+        for (String entry : value.split(",")) {
+            String trimmed = entry.trim();
+            if (!trimmed.isEmpty()) result.add(trimmed.replace('/', '.'));
+        }
+        return Set.copyOf(result);
+    }
+
+    /**
+     * Prints a compact ASM disassembly for explicitly selected methods. This is an inspection aid:
+     * it does not execute or define classes and does not modify the input archive.
+     */
+    private static void printSelectedMethodBytecode(Path jarPath, Set<String> selectedMethods) throws IOException {
+        Set<String> found = new LinkedHashSet<>();
+        System.out.println("\nSelected method bytecode traces (read-only ASM disassembly):");
+        try (ZipFile zip = new ZipFile(jarPath.toFile())) {
+            var entries = zip.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                if (entry.isDirectory() || !entry.getName().endsWith(".class")) continue;
+                try (var in = zip.getInputStream(entry)) {
+                    ClassReader reader = new ClassReader(in);
+                    reader.accept(new ClassVisitor(Opcodes.ASM9) {
+                        private String className;
+
+                        @Override
+                        public void visit(int version, int access, String name, String signature,
+                                          String superName, String[] interfaces) {
+                            className = name.replace('/', '.');
+                        }
+
+                        @Override
+                        public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                         String signature, String[] exceptions) {
+                            String key = className + "#" + name;
+                            if (!selectedMethods.contains(key)) return null;
+                            found.add(key + descriptor);
+                            return new MethodVisitor(Opcodes.ASM9) {
+                                private final List<String> instructions = new ArrayList<>();
+                                private final Map<org.objectweb.asm.Label, String> labels = new java.util.IdentityHashMap<>();
+                                private int nextLabel;
+                                private int index;
+
+                                private String label(org.objectweb.asm.Label label) {
+                                    return labels.computeIfAbsent(label, ignored -> "L" + nextLabel++);
+                                }
+
+                                private void add(String instruction) {
+                                    instructions.add(String.format("%04d: %s", index++, instruction));
+                                }
+
+                                @Override
+                                public void visitInsn(int opcode) {
+                                    add(opcodeName(opcode));
+                                }
+
+                                @Override
+                                public void visitIntInsn(int opcode, int operand) {
+                                    add(opcodeName(opcode) + " " + operand);
+                                }
+
+                                @Override
+                                public void visitVarInsn(int opcode, int var) {
+                                    add(opcodeName(opcode) + " " + var);
+                                }
+
+                                @Override
+                                public void visitTypeInsn(int opcode, String type) {
+                                    add(opcodeName(opcode) + " " + type.replace('/', '.'));
+                                }
+
+                                @Override
+                                public void visitFieldInsn(int opcode, String owner, String fieldName,
+                                                           String fieldDescriptor) {
+                                    add(opcodeName(opcode) + " " + owner.replace('/', '.') + "#"
+                                            + fieldName + " " + fieldDescriptor);
+                                }
+
+                                @Override
+                                public void visitMethodInsn(int opcode, String owner, String methodName,
+                                                            String methodDescriptor, boolean isInterface) {
+                                    add(opcodeName(opcode) + " " + owner.replace('/', '.') + "#"
+                                            + methodName + methodDescriptor);
+                                }
+
+                                @Override
+                                public void visitInvokeDynamicInsn(String methodName, String methodDescriptor,
+                                                                   org.objectweb.asm.Handle bootstrapMethodHandle,
+                                                                   Object... bootstrapMethodArguments) {
+                                    add("INVOKEDYNAMIC " + methodName + methodDescriptor
+                                            + " bootstrap=" + bootstrapMethodHandle
+                                            + " args=" + java.util.Arrays.toString(bootstrapMethodArguments));
+                                }
+
+                                @Override
+                                public void visitJumpInsn(int opcode, org.objectweb.asm.Label target) {
+                                    add(opcodeName(opcode) + " " + label(target));
+                                }
+
+                                @Override
+                                public void visitLabel(org.objectweb.asm.Label label) {
+                                    add(label(label) + ":");
+                                }
+
+                                @Override
+                                public void visitLdcInsn(Object value) {
+                                    add("LDC " + String.valueOf(value));
+                                }
+
+                                @Override
+                                public void visitIincInsn(int var, int increment) {
+                                    add("IINC " + var + " " + increment);
+                                }
+
+                                @Override
+                                public void visitTableSwitchInsn(int min, int max,
+                                                                 org.objectweb.asm.Label defaultLabel,
+                                                                 org.objectweb.asm.Label... switchLabels) {
+                                    List<String> targets = new ArrayList<>();
+                                    for (org.objectweb.asm.Label target : switchLabels) targets.add(label(target));
+                                    add("TABLESWITCH " + min + ".." + max + " default=" + label(defaultLabel)
+                                            + " targets=" + targets);
+                                }
+
+                                @Override
+                                public void visitLookupSwitchInsn(org.objectweb.asm.Label defaultLabel,
+                                                                  int[] keys,
+                                                                  org.objectweb.asm.Label[] switchLabels) {
+                                    List<String> targets = new ArrayList<>();
+                                    for (int i = 0; i < switchLabels.length; i++) {
+                                        targets.add(keys[i] + ":" + label(switchLabels[i]));
+                                    }
+                                    add("LOOKUPSWITCH default=" + label(defaultLabel) + " targets=" + targets);
+                                }
+
+                                @Override
+                                public void visitMultiANewArrayInsn(String descriptor, int dimensions) {
+                                    add("MULTIANEWARRAY " + descriptor + " " + dimensions);
+                                }
+
+                                @Override
+                                public void visitEnd() {
+                                    System.out.println("\n  " + key + descriptor);
+                                    if (instructions.isEmpty()) {
+                                        System.out.println("    [no instructions]");
+                                    } else {
+                                        instructions.forEach(instruction -> System.out.println("    " + instruction));
+                                    }
+                                }
+                            };
+                        }
+                    }, 0);
+                }
+            }
+        }
+
+        for (String selected : selectedMethods) {
+            boolean matched = found.stream().anyMatch(value -> value.startsWith(selected));
+            if (!matched) System.out.println("  NOT FOUND: " + selected);
+        }
     }
 }
