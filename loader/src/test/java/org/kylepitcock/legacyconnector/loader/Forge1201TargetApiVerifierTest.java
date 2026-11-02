@@ -4,12 +4,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
@@ -21,7 +19,7 @@ final class Forge1201TargetApiVerifierTest {
     @Test
     void verifiesMappedClassAndMemberDescriptorsWithoutLoadingClasses() throws Exception {
         Map<String, byte[]> classes = Map.of(
-                TARGET_MOD, targetModClass("net/neoforged/fml/Base", true, true),
+                TARGET_MOD, targetModClass("net/neoforged/fml/Base", false, true),
                 TARGET_BUS, targetInterface(TARGET_BUS),
                 "net/neoforged/fml/Base", targetBaseClass());
 
@@ -55,7 +53,8 @@ final class Forge1201TargetApiVerifierTest {
     void reportsChangedOrMissingTargetMemberSignatures() throws Exception {
         Map<String, byte[]> classes = Map.of(
                 TARGET_MOD, targetModClass("java/lang/Object", false, true),
-                TARGET_BUS, targetInterface(TARGET_BUS));
+                TARGET_BUS, targetInterface(TARGET_BUS),
+                "java/lang/Object", targetEmptyClass("java/lang/Object", null));
 
         Forge1201TargetApiVerifier.Result result = Forge1201TargetApiVerifier.verify(
                 analysis(
@@ -129,10 +128,6 @@ final class Forge1201TargetApiVerifierTest {
                 metadata, 1, List.of(), List.of(), null, Map.of(), classes, methods, fields);
     }
 
-    private static Map<String, byte[]> bytesMap(Map<String, byte[]> classes) {
-        return classes;
-    }
-
     private static byte[] targetModClass(String superName, boolean registerMethod, boolean busField) {
         ClassWriter writer = new ClassWriter(0);
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, TARGET_MOD, null, superName, null);
@@ -152,6 +147,13 @@ final class Forge1201TargetApiVerifierTest {
                     null,
                     null).visitEnd();
         }
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] targetEmptyClass(String name, String superName) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, name, null, superName, null);
         writer.visitEnd();
         return writer.toByteArray();
     }
