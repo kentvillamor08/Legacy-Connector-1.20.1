@@ -106,11 +106,12 @@ public final class LegacyModLocator extends AbstractModProvider implements IModL
 
             List<LegacyJar> legacy = new ArrayList<>();
             java.util.Set<String> seenNames = new java.util.HashSet<>();
-            // FML also loaded mods/<minecraft version>/ (where dependency downloaders such as CodeChickenCore's put
-            // CodeChickenLib); a jar present in both places is taken from mods/. These folders are also where jars that ship
-            // launcher services (a shaded Mixin, as many 1.12.2 mods have) must go: NeoForge's early scan of mods/ itself
-            // loads such jars as launcher services before anything can translate them, and the game stops.
-            for (Path dir : List.of(modsDir, modsDir.resolve("1.7.10"), modsDir.resolve("1.12.2"))) {
+            // Forge 1.20.1's built-in ModsFolderLocator scans the top-level mods/ directory independently.
+            // It would reject an original legacy jar as an invalid old-Forge mod before our translated copy can
+            // load, so this Forge port intentionally accepts legacy jars from versioned subfolders only.
+            // The upstream NeoForge branch can claim root-level paths through its candidate-locator context;
+            // Forge's IModLocator API has no equivalent exclusion mechanism.
+            for (Path dir : List.of(modsDir.resolve("1.7.10"), modsDir.resolve("1.12.2"))) {
                 if (!Files.isDirectory(dir)) continue;
                 try (Stream<Path> files = Files.list(dir)) {
                     for (Path p : files.filter(f -> f.getFileName().toString().toLowerCase().endsWith(".jar"))
