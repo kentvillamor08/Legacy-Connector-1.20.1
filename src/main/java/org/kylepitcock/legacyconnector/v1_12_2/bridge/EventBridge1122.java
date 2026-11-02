@@ -6,7 +6,7 @@ import legacyconnector.v1_12_2.net.minecraftforge.fml.common.eventhandler.Event;
 import legacyconnector.v1_12_2.net.minecraftforge.fml.common.gameevent.PlayerEvent;
 import legacyconnector.v1_12_2.net.minecraftforge.fml.common.gameevent.TickEvent;
 import legacyconnector.v1_12_2.net.minecraftforge.fml.relauncher.Side;
-import net.neoforged.bus.api.IEventBus;
+import net.minecraftforge.eventbus.api.IEventBus;
 
 /**
  * Posts 1.12.2's gameplay events on {@code MinecraftForge.EVENT_BUS} (FML's bus is the same one in 1.12) from the modern
