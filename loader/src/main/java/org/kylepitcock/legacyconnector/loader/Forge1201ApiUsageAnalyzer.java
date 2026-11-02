@@ -67,25 +67,32 @@ public final class Forge1201ApiUsageAnalyzer {
         private final Map<MemberKey, Integer> methods = new HashMap<>();
         private final Map<MemberKey, Integer> fields = new HashMap<>();
 
+        private void recordClass(String internalName) {
+            if (!isGameApi(internalName)) return;
+            classes.add(internalName);
+            String[] pieces = internalName.split("/");
+            String packageName = String.join("/", java.util.Arrays.copyOf(pieces, Math.min(3, pieces.length)));
+            packages.merge(packageName, 1, Integer::sum);
+        }
+
         @Override
         public String map(String internalName) {
-            if (isGameApi(internalName)) {
-                classes.add(internalName);
-                String[] pieces = internalName.split("/");
-                String packageName = String.join("/", java.util.Arrays.copyOf(pieces, Math.min(3, pieces.length)));
-                packages.merge(packageName, 1, Integer::sum);
-            }
+            recordClass(internalName);
             return internalName;
         }
 
         @Override
         public String mapMethodName(String owner, String name, String descriptor) {
+            // ClassRemapper's member-name callback is also an authoritative reference to the owner.
+            // Record it here rather than relying on the order in which ASM visits descriptors and instructions.
+            recordClass(owner);
             if (isGameApi(owner)) methods.merge(new MemberKey(owner, name, descriptor), 1, Integer::sum);
             return name;
         }
 
         @Override
         public String mapFieldName(String owner, String name, String descriptor) {
+            recordClass(owner);
             if (isGameApi(owner)) fields.merge(new MemberKey(owner, name, descriptor), 1, Integer::sum);
             return name;
         }
