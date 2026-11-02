@@ -12,7 +12,7 @@ import org.slf4j.LoggerFactory;
 public final class VillagerTrades1122 {
     private VillagerTrades1122() {}
 
-    public static void register(net.neoforged.bus.api.IEventBus game) {
+    public static void register(net.minecraftforge.eventbus.api.IEventBus game) {
         game.addListener((net.neoforged.neoforge.event.village.VillagerTradesEvent e) -> {
             for (VillagerRegistry.VillagerProfession profession : VillagerRegistry.mcc$professions()) {
                 if (profession.mcc$modern() != e.getType()) continue;
