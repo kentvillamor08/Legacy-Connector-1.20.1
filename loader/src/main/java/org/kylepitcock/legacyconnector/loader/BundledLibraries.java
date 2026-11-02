@@ -24,9 +24,7 @@ import java.util.jar.Manifest;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
-import net.neoforged.neoforgespi.locating.IDiscoveryPipeline;
-import net.neoforged.neoforgespi.locating.IncompatibleFileReporting;
-import net.neoforged.neoforgespi.locating.ModFileDiscoveryAttributes;
+import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -108,7 +106,7 @@ final class BundledLibraries {
      * @param legacy the legacy jars that will be translated (skipped ones excluded)
      * @param scanDirs the folders whose jars may already provide a library
      */
-    static Result provide(IDiscoveryPipeline pipeline, Path cacheDir, List<LegacyJar> legacy, List<Path> scanDirs, byte[] loaderDigest, Set<Path> keep) {
+    static Result provide(Consumer<Path> candidateConsumer, Path cacheDir, List<LegacyJar> legacy, List<Path> scanDirs, byte[] loaderDigest, Set<Path> keep) {
         try {
             List<String> files = index();
             if (files.isEmpty()) return Result.NONE;
@@ -186,7 +184,7 @@ final class BundledLibraries {
                         Path target = libDir.resolve(f);
                         if (!Files.exists(target)) writeLibrary(read(f), target);
                         keep.add(target);
-                        pipeline.addPath(target, ModFileDiscoveryAttributes.DEFAULT, IncompatibleFileReporting.ERROR);
+                        candidateConsumer.accept(target);
                     }
                     provided.add(g.id);
                     notes.add(g.description + ": loaded from Legacy Connector (" + String.join(", ", byGroup.get(g)) + ")");
