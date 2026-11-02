@@ -109,7 +109,7 @@ Run the read-only mapping decision audit against the same original input JAR:
 
 This command classifies reviewed namespace moves, known semantic adapters and unreviewed Forge API types. It does not rewrite the JAR. A package relocation is only a candidate until the exact class and member signatures are verified against the pinned NeoForge 21.1.x artifact.
 
-After the mapping catalog has been reviewed, verify the 82 remaining namespace-relocation candidates against the **actual target game's compile classpath** configured by the root NeoForge ModDev project:
+After the mapping catalog has been reviewed, verify the remaining namespace-relocation candidates against the **actual target game's compile classpath** configured by the root NeoForge ModDev project. The candidate count is expected to change as additional APIs are reclassified for manual migration:
 
 ```powershell
 .\\gradlew.bat :verifyForge1201TargetApi -Pforge1201Jar="C:\\path\\to\\symbiote-1.1.3.jar"
