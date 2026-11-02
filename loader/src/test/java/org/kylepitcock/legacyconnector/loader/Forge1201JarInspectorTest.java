@@ -28,9 +28,15 @@ final class Forge1201JarInspectorTest {
         assertEquals("[47.3.0,)", info.forgeVersionRange());
         assertEquals("alien_evolution", info.mods().get(0).modId());
         assertEquals("Alien Evolution", info.displayName());
-        assertEquals(2, info.mods().get(0).dependencies().size());
+        assertEquals(8, info.mods().get(0).dependencies().size());
         assertEquals("minecraft", info.mods().get(0).dependencies().get(0).modId());
         assertEquals("forge", info.mods().get(0).dependencies().get(1).modId());
+        assertEquals("palladium", info.mods().get(0).dependencies().get(2).modId());
+        assertEquals("geckolib", info.mods().get(0).dependencies().get(3).modId());
+        assertEquals("kubejs", info.mods().get(0).dependencies().get(4).modId());
+        assertEquals("rhino", info.mods().get(0).dependencies().get(5).modId());
+        assertEquals("architectury", info.mods().get(0).dependencies().get(6).modId());
+        assertEquals("pehkui", info.mods().get(0).dependencies().get(7).modId());
         assertEquals("[47.3.0,)", info.mods().get(0).dependencies().get(1).versionRange());
         assertEquals(true, info.mods().get(0).dependencies().get(1).mandatory());
     }
@@ -99,6 +105,48 @@ final class Forge1201JarInspectorTest {
                 mandatory=true
                 versionRange="[47.3.0,)"
                 ordering="NONE"
+                side="BOTH"
+
+                [[dependencies.alien_evolution]]
+                modId="palladium"
+                mandatory=true
+                versionRange="*"
+                ordering="AFTER"
+                side="BOTH"
+
+                [[dependencies.alien_evolution]]
+                modId="geckolib"
+                mandatory=true
+                versionRange="*"
+                ordering="AFTER"
+                side="BOTH"
+
+                [[dependencies.alien_evolution]]
+                modId="kubejs"
+                mandatory=true
+                versionRange="*"
+                ordering="AFTER"
+                side="BOTH"
+
+                [[dependencies.alien_evolution]]
+                modId="rhino"
+                mandatory=true
+                versionRange="*"
+                ordering="AFTER"
+                side="BOTH"
+
+                [[dependencies.alien_evolution]]
+                modId="architectury"
+                mandatory=true
+                versionRange="*"
+                ordering="AFTER"
+                side="BOTH"
+
+                [[dependencies.alien_evolution]]
+                modId="pehkui"
+                mandatory=true
+                versionRange="*"
+                ordering="AFTER"
                 side="BOTH"
                 """;
     }
