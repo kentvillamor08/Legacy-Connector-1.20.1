@@ -4,7 +4,7 @@ import legacyconnector.v1_7_10.net.minecraft.block.Block;
 import legacyconnector.v1_7_10.net.minecraft.item.Item;
 import legacyconnector.v1_7_10.net.minecraft.item.ItemBlock;
 import net.minecraft.client.renderer.BlockEntityWithoutLevelRenderer;
-import net.neoforged.bus.api.IEventBus;
+import net.minecraftforge.eventbus.api.IEventBus;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import net.neoforged.neoforge.client.extensions.common.IClientItemExtensions;
 import net.neoforged.neoforge.client.extensions.common.RegisterClientExtensionsEvent;
