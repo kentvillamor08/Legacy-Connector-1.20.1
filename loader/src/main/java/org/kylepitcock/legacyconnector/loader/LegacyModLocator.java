@@ -83,6 +83,16 @@ public final class LegacyModLocator extends AbstractModProvider implements IModL
         }
     }
 
+    /**
+     * Forge supplies launch arguments to every mod provider during discovery.
+     * This locator obtains its game and mods directories directly from FMLPaths,
+     * so there are no provider-specific arguments to consume.
+     */
+    @Override
+    public void initArguments(Map<String, ?> arguments) {
+        // No-op: FMLPaths is the source of truth for this locator's directories.
+    }
+
     @Override
     public String name() {
         return "legacyconnector";
