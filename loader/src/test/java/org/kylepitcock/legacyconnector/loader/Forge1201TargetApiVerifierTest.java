@@ -101,7 +101,7 @@ final class Forge1201TargetApiVerifierTest {
     void reportsManualAdapterTypesEmbeddedInCandidateMemberDescriptors() throws Exception {
         String targetFactory = "net/neoforged/neoforge/network/IContainerFactory";
         Map<String, byte[]> classes = Map.of(
-                targetFactory, targetModClass("java/lang/Object", false, false));
+                targetFactory, targetClass(targetFactory, "java/lang/Object", false, false));
 
         Forge1201TargetApiVerifier.Result result = verify(
                 analysis(
@@ -156,8 +156,13 @@ final class Forge1201TargetApiVerifierTest {
     }
 
     private static byte[] targetModClass(String superName, boolean registerMethod, boolean busField) {
+        return targetClass(TARGET_MOD, superName, registerMethod, busField);
+    }
+
+    private static byte[] targetClass(
+            String className, String superName, boolean registerMethod, boolean busField) {
         ClassWriter writer = new ClassWriter(0);
-        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, TARGET_MOD, null, superName, null);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, className, null, superName, null);
         if (registerMethod) {
             writer.visitMethod(
                     Opcodes.ACC_PUBLIC,
