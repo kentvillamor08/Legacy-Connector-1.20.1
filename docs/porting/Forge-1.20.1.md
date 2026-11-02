@@ -50,7 +50,7 @@ Forge's stock folder locator scans only the top-level `mods/` directory and does
 - [x] Generate Forge `META-INF/mods.toml` metadata and Forge `@Mod` entrypoint descriptors for translated jars.
 - [x] Generate entrypoint constructors using Forge's `FMLJavaModLoadingContext` and obtain the mod bus/container through its Forge methods.
 - [x] Add a unit test for generated Forge metadata and entrypoint bytecode.
-- [ ] Build/compile the loader against the Forge 1.20.1 dependencies.
+- [x] Build/compile the standalone loader against Forge 1.20.1 dependencies (local Gradle `clean build` succeeded; 10 tasks including unit tests).
 - [ ] Add and embed the Forge runtime mod so the generated bootstrap has its real runtime implementation.
 - [ ] Prove discovery with a tiny legacy fixture jar before adding the full compatibility matrix.
 
@@ -82,7 +82,7 @@ Forge's stock folder locator scans only the top-level `mods/` directory and does
 - [x] Added Forge `mods.toml` generation, modern-mod metadata detection, and context-based entrypoint generation.
 - [x] Added a unit test and GitHub Actions build workflow for the standalone loader.
 - [x] Added a standalone loader Gradle project using a JDK 21 toolchain and Java 17 bytecode output.
-- [ ] Compile and test the Forge loader locally/CI; no successful build has been recorded yet.
+- [x] Compile and test the standalone Forge loader locally; user confirmed `BUILD SUCCESSFUL` (CI status not yet verified).
 - [ ] Port and embed the runtime mod; the root runtime sources are still largely NeoForge-based.
 
 This status file is intentionally explicit: a branch and a migration plan are not evidence of a successful build. Update the checklist as code and in-game tests are completed.
