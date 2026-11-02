@@ -185,7 +185,7 @@ public final class Forge1201MetadataTransformer {
         boolean escaped = false;
         for (int i = 0; i < limit; i++) {
             char ch = line.charAt(i);
-            if (quote == '"' && !escaped && ch == '\\\\') {
+            if (quote == '"' && !escaped && ch == '\\') {
                 escaped = true;
                 continue;
             }
@@ -206,7 +206,7 @@ public final class Forge1201MetadataTransformer {
         boolean escaped = false;
         for (int i = 0; i < line.length(); i++) {
             char ch = line.charAt(i);
-            if (quote == '"' && !escaped && ch == '\\\\') {
+            if (quote == '"' && !escaped && ch == '\\') {
                 escaped = true;
                 continue;
             }
@@ -243,7 +243,7 @@ public final class Forge1201MetadataTransformer {
     }
 
     private static String quote(String value) {
-        return "\"" + value.replace("\\\\", "\\\\\\\\").replace("\"", "\\\\\"") + "\"";
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
     private static void requireRange(String value, String label) {
