@@ -56,7 +56,7 @@ final class Forge1201MetadataTransformerTest {
         String result = transform(SOURCE_METADATA);
 
         assertTrue(result.contains("modLoader=\"javafml\""));
-        assertTrue(result.contains("loaderVersion=\"[4,)\""));
+        assertTrue(result.contains("loaderVersion=\"[1,)\""));
         assertTrue(result.contains("modId=\"neoforge\""));
         assertTrue(result.contains("versionRange=\"[21.1.258,)\""));
         assertTrue(result.contains("modId=\"minecraft\""));
@@ -142,13 +142,13 @@ final class Forge1201MetadataTransformerTest {
     @Test
     void rejectsInvalidReplacementRanges() {
         assertThrows(IllegalArgumentException.class, () -> Forge1201MetadataTransformer.transformToml(
-                SOURCE_METADATA, "[4,)", "[21.1.258,)", "[1.21.1,1.22)\nmalicious=true"));
+                SOURCE_METADATA, "[1,)", "[21.1.258,)", "[1.21.1,1.22)\nmalicious=true"));
     }
 
     private static String transform(String source) {
         return Forge1201MetadataTransformer.transformToml(
                 source,
-                "[4,)",
+                "[1,)",
                 "[21.1.258,)",
                 "[1.21.1,1.22)");
     }
