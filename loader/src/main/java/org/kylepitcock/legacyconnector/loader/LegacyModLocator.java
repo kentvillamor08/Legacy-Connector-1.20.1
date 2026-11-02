@@ -395,7 +395,7 @@ public final class LegacyModLocator extends AbstractModProvider implements IModL
                 for (Path p : files.filter(f -> f.getFileName().toString().toLowerCase().endsWith(".jar")).toList()) {
                     if (p.getFileName().toString().toLowerCase().startsWith("legacyconnector") || legacyPaths.contains(p.toAbsolutePath().normalize())) continue;
                     try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(p.toFile())) {
-                        var e = zip.getEntry("META-INF/neoforge.mods.toml");
+                        var e = zip.getEntry("META-INF/mods.toml");
                         if (e == null) continue;
                         String toml = new String(zip.getInputStream(e).readAllBytes(), StandardCharsets.UTF_8);
                         Set<String> ids = new HashSet<>();
