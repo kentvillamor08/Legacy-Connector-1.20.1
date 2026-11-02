@@ -25,4 +25,4 @@ On Windows:
 gradlew.bat -p loader clean build
 ```
 
-The build uses a Java 21 toolchain but compiles loader bytecode for Java 17, matching the runtime baseline of Forge 1.20.1. The produced loader module is an intermediate development artifact, not yet the distributable Legacy Connector jar: the Forge runtime mod and final bundling task still need to be ported.
+The build uses a Java 21 toolchain but compiles the early loader service to Java 17 bytecode so it remains compatible with Forge's FML startup layer. The current runtime-port decision is to require Java 21 for the finished bundled mod; this is declared in the runtime `mods.toml` and still needs to be verified with a Forge 1.20.1 client/server launch. The produced loader module is an intermediate development artifact, not a playable standalone mod.
