@@ -92,6 +92,21 @@ final class Forge1201MappingCatalogTest {
     }
 
     @Test
+    void configScreenFactoryRequiresExtensionPointMigration() {
+        var factory = Forge1201MappingCatalog.classify(
+                "net/minecraftforge/client/ConfigScreenHandler$ConfigScreenFactory");
+
+        assertEquals(Forge1201MappingCatalog.Kind.MANUAL_ADAPTER_REQUIRED, factory.kind());
+    }
+
+    @Test
+    void forgeModAttributesRequireFieldLevelMigration() {
+        var decision = Forge1201MappingCatalog.classify("net/minecraftforge/common/ForgeMod");
+
+        assertEquals(Forge1201MappingCatalog.Kind.MANUAL_ADAPTER_REQUIRED, decision.kind());
+    }
+
+    @Test
     void eventResultAndDeferredRegisterRequireSemanticReview() {
         var result = Forge1201MappingCatalog.classify(
                 "net/minecraftforge/eventbus/api/Event$Result");
