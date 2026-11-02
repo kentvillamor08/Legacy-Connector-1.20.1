@@ -97,7 +97,7 @@ configurations {
 
 dependencies {
     // Forge 1.20.1 runtime.
-    minecraft "net.minecraftforge:forge:\${minecraft_version}-\${forge_version}"
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
 
     // The locator service must be present on the launch classpath in development. Production bundles its jar
     // alongside the embedded runtime mod.
@@ -108,14 +108,14 @@ dependencies {
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 
     // Optional integrations: only linked when the corresponding mod is installed.
-    compileOnly fg.deobf("top.theillusivec4.curios:curios-forge:\${curios_version}:api")
-    compileOnly fg.deobf("maven.modrinth:jade:\${jade_version}")
-    compileOnly fg.deobf("mezz.jei:jei-\${minecraft_version}-forge-api:\${jei_version}")
-    compileOnly(fg.deobf("com.simibubi.create:create-\${minecraft_version}:\${create_version}:slim")) { transitive = false }
-    compileOnly(fg.deobf("com.github.glitchfiend:TerraBlender-forge:\${terrablender_version}")) { transitive = false }
+    compileOnly fg.deobf("top.theillusivec4.curios:curios-forge:${curios_version}:api")
+    compileOnly fg.deobf("maven.modrinth:jade:${jade_version}")
+    compileOnly fg.deobf("mezz.jei:jei-${minecraft_version}-forge-api:${jei_version}")
+    compileOnly(fg.deobf("com.simibubi.create:create-${minecraft_version}:${create_version}:slim")) { transitive = false }
+    compileOnly(fg.deobf("com.github.glitchfiend:TerraBlender-forge:${terrablender_version}")) { transitive = false }
 
     // Pehkui provides entity scaling used by the legacy Entity.setSize / eyeHeight bridge.
-    jarJar(implementation(fg.deobf("maven.modrinth:pehkui:\${pehkui_version}"))) {
+    jarJar(implementation(fg.deobf("maven.modrinth:pehkui:${pehkui_version}"))) {
         version { strictly pehkui_version }
     }
 
@@ -189,16 +189,16 @@ tasks.named('processResources') { dependsOn generateShimIndex }
 
 // Compile-only legacy API jars that look like the original Forge/Minecraft API to a Java 8 compiler.
 ['1_7_10', '1_12_2'].each { ver ->
-    tasks.register("legacyApiStubs\${ver}", JavaExec) {
+    tasks.register("legacyApiStubs${ver}", JavaExec) {
         dependsOn tasks.named('compileJava')
         classpath = project(':loader').sourceSets.main.runtimeClasspath
         mainClass = 'org.kylepitcock.legacyconnector.loader.shim.LegacyApiStubGenerator'
         def classDir = sourceSets.main.java.classesDirectory
-        def out = layout.buildDirectory.file("legacy-api/legacy-api-\${ver}.jar")
+        def out = layout.buildDirectory.file("legacy-api/legacy-api-${ver}.jar")
         inputs.dir classDir
         outputs.file out
         argumentProviders.add({
-            [classDir.get().asFile.absolutePath, "legacyconnector/v\${ver}/".toString(), out.get().asFile.absolutePath]
+            [classDir.get().asFile.absolutePath, "legacyconnector/v${ver}/".toString(), out.get().asFile.absolutePath]
         } as CommandLineArgumentProvider)
     }
 }
@@ -221,7 +221,7 @@ tasks.register('textureReport', JavaExec) {
     mainClass = 'org.kylepitcock.legacyconnector.core.pack.TextureModernizer'
     argumentProviders.add({
         def client = project.findProperty('modernClient') ?:
-                "\${System.getenv('APPDATA') ?: System.getProperty('user.home')}/.minecraft/versions/1.20.1/1.20.1.jar"
+                "${System.getenv('APPDATA') ?: System.getProperty('user.home')}/.minecraft/versions/1.20.1/1.20.1.jar"
         def samples = project.findProperty('sampleDir') ?: layout.buildDirectory.dir('texture-samples').get().asFile.absolutePath
         [client.toString(), samples.toString()] +
                 (project.findProperty('legacyJar') ?: '').toString().split(',').findAll { it }
