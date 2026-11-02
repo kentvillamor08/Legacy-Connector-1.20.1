@@ -74,14 +74,14 @@ public final class LegacyJarInspector {
                     .orElse(Map.of());
             String modLoader = root.get("modLoader");
             String loaderVersion = root.get("loaderVersion");
-            if (!"javafml".equalsIgnoreCase(modLoader) || !hasRangeLowerBound(loaderVersion, "47")) {
+            if (!"javafml".equalsIgnoreCase(modLoader) || !hasMajorRangeLowerBound(loaderVersion, "47")) {
                 return null;
             }
 
             String minecraftRange = dependencyRange(sections, "minecraft");
             String forgeRange = dependencyRange(sections, "forge");
             if (!hasRangeLowerBound(minecraftRange, "1.20.1")
-                    || !hasRangeLowerBound(forgeRange, "47")) {
+                    || !hasMajorRangeLowerBound(forgeRange, "47")) {
                 return null;
             }
 
@@ -114,14 +114,22 @@ public final class LegacyJarInspector {
     }
 
     private static boolean hasRangeLowerBound(String range, String expected) {
-        if (range == null || range.isBlank()) return false;
+        return expected.equals(rangeLowerBound(range));
+    }
+
+    private static boolean hasMajorRangeLowerBound(String range, String expectedMajor) {
+        String lowerBound = rangeLowerBound(range);
+        return lowerBound != null && (lowerBound.equals(expectedMajor) || lowerBound.startsWith(expectedMajor + "."));
+    }
+
+    private static String rangeLowerBound(String range) {
+        if (range == null || range.isBlank()) return null;
         String value = range.trim();
         if (value.startsWith("[") || value.startsWith("(")) value = value.substring(1).trim();
         int comma = value.indexOf(',');
         if (comma >= 0) value = value.substring(0, comma).trim();
         else if (value.endsWith("]") || value.endsWith(")")) value = value.substring(0, value.length() - 1).trim();
-        if (!value.equals(expected)) return false;
-        return true;
+        return value;
     }
 
     private record TomlSection(String name, Map<String, String> values) {}
