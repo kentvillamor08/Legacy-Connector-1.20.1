@@ -62,8 +62,20 @@ public final class Forge1201DependencyResolver {
             try (var in = zip.getInputStream(metadata)) {
                 toml = new String(in.readAllBytes(), StandardCharsets.UTF_8);
             }
-            Matcher matcher = MOD_ID.matcher(stripTomlComments(toml));
-            while (matcher.find()) ids.add(matcher.group(1).toLowerCase(java.util.Locale.ROOT));
+            String section = "";
+            for (String line : stripTomlComments(toml).split("\\R")) {
+                String trimmed = line.trim();
+                if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+                    boolean arrayTable = trimmed.startsWith("[[") && trimmed.endsWith("]]");
+                    int start = arrayTable ? 2 : 1;
+                    int end = trimmed.length() - (arrayTable ? 2 : 1);
+                    section = trimmed.substring(start, end).trim();
+                    continue;
+                }
+                if (!section.equals("mods")) continue;
+                Matcher matcher = MOD_ID.matcher(line);
+                if (matcher.find()) ids.add(matcher.group(1).toLowerCase(java.util.Locale.ROOT));
+            }
         } catch (IOException | RuntimeException ignored) {
             // Invalid or unrelated archives are not native mod candidates.
         }
