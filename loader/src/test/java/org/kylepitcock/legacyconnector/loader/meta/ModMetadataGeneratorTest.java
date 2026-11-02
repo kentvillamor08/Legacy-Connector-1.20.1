@@ -53,7 +53,8 @@ final class ModMetadataGeneratorTest {
 
     @Test
     void generatesForgeModEntrypointUsingForgeLoadingContext() {
-        byte[] bytecode = ModMetadataGenerator.entrypointClass(sampleJar(), sampleJar().mods.get(0));
+        LegacyJar jar = sampleJar();
+        byte[] bytecode = ModMetadataGenerator.entrypointClass(jar, jar.mods.get(0));
         ClassNode node = new ClassNode();
         new ClassReader(bytecode).accept(node, 0);
 
@@ -68,9 +69,7 @@ final class ModMetadataGeneratorTest {
 
         assertEquals("(Lnet/minecraftforge/fml/javafmlmod/FMLJavaModLoadingContext;)V", constructor.desc);
 
-        List<MethodInsnNode> calls = constructor.instructions.iterator().hasNext()
-                ? methodCalls(constructor)
-                : List.of();
+        List<MethodInsnNode> calls = methodCalls(constructor);
 
         assertTrue(calls.stream().anyMatch(call ->
                 call.getOpcode() == Opcodes.INVOKEVIRTUAL
