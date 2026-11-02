@@ -115,7 +115,7 @@ After the mapping catalog has been reviewed, verify the 82 remaining namespace-r
 .\\gradlew.bat :verifyForge1201TargetApi -Pforge1201Jar="C:\\path\\to\\symbiote-1.1.3.jar"
 ```
 
-This task runs in the root project's target compile classpath while the `:loader` module remains independent of Minecraft/NeoForge classes. It reads class-file structures with ASM and checks target class presence plus exact method/field descriptors, including inherited members where the visible hierarchy is complete. Missing classes, missing members, and incomplete hierarchy lookups are reported separately. No target class is loaded or initialized and no JAR bytes are changed. A structural match is not proof of behavioral compatibility; manual-adapter types and Minecraft 1.20.1-to-1.21.1 changes remain separate.
+This task runs in the root project's target compile classpath while the `:loader` module remains independent of Minecraft/NeoForge classes. It reads class-file structures with ASM and checks target class presence plus exact method/field descriptors, including inherited members where the visible hierarchy is complete. Missing classes, missing members, incomplete hierarchy lookups, and member descriptors that contain manual-adapter types are reported separately. No target class is loaded or initialized and no JAR bytes are changed. A structural match is not proof of behavioral compatibility; manual-adapter types and Minecraft 1.20.1-to-1.21.1 changes remain separate.
 ## Current status
 
 - Added a separate metadata detector for jars whose `mods.toml` declares JavaFML 47.x, Minecraft 1.20.1 and Forge 47.x.
