@@ -1,6 +1,6 @@
 package org.kylepitcock.legacyconnector.api.event;
 
-import net.neoforged.bus.api.Event;
+import net.minecraftforge.eventbus.api.Event;
 import net.neoforged.fml.event.IModBusEvent;
 
 /** Phase {@code LOAD_COMPLETE}: the legacy mods' loadComplete ran. Main thread; registries are frozen. */
