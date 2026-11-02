@@ -22,8 +22,8 @@ SOURCE_ROOTS = (
     ROOT / "loader" / "src" / "main" / "java",
     ROOT / "testmods" / "src" / "main" / "java",
 )
-NEOFORGED = re.compile(r"net\\.neoforged(?:\\.[A-Za-z0-9_*$]+)*")
-IMPORT = re.compile(r"^\\s*import\\s+(?:static\\s+)?(net\\.neoforged\\.[^;]+);", re.MULTILINE)
+NEOFORGED = re.compile(r"net\.neoforged(?:\.[A-Za-z0-9_*$]+)*")
+IMPORT = re.compile(r"^\s*import\s+(?:static\s+)?(net\.neoforged\.[^;]+);", re.MULTILINE)
 TOKEN = re.compile(r"(?<![A-Za-z0-9_])(?:DeferredRegister|DeferredHolder|RegisterEvent|IEventBus|ModLoadingIssue|IModFileCandidateLocator|IDiscoveryPipeline|ILaunchContext)(?![A-Za-z0-9_])")
 
 
@@ -86,7 +86,7 @@ def main() -> int:
         for file_path in sorted(set(affected[package])):
             lines.append(f"    {file_path}")
 
-    report = "\\n".join(lines) + "\\n"
+    report = "\n".join(lines) + "\n"
     if args.output:
         output = args.output if args.output.is_absolute() else ROOT / args.output
         output.parent.mkdir(parents=True, exist_ok=True)
