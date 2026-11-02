@@ -136,7 +136,7 @@ sourceSets.main.resources.srcDir(files(layout.buildDirectory.dir('generated/core
 // Example: ./gradlew :loader:inspectForge1201 -Pforge1201Jar=/path/to/mod.jar
 tasks.register('inspectForge1201', JavaExec) {
     group = 'verification'
-    description = 'Inventories Minecraft/Forge API references in a Forge 1.20.1 mod jar without loading it.'
+    description = 'Inventories Forge API references and optionally prints selected mod method bytecode without loading it.'
     dependsOn tasks.named('classes')
     classpath = sourceSets.main.runtimeClasspath + sourceSets.main.compileClasspath
     mainClass = 'org.kylepitcock.legacyconnector.loader.Forge1201ApiUsageAnalyzer'
