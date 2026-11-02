@@ -169,7 +169,7 @@ public final class LiveStacks1122 {
     }
 
     /** Flushes each side at the end of each of its level ticks. */
-    public static void register(net.neoforged.bus.api.IEventBus game) {
+    public static void register(net.minecraftforge.eventbus.api.IEventBus game) {
         game.addListener((net.neoforged.neoforge.event.tick.LevelTickEvent.Post e) -> flushAll(e.getLevel().isClientSide() ? CLIENT : SERVER));
     }
 }
