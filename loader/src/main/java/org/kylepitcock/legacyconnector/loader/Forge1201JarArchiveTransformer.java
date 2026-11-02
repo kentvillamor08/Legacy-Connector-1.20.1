@@ -65,7 +65,9 @@ public final class Forge1201JarArchiveTransformer {
         Files.createDirectories(parent);
 
         String inputDigest = sha256(source);
-        Path temporary = Files.createTempFile(parent, destination.getFileName().toString(), ".tmp");
+        String temporaryPrefix = destination.getFileName().toString();
+        if (temporaryPrefix.length() < 3) temporaryPrefix = (temporaryPrefix + "___").substring(0, 3);
+        Path temporary = Files.createTempFile(parent, temporaryPrefix, ".tmp");
         int copied = 0;
         int removedSignatures = 0;
         boolean wroteMetadata = false;
