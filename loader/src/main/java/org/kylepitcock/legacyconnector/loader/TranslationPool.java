@@ -82,7 +82,7 @@ final class TranslationPool implements AutoCloseable {
     static void heartbeat() {
         if (!"main".equals(Thread.currentThread().getName())) return;
         try {
-            net.neoforged.fml.loading.ImmediateWindowHandler.renderTick();
+            net.minecraftforge.fml.loading.ImmediateWindowHandler.renderTick();
         } catch (Throwable ignored) {
             // cosmetic: no window, or a provider that does not support ticking
         }
