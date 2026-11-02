@@ -38,6 +38,14 @@ public record Forge1201JarInfo(
         public Mod {
             dependencies = List.copyOf(dependencies);
         }
+
+        public String dependencySummary() {
+            return dependencies.stream()
+                    .map(dependency -> (dependency.mandatory() ? "" : "optional ")
+                            + dependency.modId() + " " + dependency.versionRange())
+                    .reduce((a, b) -> a + ", " + b)
+                    .orElse("none declared");
+        }
     }
 
     /** One dependency entry copied from a [[dependencies.<modid>]] section in mods.toml. */
