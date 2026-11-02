@@ -222,7 +222,7 @@ public final class EntityBridge1122 {
     // ------------------------------------------------------------------ capabilities of vanilla entities
 
     /** Saves the capabilities of every vanilla entity view (world saves, logouts, server stop). */
-    public static void registerSaving(net.neoforged.bus.api.IEventBus bus) {
+    public static void registerSaving(net.minecraftforge.eventbus.api.IEventBus bus) {
         bus.addListener((net.neoforged.neoforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent e) -> saveCaps(e.getEntity()));
         bus.addListener((net.neoforged.neoforge.event.entity.player.PlayerEvent.SaveToFile e) -> saveCaps(e.getEntity()));
         bus.addListener((net.neoforged.neoforge.event.server.ServerStoppingEvent e) -> saveAllCaps());
