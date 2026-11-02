@@ -17,6 +17,7 @@ import java.util.zip.ZipFile;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.commons.ClassRemapper;
 import org.objectweb.asm.commons.Remapper;
@@ -177,6 +178,15 @@ public final class Forge1201ApiUsageAnalyzer {
                         public void visit(int version, int access, String name, String signature,
                                           String superName, String[] interfaces) {
                             className = name;
+                        }
+
+                        @Override
+                        public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                         String signature, String[] exceptions) {
+                            // Return a visitor so ClassRemapper traverses method bodies.
+                            // Without this sink visitor, the downstream ClassVisitor returns null and
+                            // ASM skips instructions, hiding method/field references from the analyzer.
+                            return new MethodVisitor(Opcodes.ASM9) {};
                         }
 
                         @Override
