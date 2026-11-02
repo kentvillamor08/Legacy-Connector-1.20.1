@@ -123,6 +123,8 @@ public final class Forge1201MappingCatalog {
                     "Migrate config value declarations and consumers to ModConfigSpec.DoubleValue."),
             Map.entry("net/minecraftforge/common/ForgeConfigSpec$IntValue",
                     "Migrate config value declarations and consumers to ModConfigSpec.IntValue."),
+            Map.entry("net/minecraftforge/client/ConfigScreenHandler",
+                    "Replace the old config screen extension-point API with IConfigScreenFactory registered through ModContainer."),
             Map.entry("net/minecraftforge/client/ConfigScreenHandler$ConfigScreenFactory",
                     "Replace the old config screen factory with IConfigScreenFactory registered through ModContainer."),
             Map.entry("net/minecraftforge/client/gui/overlay/ForgeGui",
