@@ -61,7 +61,7 @@ final class Forge1201JarArchiveTransformerTest {
         String before = sha256(original);
 
         Forge1201JarArchiveTransformer.Result result = Forge1201JarArchiveTransformer.transform(
-                original, translated, "[4,)", "[21.1.258,)", "[1.21.1,1.22)");
+                original, translated, "[1,)", "[21.1.258,)", "[1.21.1,1.22)");
 
         assertTrue(Files.isRegularFile(translated));
         assertEquals(before, sha256(original));
@@ -84,7 +84,7 @@ final class Forge1201JarArchiveTransformerTest {
             String metadata = new String(
                     zip.getInputStream(zip.getEntry("META-INF/neoforge.mods.toml")).readAllBytes(),
                     StandardCharsets.UTF_8);
-            assertTrue(metadata.contains("loaderVersion=\\"[4,)\\""));
+            assertTrue(metadata.contains("loaderVersion=\\"[1,)\\""));
             assertTrue(metadata.contains("modId=\\"neoforge\\""));
             assertTrue(metadata.contains("type=\\"required\\""));
             assertTrue(metadata.contains("type=\\"optional\\""));
@@ -100,7 +100,7 @@ final class Forge1201JarArchiveTransformerTest {
         String before = sha256(original);
 
         assertThrows(IllegalArgumentException.class, () -> Forge1201JarArchiveTransformer.transform(
-                original, original, "[4,)", "[21.1.258,)", "[1.21.1,1.22)"));
+                original, original, "[1,)", "[21.1.258,)", "[1.21.1,1.22)"));
 
         assertEquals(before, sha256(original));
     }
@@ -114,7 +114,7 @@ final class Forge1201JarArchiveTransformerTest {
         Path output = tempDir.resolve("bad-output.jar");
 
         assertThrows(IllegalArgumentException.class, () -> Forge1201JarArchiveTransformer.transform(
-                input, output, "[4,)", "[21.1.258,)", "[1.21.1,1.22)"));
+                input, output, "[1,)", "[21.1.258,)", "[1.21.1,1.22)"));
 
         assertFalse(Files.exists(output));
     }
