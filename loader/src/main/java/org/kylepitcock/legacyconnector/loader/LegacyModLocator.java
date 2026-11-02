@@ -130,9 +130,14 @@ public final class LegacyModLocator implements IModFileCandidateLocator {
                             } else {
                                 Forge1201JarInfo forge1201 = LegacyJarInspector.inspectForge1201(p);
                                 if (forge1201 != null) {
+                                    String dependencies = forge1201.mods().stream()
+                                            .map(mod -> mod.modId() + " -> " + mod.dependencySummary())
+                                            .reduce((a, b) -> a + "; " + b)
+                                            .orElse("none declared");
                                     String message = "Legacy Connector recognized Forge 1.20.1 mod "
                                             + forge1201.displayName() + " (" + forge1201.modIds() + ") in "
-                                            + p.getFileName() + ", but 1.20.1 translation is not enabled yet; the jar was skipped.";
+                                            + p.getFileName() + ", but 1.20.1 translation is not enabled yet; the jar was skipped. "
+                                            + "Declared dependencies: " + dependencies;
                                     context.addLocated(p);
                                     pipeline.addIssue(ModLoadingIssue.warning(message).withAffectedPath(p));
                                     LOG.warn(message);
