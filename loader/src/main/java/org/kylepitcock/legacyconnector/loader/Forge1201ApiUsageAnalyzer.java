@@ -39,6 +39,36 @@ public final class Forge1201ApiUsageAnalyzer {
         }
     }
 
+    /**
+     * A direct bytecode invocation from a mod-owned method to a Forge/optional API method.
+     * This preserves the caller method, unlike the global constant-pool member inventory.
+     */
+    public record ApiMethodCallSite(
+            String callerClass,
+            String callerMethod,
+            String callerDescriptor,
+            String targetOwner,
+            String targetName,
+            String targetDescriptor,
+            int opcode,
+            int count) {
+        public String display() {
+            return targetOwner.replace('/', '.') + "#" + targetName + targetDescriptor
+                    + " <= " + callerClass.replace('/', '.') + "#" + callerMethod + callerDescriptor
+                    + " [" + opcodeName(opcode) + "]"
+                    + (count > 1 ? " (x" + count + ")" : "");
+        }
+    }
+
+    private record CallSiteKey(
+            String callerClass,
+            String callerMethod,
+            String callerDescriptor,
+            String targetOwner,
+            String targetName,
+            String targetDescriptor,
+            int opcode) {}
+
     public record Analysis(
             Forge1201JarInfo metadata,
             int classCount,
@@ -47,6 +77,7 @@ public final class Forge1201ApiUsageAnalyzer {
             String coreModClass,
             Map<String, Integer> packageReferences,
             List<String> referencedApiClasses,
+            List<ApiMethodCallSite> methodCallSites,
             List<ApiMemberReference> methodReferences,
             List<ApiMemberReference> fieldReferences) {
 
@@ -55,6 +86,7 @@ public final class Forge1201ApiUsageAnalyzer {
             mixinConfigs = List.copyOf(mixinConfigs);
             packageReferences = Map.copyOf(packageReferences);
             referencedApiClasses = List.copyOf(referencedApiClasses);
+            methodCallSites = List.copyOf(methodCallSites);
             methodReferences = List.copyOf(methodReferences);
             fieldReferences = List.copyOf(fieldReferences);
         }
@@ -67,6 +99,7 @@ public final class Forge1201ApiUsageAnalyzer {
         private final Map<String, Integer> packages = new TreeMap<>();
         private final Map<MemberKey, Integer> methods = new HashMap<>();
         private final Map<MemberKey, Integer> fields = new HashMap<>();
+        private final Map<CallSiteKey, Integer> callSites = new HashMap<>();
 
         private void recordClass(String internalName) {
             if (!isGameApi(internalName)) return;
@@ -98,6 +131,28 @@ public final class Forge1201ApiUsageAnalyzer {
             return name;
         }
 
+        private void recordCallSite(
+                String callerClass,
+                String callerMethod,
+                String callerDescriptor,
+                int opcode,
+                String targetOwner,
+                String targetName,
+                String targetDescriptor) {
+            if (!isForgeOrOptionalApi(targetOwner)) return;
+            CallSiteKey key = new CallSiteKey(
+                    callerClass, callerMethod, callerDescriptor,
+                    targetOwner, targetName, targetDescriptor, opcode);
+            callSites.merge(key, 1, Integer::sum);
+        }
+
+        private static boolean isForgeOrOptionalApi(String name) {
+            return name.startsWith("net/minecraftforge/")
+                    || name.startsWith("top/theillusivec4/curios/")
+                    || name.startsWith("com/illusivesoulworks/")
+                    || name.startsWith("com/gelred/");
+        }
+
         private static boolean isGameApi(String name) {
             return name.startsWith("net/minecraft/")
                     || name.startsWith("net/minecraftforge/")
@@ -112,6 +167,27 @@ public final class Forge1201ApiUsageAnalyzer {
 
         Map<String, Integer> packageCounts() {
             return Map.copyOf(packages);
+        }
+
+        List<ApiMethodCallSite> methodCallSiteList() {
+            return callSites.entrySet().stream()
+                    .map(entry -> new ApiMethodCallSite(
+                            entry.getKey().callerClass(),
+                            entry.getKey().callerMethod(),
+                            entry.getKey().callerDescriptor(),
+                            entry.getKey().targetOwner(),
+                            entry.getKey().targetName(),
+                            entry.getKey().targetDescriptor(),
+                            entry.getKey().opcode(),
+                            entry.getValue()))
+                    .sorted(Comparator.comparing(ApiMethodCallSite::targetOwner)
+                            .thenComparing(ApiMethodCallSite::targetName)
+                            .thenComparing(ApiMethodCallSite::targetDescriptor)
+                            .thenComparing(ApiMethodCallSite::callerClass)
+                            .thenComparing(ApiMethodCallSite::callerMethod)
+                            .thenComparing(ApiMethodCallSite::callerDescriptor)
+                            .thenComparingInt(ApiMethodCallSite::opcode))
+                    .toList();
         }
 
         List<ApiMemberReference> methodList() {
@@ -183,10 +259,21 @@ public final class Forge1201ApiUsageAnalyzer {
                         @Override
                         public MethodVisitor visitMethod(int access, String name, String descriptor,
                                                          String signature, String[] exceptions) {
-                            // Return a visitor so ClassRemapper traverses method bodies.
-                            // Without this sink visitor, the downstream ClassVisitor returns null and
-                            // ASM skips instructions, hiding method/field references from the analyzer.
-                            return new MethodVisitor(Opcodes.ASM9) {};
+                            // Preserve the containing mod method for each direct Forge/optional API call.
+                            // This is separate from the global member inventory, which only knows that
+                            // a symbolic reference exists somewhere in the class.
+                            String callerClass = className;
+                            String callerMethod = name;
+                            String callerDescriptor = descriptor;
+                            return new MethodVisitor(Opcodes.ASM9) {
+                                @Override
+                                public void visitMethodInsn(int opcode, String owner, String targetName,
+                                                            String targetDescriptor, boolean isInterface) {
+                                    references.recordCallSite(
+                                            callerClass, callerMethod, callerDescriptor,
+                                            opcode, owner, targetName, targetDescriptor);
+                                }
+                            };
                         }
 
                         @Override
@@ -216,8 +303,19 @@ public final class Forge1201ApiUsageAnalyzer {
                 coreModClass,
                 references.packageCounts(),
                 references.classList(),
+                references.methodCallSiteList(),
                 references.methodList(),
                 references.fieldList());
+    }
+
+    private static String opcodeName(int opcode) {
+        return switch (opcode) {
+            case Opcodes.INVOKEVIRTUAL -> "INVOKEVIRTUAL";
+            case Opcodes.INVOKESPECIAL -> "INVOKESPECIAL";
+            case Opcodes.INVOKESTATIC -> "INVOKESTATIC";
+            case Opcodes.INVOKEINTERFACE -> "INVOKEINTERFACE";
+            default -> "OPCODE_" + opcode;
+        };
     }
 
     public static void print(Analysis analysis) {
@@ -246,6 +344,9 @@ public final class Forge1201ApiUsageAnalyzer {
 
         System.out.println("\nReferenced API classes (" + analysis.referencedApiClasses().size() + "):");
         analysis.referencedApiClasses().forEach(name -> System.out.println("  " + name.replace('/', '.')));
+
+        System.out.println("\nForge / optional API method call sites (" + analysis.methodCallSites().size() + "):");
+        analysis.methodCallSites().forEach(callSite -> System.out.println("  " + callSite.display()));
 
         System.out.println("\nMost-used API method references:");
         analysis.methodReferences().stream().limit(80).forEach(reference -> System.out.println("  " + reference.display()));
