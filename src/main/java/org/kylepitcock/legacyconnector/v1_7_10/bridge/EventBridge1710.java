@@ -39,7 +39,7 @@ import legacyconnector.v1_7_10.net.minecraftforge.event.world.WorldEvent;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.level.LevelAccessor;
-import net.neoforged.bus.api.IEventBus;
+import net.minecraftforge.eventbus.api.IEventBus;
 import net.neoforged.neoforge.common.util.TriState;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
 import net.neoforged.neoforge.event.entity.living.LivingIncomingDamageEvent;
@@ -238,7 +238,7 @@ public final class EventBridge1710 {
         });
         // Forge's Item.onBlockStartBreak (NeoForge dropped the hook): after the break event, true cancels the break. Thaumcraft's elemental
         // axe fells the tree, the shovel and the crusher dig areas, Tinkers' hammers... Blocks legacy code breaks itself are no new start.
-        gameBus.addListener(net.neoforged.bus.api.EventPriority.LOWEST, (net.neoforged.neoforge.event.level.BlockEvent.BreakEvent e) -> {
+        gameBus.addListener(net.minecraftforge.eventbus.api.EventPriority.LOWEST, (net.neoforged.neoforge.event.level.BlockEvent.BreakEvent e) -> {
             if (e.isCanceled() || START_BREAK.get() || legacyconnector.v1_7_10.net.minecraftforge.common.ForgeHooks.mcc$inLegacyBreak()
                     || !(e.getPlayer() instanceof net.minecraft.server.level.ServerPlayer sp)) return;
             var stack = sp.getMainHandItem();
