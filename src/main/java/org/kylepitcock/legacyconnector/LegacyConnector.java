@@ -6,11 +6,11 @@ import net.minecraft.world.level.levelgen.feature.configurations.NoneFeatureConf
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
-import net.neoforged.fml.common.Mod;
-import net.neoforged.fml.loading.FMLEnvironment;
-import net.neoforged.neoforge.common.NeoForge;
-import net.neoforged.neoforge.registries.DeferredHolder;
-import net.neoforged.neoforge.registries.DeferredRegister;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.loading.FMLEnvironment;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.registries.RegistryObject;
+import net.minecraftforge.registries.DeferredRegister;
 import org.kylepitcock.legacyconnector.core.LegacyLifecycle;
 import org.kylepitcock.legacyconnector.core.LegacyMods;
 import org.kylepitcock.legacyconnector.core.data.CompatComponents;
@@ -85,13 +85,14 @@ public final class LegacyConnector {
 
     private static final DeferredRegister<net.minecraft.world.inventory.MenuType<?>> MENUS = DeferredRegister.create(Registries.MENU, MOD_ID);
     public static final DeferredHolder<net.minecraft.world.inventory.MenuType<?>, net.minecraft.world.inventory.MenuType<org.kylepitcock.legacyconnector.v1_7_10.gui.LegacyMenu>> LEGACY_MENU_1_7_10 =
-            MENUS.register("legacy_1_7_10", () -> net.neoforged.neoforge.common.extensions.IMenuTypeExtension.create(
+            MENUS.register("legacy_1_7_10", () -> net.minecraftforge.common.extensions.IMenuTypeExtension.create(
                     org.kylepitcock.legacyconnector.v1_7_10.bridge.GuiBridge::clientMenu));
     public static final DeferredHolder<net.minecraft.world.inventory.MenuType<?>, net.minecraft.world.inventory.MenuType<org.kylepitcock.legacyconnector.v1_12_2.gui.LegacyMenu1122>> LEGACY_MENU_1_12_2 =
-            MENUS.register("legacy_1_12_2", () -> net.neoforged.neoforge.common.extensions.IMenuTypeExtension.create(
+            MENUS.register("legacy_1_12_2", () -> net.minecraftforge.common.extensions.IMenuTypeExtension.create(
                     org.kylepitcock.legacyconnector.v1_12_2.bridge.GuiBridge1122::clientMenu));
 
-    public LegacyConnector(IEventBus modBus, ModContainer container) {
+    public LegacyConnector(net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext context) {
+        IEventBus modBus = context.getModEventBus();
         org.kylepitcock.legacyconnector.core.DirectMemoryGuard.start();
         org.kylepitcock.legacyconnector.core.LegacyLogFilter.install();
         org.kylepitcock.legacyconnector.core.EntityCensus.register();
@@ -112,7 +113,7 @@ public final class LegacyConnector {
         modBus.addListener(org.kylepitcock.legacyconnector.v1_7_10.entity.LegacyHosts::onSpawnPlacements);
         modBus.addListener(org.kylepitcock.legacyconnector.v1_12_2.entity.Hosts1122::onSpawnPlacements);
         MENUS.register(modBus);
-        modBus.addListener((net.neoforged.neoforge.registries.RegisterEvent e) -> {
+        modBus.addListener((net.minecraftforge.registries.RegisterEvent e) -> {
             if (e.getRegistryKey().equals(Registries.MENU)) {
                 org.kylepitcock.legacyconnector.v1_7_10.bridge.GuiBridge.setMenuType(LEGACY_MENU_1_7_10.get());
                 org.kylepitcock.legacyconnector.v1_12_2.bridge.GuiBridge1122.setMenuType(LEGACY_MENU_1_12_2.get());
@@ -120,7 +121,7 @@ public final class LegacyConnector {
         });
         modBus.addListener(LegacyConnector::registerCapabilities);
         // Optional: Create's contraption movement checks follow the legacy piston rules (also used by Create Aeronautics).
-        if (net.neoforged.fml.ModList.get().isLoaded("create")) org.kylepitcock.legacyconnector.compat.create.CreateCompat.init();
+        if (net.minecraftforge.fml.ModList.get().isLoaded("create")) org.kylepitcock.legacyconnector.compat.create.CreateCompat.init();
         if (FMLEnvironment.dist.isClient()) org.kylepitcock.legacyconnector.v1_7_10.client.Client1710.register(modBus);
         if (FMLEnvironment.dist.isClient()) org.kylepitcock.legacyconnector.v1_12_2.client.Client1122.register(modBus);
         if (FMLEnvironment.dist.isClient()) org.kylepitcock.legacyconnector.core.pack.ModernizedTextures.register();
@@ -150,7 +151,7 @@ public final class LegacyConnector {
         org.kylepitcock.legacyconnector.core.pack.LegacyRecipeSync.watch(org.kylepitcock.legacyconnector.v1_7_10.bridge.RecipeBridge::changedSinceGenerate);
         org.kylepitcock.legacyconnector.core.pack.LegacyRecipeSync.watch(org.kylepitcock.legacyconnector.v1_12_2.bridge.RecipeBridge1122::changedSinceGenerate);
 
-        IEventBus game = NeoForge.EVENT_BUS;
+        IEventBus game = MinecraftForge.EVENT_BUS;
         org.kylepitcock.legacyconnector.core.LevelReleases.register(game);
         org.kylepitcock.legacyconnector.core.pack.LegacyRecipeSync.register(game);
         EventBridge1710.register(game);
@@ -158,7 +159,7 @@ public final class LegacyConnector {
         org.kylepitcock.legacyconnector.v1_7_10.bridge.DimensionPhysics1710.register(game);
         org.kylepitcock.legacyconnector.v1_7_10.compat.chromaticraft.ChromaDimensionBarriers.register(game);
         org.kylepitcock.legacyconnector.v1_12_2.entity.Entities1122.register(game);
-        game.addListener((net.neoforged.neoforge.event.server.ServerStoppedEvent e) -> {
+        game.addListener((net.minecraftforge.event.server.ServerStoppedEvent e) -> {
             if (!e.getServer().isDedicatedServer()) return;
             // Legacy mods start non-daemon thread pools (IC2 and others) they never stop, which keep a stopped dedicated server's JVM alive.
             Thread exit = new Thread(() -> {
@@ -183,7 +184,8 @@ public final class LegacyConnector {
         int stopTicks = Integer.getInteger("legacyconnector.autostopTicks", 0);
         if (stopTicks > 0) {
             int[] ticks = {0};
-            game.addListener((net.neoforged.neoforge.event.tick.ServerTickEvent.Post e) -> {
+            game.addListener((net.minecraftforge.event.TickEvent.ServerTickEvent e) -> {
+                if (e.phase != net.minecraftforge.event.TickEvent.Phase.END) return;
                 if (++ticks[0] != stopTicks) return;
                 LOGGER.info("Test autostop after {} ticks: saving and stopping", stopTicks);
                 long chunks = 0;
@@ -216,7 +218,7 @@ public final class LegacyConnector {
     }
 
     /** Hoppers, comparators-by-capability and modern item pipes can use legacy tile entity inventories. */
-    private static void registerCapabilities(net.neoforged.neoforge.capabilities.RegisterCapabilitiesEvent event) {
+    private static void registerCapabilities(net.minecraftforge.event.RegisterCapabilitiesEvent event) {
         // public addon API: addons' rules are asked first, then the 1.12.2 built-ins (see api/LegacyCapabilities)
         org.kylepitcock.legacyconnector.api.internal.CapabilityRules.apply(event);
         org.kylepitcock.legacyconnector.v1_7_10.bridge.EnergyBridge.registerCapabilities(event);
@@ -225,7 +227,7 @@ public final class LegacyConnector {
         org.kylepitcock.legacyconnector.v1_12_2.bridge.ItemCapabilities1122.register(event);
         var type = org.kylepitcock.legacyconnector.v1_7_10.bridge.TileEntityBridge.type();
         if (type == null) return;
-        event.registerBlockEntity(net.neoforged.neoforge.capabilities.Capabilities.ItemHandler.BLOCK, type, (be, side) ->
+        event.registerBlockEntity(net.minecraftforge.common.capabilities.ForgeCapabilities.ITEM_HANDLER, type, (be, side) ->
                 org.kylepitcock.legacyconnector.api.internal.BuiltinAdapters.inventory1710(be.legacy(), side, be));
     }
 }
