@@ -10,8 +10,7 @@ authors = "${mod_authors}"
 description = '''${mod_description}'''
 features = { java_version = "[21,)" }
 
-[[accessTransformers]]
-file = "META-INF/accesstransformer.cfg"
+accessTransformers = ["META-INF/accesstransformer.cfg"]
 
 [[dependencies."${mod_id}"]]
 modId = "forge"
