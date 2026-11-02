@@ -1,0 +1,185 @@
+package org.kylepitcock.legacyconnector.loader;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import org.junit.jupiter.api.Test;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.Opcodes;
+
+final class Forge1201TargetApiVerifierTest {
+    private static final String TARGET_MOD = "net/neoforged/fml/common/Mod";
+    private static final String TARGET_BUS = "net/neoforged/bus/api/IEventBus";
+
+    @Test
+    void verifiesMappedClassAndMemberDescriptorsWithoutLoadingClasses() throws Exception {
+        Map<String, byte[]> classes = Map.of(
+                TARGET_MOD, targetModClass("net/neoforged/fml/Base", true, true),
+                TARGET_BUS, targetInterface(TARGET_BUS),
+                "net/neoforged/fml/Base", targetBaseClass());
+
+        Forge1201TargetApiVerifier.Result result = Forge1201TargetApiVerifier.verify(
+                analysis(
+                        List.of("net/minecraftforge/fml/common/Mod", "net/minecraftforge/eventbus/api/IEventBus"),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                "net/minecraftforge/fml/common/Mod",
+                                "register",
+                                "(Lnet/minecraftforge/eventbus/api/IEventBus;)V",
+                                1)),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                "net/minecraftforge/fml/common/Mod",
+                                "BUS",
+                                "Lnet/minecraftforge/eventbus/api/IEventBus;",
+                                1))),
+                classes);
+
+        assertEquals(2, result.candidateClassCount());
+        assertEquals(2, result.verifiedClassCount());
+        assertTrue(result.missingTargetClasses().isEmpty());
+        assertEquals(1, result.uniqueMethodReferences());
+        assertEquals(1, result.verifiedMethodReferences());
+        assertTrue(result.methodIssues().isEmpty());
+        assertEquals(1, result.uniqueFieldReferences());
+        assertEquals(1, result.verifiedFieldReferences());
+        assertTrue(result.fieldIssues().isEmpty());
+    }
+
+    @Test
+    void reportsChangedOrMissingTargetMemberSignatures() throws Exception {
+        Map<String, byte[]> classes = Map.of(
+                TARGET_MOD, targetModClass("java/lang/Object", false, true),
+                TARGET_BUS, targetInterface(TARGET_BUS));
+
+        Forge1201TargetApiVerifier.Result result = Forge1201TargetApiVerifier.verify(
+                analysis(
+                        List.of("net/minecraftforge/fml/common/Mod", "net/minecraftforge/eventbus/api/IEventBus"),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                "net/minecraftforge/fml/common/Mod", "register",
+                                "(Lnet/minecraftforge/eventbus/api/IEventBus;)V", 1)),
+                        List.of()),
+                classes);
+
+        assertEquals(2, result.verifiedClassCount());
+        assertEquals(0, result.verifiedMethodReferences());
+        assertEquals(1, result.methodIssues().size());
+        assertEquals(Forge1201TargetApiVerifier.MemberStatus.MISSING,
+                result.methodIssues().get(0).status());
+    }
+
+    @Test
+    void reportsMissingTargetTypesAndIncompleteHierarchySeparately() throws Exception {
+        Map<String, byte[]> classes = Map.of(
+                TARGET_MOD, targetModClass("net/neoforged/fml/UnseenParent", false, false),
+                TARGET_BUS, targetInterface(TARGET_BUS));
+
+        Forge1201TargetApiVerifier.Result result = Forge1201TargetApiVerifier.verify(
+                analysis(
+                        List.of(
+                                "net/minecraftforge/fml/common/Mod",
+                                "net/minecraftforge/eventbus/api/IEventBus",
+                                "net/minecraftforge/client/event/DoesNotExist"),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                "net/minecraftforge/fml/common/Mod", "inherited",
+                                "()V", 1)),
+                        List.of()),
+                classes);
+
+        assertEquals(2, result.verifiedClassCount());
+        assertEquals(List.of("net/neoforged/neoforge/client/event/DoesNotExist"),
+                result.missingTargetClasses());
+        assertEquals(Forge1201TargetApiVerifier.MemberStatus.INCOMPLETE_HIERARCHY,
+                result.methodIssues().get(0).status());
+    }
+
+    @Test
+    void ignoresManualAdapterOwnersBecauseTheyAreNotPackageMoves() throws Exception {
+        Forge1201TargetApiVerifier.Result result = Forge1201TargetApiVerifier.verify(
+                analysis(
+                        List.of("net/minecraftforge/network/simple/SimpleChannel"),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                "net/minecraftforge/network/simple/SimpleChannel",
+                                "sendToServer", "(Ljava/lang/Object;)V", 1)),
+                        List.of()),
+                Map.of());
+
+        assertEquals(0, result.candidateClassCount());
+        assertEquals(0, result.uniqueMethodReferences());
+        assertTrue(result.missingTargetClasses().isEmpty());
+    }
+
+    private static Forge1201ApiUsageAnalyzer.Analysis analysis(
+            List<String> classes,
+            List<Forge1201ApiUsageAnalyzer.ApiMemberReference> methods,
+            List<Forge1201ApiUsageAnalyzer.ApiMemberReference> fields) {
+        Forge1201JarInfo metadata = new Forge1201JarInfo(
+                Path.of("synthetic.jar"),
+                "javafml",
+                "[47,)",
+                "[1.20.1,1.21)",
+                "[47,)",
+                List.of(new Forge1201JarInfo.Mod("fixture", "1.0", "Fixture", List.of())));
+        return new Forge1201ApiUsageAnalyzer.Analysis(
+                metadata, 1, List.of(), List.of(), null, Map.of(), classes, methods, fields);
+    }
+
+    private static Map<String, byte[]> bytesMap(Map<String, byte[]> classes) {
+        return classes;
+    }
+
+    private static byte[] targetModClass(String superName, boolean registerMethod, boolean busField) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, TARGET_MOD, null, superName, null);
+        if (registerMethod) {
+            writer.visitMethod(
+                    Opcodes.ACC_PUBLIC,
+                    "register",
+                    "(Lnet/neoforged/bus/api/IEventBus;)V",
+                    null,
+                    null).visitEnd();
+        }
+        if (busField) {
+            writer.visitField(
+                    Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                    "BUS",
+                    "Lnet/neoforged/bus/api/IEventBus;",
+                    null,
+                    null).visitEnd();
+        }
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] targetBaseClass() {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "net/neoforged/fml/Base", null,
+                "java/lang/Object", null);
+        writer.visitMethod(Opcodes.ACC_PUBLIC, "register",
+                "(Lnet/neoforged/bus/api/IEventBus;)V", null, null).visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] targetInterface(String name) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_INTERFACE | Opcodes.ACC_ABSTRACT,
+                name, null, "java/lang/Object", null);
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static Forge1201TargetApiVerifier.Result verify(
+            Forge1201ApiUsageAnalyzer.Analysis analysis,
+            Map<String, byte[]> classes) throws IOException {
+        return Forge1201TargetApiVerifier.verify(analysis, internalName -> {
+            byte[] bytes = classes.get(internalName);
+            return bytes == null ? null : new ByteArrayInputStream(bytes);
+        });
+    }
+}
