@@ -9,7 +9,9 @@ The upstream `master` branch remains the source reference and is not modified by
 - Loader: Minecraft Forge 47.3.0 baseline
 - Legacy mod formats: Forge 1.7.10 and Forge 1.12.2
 - Build toolchain: JDK 21.
-- Runtime bytecode target: Java 17, matching Forge 1.20.1's Java baseline.
+- Runtime bytecode target: Java 21 for the root runtime, because the upstream mixin/runtime source currently uses Java 21 language and bytecode features.
+- The loader subproject remains Java 17 bytecode so Forge can load the early discovery service. The bundled mod declares a Java 21 runtime feature requirement.
+- Forge 1.20.1's minimum Java baseline is Java 17; this port intentionally chooses Java 21, which must be verified against the selected Forge build in local client/server tests.
 
 ## Architecture that must be preserved
 
@@ -60,13 +62,14 @@ Forge's stock folder locator scans only the top-level `mods/` directory and does
 - [ ] Preserve 1.7.10 and 1.12.2 detection independently.
 
 ### C. Runtime and shim port
-- [ ] Port runtime mod metadata and the `@Mod` entry point.
-- [ ] Port registration, event, capability, networking, client, resource, world-generation, entity, and GUI bridges.
+- [x] Add Forge `META-INF/mods.toml` runtime metadata, ForgeGradle build setup, and convert the main `@Mod` entry point to the Forge loading context (initial migration; compile verification pending).
+- [ ] Finish migrating registration, event, capability, networking, client, resource, world-generation, entity, and GUI bridges; several event-bus imports and primary registry APIs have been converted, but many NeoForge-specific references remain.
 - [ ] Audit Minecraft 1.21.1-to-1.20.1 API differences individually; do not use blind global replacements for class or method names.
 - [ ] Keep compatibility fixes generic; mod-specific hooks remain isolated.
 
 ### D. Verification
-- [ ] Compile the loader and runtime separately.
+- [x] Compile the standalone loader and pass its unit tests locally (user confirmed `BUILD SUCCESSFUL`).
+- [ ] Compile the Forge runtime against Minecraft 1.20.1 / Forge 47.3.0.
 - [ ] Launch a clean Forge 1.20.1 client and dedicated server.
 - [ ] Load a minimal 1.7.10 fixture and a minimal 1.12.2 fixture.
 - [ ] Test content registration, item/block use, entities, client rendering, GUIs, world generation, and dimensions.
