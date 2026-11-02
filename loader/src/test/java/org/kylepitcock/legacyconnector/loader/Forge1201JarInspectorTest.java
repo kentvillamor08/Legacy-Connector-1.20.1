@@ -25,7 +25,7 @@ final class Forge1201JarInspectorTest {
 
         assertNotNull(info);
         assertEquals("[1.20.1,1.20.2)", info.minecraftVersionRange());
-        assertEquals("[47,)", info.forgeVersionRange());
+        assertEquals("[47.3.0,)", info.forgeVersionRange());
         assertEquals("alien_evolution", info.mods().get(0).modId());
         assertEquals("Alien Evolution", info.displayName());
     }
@@ -51,7 +51,7 @@ final class Forge1201JarInspectorTest {
                 [[dependencies.alien_evolution]]
                 modId="forge"
                 mandatory=true
-                versionRange="[47,)"
+                versionRange="[47.3.0,)"
                 ordering="NONE"
                 side="BOTH"
                 """, "");
@@ -73,7 +73,7 @@ final class Forge1201JarInspectorTest {
     private static String forge1201Metadata() {
         return """
                 modLoader="javafml"
-                loaderVersion="[47,)"
+                loaderVersion="[47.2,)"
                 license="MIT"
 
                 [[mods]]
