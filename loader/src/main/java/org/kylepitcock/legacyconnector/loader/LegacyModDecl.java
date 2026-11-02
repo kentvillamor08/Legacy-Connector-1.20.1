@@ -26,7 +26,7 @@ public final class LegacyModDecl {
     public boolean serverSideOnly;
 
     /**
-     * NeoForge requires mod ids to match {@code [a-z][a-z0-9_]{1,63}}. Legacy ids like {@code BuildCraft|Core}
+     * Forge FML requires mod ids to match {@code [a-z][a-z0-9_]{1,63}}. Legacy ids like {@code BuildCraft|Core}
      * or {@code IC2} do not, so they are normalized; the runtime keeps a legacy -> modern table so
      * {@code Loader.isModLoaded("BuildCraft|Core")} keeps working.
      */
@@ -104,7 +104,7 @@ public final class LegacyModDecl {
     }
 
     public record Dependency(String legacyId, boolean required, String ordering, String versionRange) {
-        /** Forge/FML/Minecraft themselves are provided by NeoForge + the shim. */
+        /** Forge/FML/Minecraft themselves are provided by Forge + the shim. */
         public boolean isPlatform() {
             String id = legacyId.toLowerCase(Locale.ROOT);
             return id.equals("forge") || id.equals("fml") || id.equals("minecraft") || id.equals("mcp") || id.equals("forgemultipartapi");
