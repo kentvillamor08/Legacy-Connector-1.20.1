@@ -24,7 +24,7 @@ public final class Forge1201MetadataTransformer {
      * optionality, and license text are preserved semantically.
      *
      * @param forgeToml source {@code META-INF/mods.toml} text
-     * @param neoForgeLoaderRange host JavaFML loader range, e.g. {@code [4,)}
+     * @param neoForgeLoaderRange host JavaFML loader range, e.g. {@code [1,)}
      * @param neoForgeVersionRange host NeoForge range, e.g. {@code [21.1.258,)}
      * @param minecraftVersionRange host Minecraft range, e.g. {@code [1.21.1,1.22)}
      * @return translated TOML text for {@code META-INF/neoforge.mods.toml}
