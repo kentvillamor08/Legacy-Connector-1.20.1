@@ -65,4 +65,41 @@ final class Forge1201MappingCatalogTest {
     void rejectsBlankClassNames() {
         assertThrows(IllegalArgumentException.class, () -> Forge1201MappingCatalog.classify(" "));
     }
+
+    @Test
+    void configSpecNestedTypesAreNotMistakenForSimplePackageMoves() {
+        var builder = Forge1201MappingCatalog.classify(
+                "net/minecraftforge/common/ForgeConfigSpec$Builder");
+        var intValue = Forge1201MappingCatalog.classify(
+                "net/minecraftforge/common/ForgeConfigSpec$IntValue");
+
+        assertEquals(Forge1201MappingCatalog.Kind.MANUAL_ADAPTER_REQUIRED, builder.kind());
+        assertEquals(Forge1201MappingCatalog.Kind.MANUAL_ADAPTER_REQUIRED, intValue.kind());
+    }
+
+    @Test
+    void tickEventFamilyRequiresPrePostMigration() {
+        var client = Forge1201MappingCatalog.classify(
+                "net/minecraftforge/event/TickEvent$ClientTickEvent");
+        var player = Forge1201MappingCatalog.classify(
+                "net/minecraftforge/event/TickEvent$PlayerTickEvent");
+        var render = Forge1201MappingCatalog.classify(
+                "net/minecraftforge/event/TickEvent$RenderTickEvent");
+
+        assertEquals(Forge1201MappingCatalog.Kind.MANUAL_ADAPTER_REQUIRED, client.kind());
+        assertEquals(Forge1201MappingCatalog.Kind.MANUAL_ADAPTER_REQUIRED, player.kind());
+        assertEquals(Forge1201MappingCatalog.Kind.MANUAL_ADAPTER_REQUIRED, render.kind());
+    }
+
+    @Test
+    void eventResultAndDeferredRegisterRequireSemanticReview() {
+        var result = Forge1201MappingCatalog.classify(
+                "net/minecraftforge/eventbus/api/Event$Result");
+        var deferred = Forge1201MappingCatalog.classify(
+                "net/minecraftforge/registries/DeferredRegister");
+
+        assertEquals(Forge1201MappingCatalog.Kind.MANUAL_ADAPTER_REQUIRED, result.kind());
+        assertEquals(Forge1201MappingCatalog.Kind.MANUAL_ADAPTER_REQUIRED, deferred.kind());
+    }
+
 }
