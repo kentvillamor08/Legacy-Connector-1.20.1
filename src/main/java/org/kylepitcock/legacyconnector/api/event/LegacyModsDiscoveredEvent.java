@@ -1,7 +1,7 @@
 package org.kylepitcock.legacyconnector.api.event;
 
 import java.util.List;
-import net.neoforged.bus.api.Event;
+import net.minecraftforge.eventbus.api.Event;
 import net.neoforged.fml.event.IModBusEvent;
 import org.kylepitcock.legacyconnector.api.LegacyMod;
 
