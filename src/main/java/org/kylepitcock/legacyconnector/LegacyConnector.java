@@ -5,7 +5,7 @@ import net.minecraft.world.level.levelgen.feature.Feature;
 import net.minecraft.world.level.levelgen.feature.configurations.NoneFeatureConfiguration;
 import net.minecraftforge.eventbus.api.EventPriority;
 import net.minecraftforge.eventbus.api.IEventBus;
-import net.neoforged.fml.ModContainer;
+import net.minecraftforge.fml.ModContainer;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.loading.FMLEnvironment;
 import net.minecraftforge.common.MinecraftForge;
@@ -36,7 +36,7 @@ public final class LegacyConnector {
     public static final String MOD_ID = "legacyconnector";
 
     private static final DeferredRegister<Feature<?>> FEATURES = DeferredRegister.create(Registries.FEATURE, MOD_ID);
-    public static final DeferredHolder<Feature<?>, LegacyWorldGenFeature> LEGACY_WORLDGEN =
+    public static final RegistryObject<LegacyWorldGenFeature> LEGACY_WORLDGEN =
             FEATURES.register("legacy_worldgen", () -> new LegacyWorldGenFeature(NoneFeatureConfiguration.CODEC));
     static {
         FEATURES.register("legacy_biome", () -> new org.kylepitcock.legacyconnector.core.worldgen.LegacyBiomeFeature(NoneFeatureConfiguration.CODEC));
@@ -84,10 +84,10 @@ public final class LegacyConnector {
     }
 
     private static final DeferredRegister<net.minecraft.world.inventory.MenuType<?>> MENUS = DeferredRegister.create(Registries.MENU, MOD_ID);
-    public static final DeferredHolder<net.minecraft.world.inventory.MenuType<?>, net.minecraft.world.inventory.MenuType<org.kylepitcock.legacyconnector.v1_7_10.gui.LegacyMenu>> LEGACY_MENU_1_7_10 =
+    public static final RegistryObject<net.minecraft.world.inventory.MenuType<?>, net.minecraft.world.inventory.MenuType<org.kylepitcock.legacyconnector.v1_7_10.gui.LegacyMenu>> LEGACY_MENU_1_7_10 =
             MENUS.register("legacy_1_7_10", () -> net.minecraftforge.common.extensions.IMenuTypeExtension.create(
                     org.kylepitcock.legacyconnector.v1_7_10.bridge.GuiBridge::clientMenu));
-    public static final DeferredHolder<net.minecraft.world.inventory.MenuType<?>, net.minecraft.world.inventory.MenuType<org.kylepitcock.legacyconnector.v1_12_2.gui.LegacyMenu1122>> LEGACY_MENU_1_12_2 =
+    public static final RegistryObject<net.minecraft.world.inventory.MenuType<?>, net.minecraft.world.inventory.MenuType<org.kylepitcock.legacyconnector.v1_12_2.gui.LegacyMenu1122>> LEGACY_MENU_1_12_2 =
             MENUS.register("legacy_1_12_2", () -> net.minecraftforge.common.extensions.IMenuTypeExtension.create(
                     org.kylepitcock.legacyconnector.v1_12_2.bridge.GuiBridge1122::clientMenu));
 
