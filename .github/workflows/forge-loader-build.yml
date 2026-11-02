@@ -1,0 +1,46 @@
+name: Forge 1.20.1 loader build
+
+on:
+  push:
+    branches:
+      - port/forge-1.20.1
+    paths:
+      - "loader/**"
+      - ".github/workflows/forge-loader-build.yml"
+  pull_request:
+    branches:
+      - port/forge-1.20.1
+    paths:
+      - "loader/**"
+      - ".github/workflows/forge-loader-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-loader:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Compile and test Forge loader
+        run: ./gradlew -p loader clean build --no-daemon
+
+      - name: Upload loader development artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: legacyconnector-forge-loader
+          path: loader/build/libs/legacyconnector-loader-*.jar
+          if-no-files-found: error
