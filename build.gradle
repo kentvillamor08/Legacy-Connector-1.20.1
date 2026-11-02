@@ -88,6 +88,8 @@ minecraft {
 // Generate the Mixin refmap using the same source set as the runtime mod.
 mixin {
     add sourceSets.main, 'legacyconnector.refmap.json'
+    config 'legacyconnector.mixins.json'
+    config 'legacyconnector.compat.mixins.json'
 }
 
 configurations {
