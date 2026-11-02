@@ -147,6 +147,31 @@ public final class Forge1201JarArchiveTransformer {
         }
     }
 
+    /**
+     * Creates a metadata-only test artifact. This does not make a Forge JAR loadable:
+     * its Forge/Minecraft bytecode references are intentionally left untouched.
+     */
+    public static void main(String[] args) throws IOException {
+        if (args.length != 5) {
+            throw new IllegalArgumentException(
+                    "Usage: transformForge1201Metadata <input.jar> <output.jar> "
+                            + "<javafml-range> <neoforge-range> <minecraft-range>");
+        }
+
+        Result result = transform(
+                Path.of(args[0]),
+                Path.of(args[1]),
+                args[2],
+                args[3],
+                args[4]);
+        System.out.println("Created metadata-only Forge 1.20.1 test JAR: " + result.output());
+        System.out.println("  input SHA-256:  " + result.inputSha256());
+        System.out.println("  output SHA-256: " + result.outputSha256());
+        System.out.println("  copied entries: " + result.copiedEntries());
+        System.out.println("  removed signature entries: " + result.removedSignatureEntries());
+        System.out.println("  NOTE: classes were not remapped; this artifact is not ready to load in-game.");
+    }
+
     private static void copyEntryHeader(ZipEntry source, ZipOutputStream output) throws IOException {
         ZipEntry target = new ZipEntry(source.getName());
         if (source.getTime() >= 0) target.setTime(source.getTime());
