@@ -599,7 +599,7 @@ public final class Forge1201ApiUsageAnalyzer {
         }
 
         for (String selected : selectedMethods) {
-            boolean matched = found.stream().anyMatch(value -> value.startsWith(selected));
+            boolean matched = found.stream().anyMatch(value -> value.startsWith(selected + "("));
             if (!matched) System.out.println("  NOT FOUND: " + selected);
         }
     }
