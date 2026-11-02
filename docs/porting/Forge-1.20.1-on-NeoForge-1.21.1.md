@@ -67,4 +67,9 @@ This is an API compatibility layer, not a universal guarantee. A mod is supporte
 
 ## Current status
 
-Planning only. The existing 1.7.10/1.12.2 NeoForge 1.21.1 runtime remains the baseline. No 1.20.1 Forge mod has been validated by this branch yet.
+- Added a separate metadata detector for jars whose `mods.toml` declares JavaFML 47.x, Minecraft 1.20.1 and Forge 47.x.
+- The loader scans both `mods/` and `mods/1.20.1/`, then reports and safely skips recognized 1.20.1 jars instead of passing them to the 1.7.10/1.12.2 translator or NeoForge's native mod discovery.
+- Added detector tests for a Forge 1.20.1 example, NeoForge metadata, a different Minecraft version and a missing Forge dependency.
+- These changes still need a local loader test run. They do **not** translate or load Alien Evolution yet.
+
+The existing 1.7.10/1.12.2 NeoForge 1.21.1 runtime remains the baseline. The 1.20.1 API bridge, bytecode adaptation and gameplay validation remain future milestones.
