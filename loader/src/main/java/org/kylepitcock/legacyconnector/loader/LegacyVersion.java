@@ -7,7 +7,7 @@ import java.util.List;
  *
  * <p>Every legacy mod is assigned exactly one family. All references the mod makes to Minecraft, Forge
  * or FML classes are relocated under {@link #shimPrefix()}, where the runtime half of MC Compatibility
- * provides re-implementations of the legacy API on top of NeoForge 1.21.1. Relocation (instead of
+ * provides re-implementations of the legacy API on top of Forge 1.20.1. Relocation (instead of
  * reusing the original package names) is required because the Java module system forbids two modules
  * from sharing a package, and packages such as {@code net.minecraft.client} exist in both worlds.</p>
  *
@@ -31,7 +31,7 @@ public enum LegacyVersion {
             // Realms' copy of the chat formatting codes, which 1.8-1.12 mods used (the shim has it for 1.12.2)
             "com/mojang/realmsclient/",
             // LWJGL 2 classes that have no LWJGL 3 equivalent. GL11 is relocated so the shim can emulate the
-            // fixed-function pipeline that the 1.21 core profile no longer provides.
+            // fixed-function pipeline that the modern core profile no longer provides.
             "org/lwjgl/input/",
             "org/lwjgl/util/",
             "org/lwjgl/opengl/Display",
