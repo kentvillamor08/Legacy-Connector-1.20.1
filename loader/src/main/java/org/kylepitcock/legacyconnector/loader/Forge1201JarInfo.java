@@ -23,12 +23,23 @@ public record Forge1201JarInfo(
 
     public String displayName() {
         if (mods.isEmpty()) return path.getFileName().toString();
-        return mods.stream().map(Mod::displayName).reduce((a, b) -> a + ", " + b).orElse(path.getFileName().toString());
+        return mods.stream().map(Mod::displayName)
+                .reduce((a, b) -> a + ", " + b)
+                .orElse(path.getFileName().toString());
     }
 
     public String modIds() {
-        return mods.stream().map(Mod::modId).reduce((a, b) -> a + ", " + b).orElse("");
+        return mods.stream().map(Mod::modId)
+                .reduce((a, b) -> a + ", " + b)
+                .orElse("");
     }
 
-    public record Mod(String modId, String version, String displayName) {}
+    public record Mod(String modId, String version, String displayName, List<Dependency> dependencies) {
+        public Mod {
+            dependencies = List.copyOf(dependencies);
+        }
+    }
+
+    /** One dependency entry copied from a [[dependencies.<modid>]] section in mods.toml. */
+    public record Dependency(String modId, String versionRange, boolean mandatory, String ordering, String side) {}
 }
