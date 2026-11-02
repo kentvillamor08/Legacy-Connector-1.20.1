@@ -6,7 +6,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import net.minecraft.server.packs.PackType;
-import net.neoforged.bus.api.EventPriority;
+import net.minecraftforge.eventbus.api.EventPriority;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.LootTableLoadEvent;
 import org.kylepitcock.legacyconnector.core.LegacyMods;
