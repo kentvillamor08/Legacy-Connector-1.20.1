@@ -430,7 +430,7 @@ public final class RecipeBridge {
                 for (int m : metasOf(item)) ids.add(itemId(new ItemStack(item, 1, m).mcc$modern()));
             } else {
                 net.minecraft.world.item.ItemStack modern = stack.mcc$modern();
-                Integer extra = modern.get(CompatComponents.legacyMeta());
+                Integer extra = CompatComponents.getLegacyMeta(modern);
                 if (extra != null) {
                     // An item that did not translate is air: clients refuse recipes with empty stacks (disconnect).
                     if (itemId(modern).equals("minecraft:air")) return null;
