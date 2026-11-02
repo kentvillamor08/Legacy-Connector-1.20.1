@@ -24,51 +24,31 @@ Out of scope for the initial implementation:
 
 A native 1.21.1 NeoForge mod should be used instead of its older 1.20.1 build. A 1.20.1 jar should only be translated when it supplies functionality that is not already available natively in the pack.
 
-## First compatibility target: Alien Evolution
+## First compatibility target: Symbiote: A Bonding Experience
 
-Alien Evolution is a useful first end-to-end target because it is a content-heavy 1.20.1 Forge mod, rather than an optimization or engine-patch mod.
+The current pilot is **Symbiote 1.1.3**, a Minecraft 1.20.1 Forge 47.x content mod. Its original JAR is kept in the user's private test repository and is used only as a local analysis/test input. Its All-Rights-Reserved binary and assets must not be copied into this public repository.
 
-Its published dependency list includes Palladium, GeckoLib, KubeJS, Rhino, Architectury API and Pehkui. The compatibility work must therefore distinguish:
+The static report for the exact JAR records:
+- 278 class files and Java 17 bytecode (compatible with the Java 21 runtime at the bytecode level).
+- Two mandatory metadata dependencies: Minecraft 1.20.1 and Forge 47.x.
+- 121 distinct Forge API class references and 202 distinct Forge API field/method references.
+- 1,220 distinct Minecraft field/method references.
+- 123 Symbiote classes with direct Forge API references.
+- One Curios API class reference, in `CuriosRebondCompat`; Curios is not declared as a mandatory dependency in the source metadata.
+- An `EpicFightArmorDiagnostics` class that checks mod presence, with no direct Epic Fight API class reference detected.
 
-1. Dependencies with usable 1.21.1 NeoForge builds, which should be supplied natively by the pack.
-2. Dependencies with no suitable 1.21.1 build, which need their own compatibility work or a focused port.
-3. Alien Evolution itself, whose Palladium-facing code and content must be made functional on the 1.21.1 host.
+The report is a static symbolic inventory, not a runtime trace. It does not prove that any class or code path loads successfully.
 
-Palladium is expected to be a major part of this pilot because its currently listed game-version support is 1.20.1.
+### Symbiote dependency and integration profile
 
-## Alien Evolution dependency profile
-
-The current published Alien Evolution listing identifies these required dependencies: Palladium, GeckoLib, KubeJS, Rhino, Architectury API and Pehkui.
-
-| Dependency | 1.21.1 NeoForge availability | Pilot handling |
+| Dependency/API | Source evidence | Planned handling |
 |---|---|---|
-| Palladium | The project listing is still on Minecraft 1.20.1; its NeoForge listing refers to that game version, not 1.21.1. | Treat as a core 1.20.1 compatibility target alongside Alien Evolution. |
-| GeckoLib | A 1.21.1 NeoForge release is listed. | Prefer the native 1.21.1 release. |
-| KubeJS | A 1.21.1 NeoForge release is listed. | Prefer the native 1.21.1 release. Confirm the exact required Rhino/other dependencies for the selected KubeJS file. |
-| Rhino | A 1.21.1 NeoForge release is listed. | Prefer the native 1.21.1 release. |
-| Architectury API | 1.21.x NeoForge support is listed. | Prefer a matching native 1.21.1 release. |
-| Pehkui | A 1.21.1 NeoForge release is listed. | Prefer the native 1.21.1 release. |
+| Minecraft | Required `minecraft` dependency in `mods.toml` | Rewrite to the host's 1.21.1 range in derived metadata |
+| Forge | Required `forge` dependency in `mods.toml` | Rewrite to the `neoforge` dependency in derived metadata |
+| Curios | `CurioDropsEvent` referenced only by `CuriosRebondCompat`; not declared in `mods.toml` | Keep isolated as an optional integration; test with Curios present and absent |
+| Epic Fight | Presence check by mod ID; no direct API type detected | Do not add a dependency unless deeper inspection finds actual API use |
 
-This is a release-listing audit, not a successful runtime test. Pin exact file versions and check their dependency metadata when building the test pack. In particular, do not assume that a dependency's general project page means a particular file supports both the same Minecraft version and loader.
-
-Primary references: Alien Evolution's [Modrinth page](https://modrinth.com/mod/alienevo) and [CurseForge page](https://www.curseforge.com/minecraft/mc-mods/alienevo); dependency projects' Modrinth pages for [Palladium](https://modrinth.com/mod/threetag-palladium), [GeckoLib](https://modrinth.com/mod/geckolib), [KubeJS](https://modrinth.com/mod/kubejs), [Rhino](https://modrinth.com/mod/rhino), [Architectury API](https://modrinth.com/mod/architectury-api) and [Pehkui](https://modrinth.com/mod/pehkui).
-
-## Palladium source review: additional bridge surface
-
-The upstream Palladium `1.20/main` common source was inspected after the initial dependency-list audit. Its `Palladium.init()` method is a real content/runtime bootstrap, not a thin marker mod. It registers blocks, block entities, creative tabs, items, abilities, condition serializers, power providers, icons, world features, attributes, effects, entity types, sounds, accessories, menus and recipe types/serializers. It then initializes the network, power managers, ability event handler, properties, entity systems, multiverse systems, lifecycle callbacks, commands and player-clone data transfer.
-
-The `Abilities` registry is built on `net.threetag.palladiumcore.registry.DeferredRegister` and `RegistrySupplier`; `Ability` itself exposes a Palladium registry and a configurable property system. The common bootstrap also imports PalladiumCore lifecycle, command, player-event and platform APIs. Therefore the dependency plan must include **PalladiumCore**, not only Palladium and the Minecraft/Forge API.
-
-The Palladium 1.20.1 build properties identify `palladiumcore_version=1.0.1+1.20.1`; they also pin 1.20.1-era versions of GeckoLib, KubeJS, Curios and Pehkui. Exact artifact versions must be taken from the actual selected Palladium/Ali​​en Evolution jars' metadata and dependency files before implementation. The public GitHub PalladiumCore repository's default source tree is older (Minecraft 1.19.2), so it is useful for understanding the abstraction shape but is **not** accepted as the source of truth for the 1.20.1 binary. We still need the matching 1.20.1 PalladiumCore sources/artifact before implementing its platform internals.
-
-Implementation consequence:
-
-1. Treat PalladiumCore's common registry/event/platform abstractions as a separate compatibility surface.
-2. Inspect the exact 1.20.1 Forge implementation of PalladiumCore and its `@ExpectPlatform`/Architectury-generated calls.
-3. Map those abstractions onto the native 1.21.1 NeoForge event bus, registries, lifecycle and platform services; do not merely relocate Forge package names.
-4. Only then translate Palladium itself and validate Alien Evolution's calls into the Palladium API.
-
-Source references: [Palladium 1.20/main](https://git.threetag.net/ThreeTAG/Palladium/src/branch/1.20/main), [`Palladium.java`](https://git.threetag.net/ThreeTAG/Palladium/src/branch/1.20/main/common/src/main/java/net/threetag/palladium/Palladium.java), [`Abilities.java`](https://git.threetag.net/ThreeTAG/Palladium/src/branch/1.20/main/common/src/main/java/net/threetag/palladium/power/ability/Abilities.java), [`Ability.java`](https://git.threetag.net/ThreeTAG/Palladium/src/branch/1.20/main/common/src/main/java/net/threetag/palladium/power/ability/Ability.java), and [PalladiumCore](https://github.com/ThreeTAG/PalladiumCore).
+The first porting target should be a dedicated bootstrap/registry slice, followed by networking, gameplay events and client rendering. The class-level inventory is documented in the private testbench; the public project should not contain the original test JAR or its assets.
 ## Technical milestones
 
 1. **Jar identification**
@@ -77,23 +57,28 @@ Source references: [Palladium 1.20/main](https://git.threetag.net/ThreeTAG/Palla
    - Do not capture native 1.21.1 NeoForge mods or unrelated Forge versions.
    - Detect and reject unsupported engine-patch/coremod jars with a useful report.
 
-2. **Translation and metadata**
-   - Add a distinct `V1_20_1` compatibility family.
-   - Translate Forge 1.20.1 metadata and entrypoints into valid NeoForge 1.21.1 metadata/entrypoints.
-   - Add version-aware class/member remapping without applying the old SRG-to-MCP logic blindly to modern Forge jars.
-   - Keep dependency declarations accurate, including native dependency substitution and duplicate-mod protection.
+2. **Dedicated metadata and archive path**
+   - Keep the Forge 1.20.1 family separate from the 1.7.10/1.12.2 `LegacyVersion` enum and `LegacyJarTransformer`.
+   - Convert Forge `mods.toml` to NeoForge `neoforge.mods.toml`, including Forge-to-NeoForge platform dependency IDs and the `mandatory` to `type` dependency syntax conversion.
+   - Create a derived JAR in a separate cache; do not alter the user's original JAR.
+   - Preserve unrelated archive entries and remove stale signature files after metadata changes.
+   - Keep the current safe-skip discovery behavior until all bytecode/API translation stages are ready.
 
-3. **API compatibility**
-   - Build a version-isolated 1.20.1 Forge/FML shim over the existing 1.21.1 NeoForge runtime.
-   - Bridge only APIs needed by real content mods, prioritizing registration, items/blocks, entities, recipes, capabilities, events, networking, menus/screens and client rendering.
-   - Handle 1.20.1-to-1.21.1 Minecraft API changes deliberately; do not use global package renames as a substitute for API adaptation.
+3. **Modern bytecode and mapping**
+   - Add a pinned 1.20.1-to-1.21.1 mapping set for class, descriptor, field and method references.
+   - Do not apply the old SRG-to-MCP logic to modern Forge jars.
+   - Add narrowly scoped call-site adapters only for APIs whose semantics changed; do not use a global package rename as a substitute for API adaptation.
 
-4. **Pilot validation**
-   - Start with the actual Alien Evolution Forge jar and its exact dependency set.
+4. **Runtime API compatibility**
+   - Keep runtime shims isolated from the pre-Minecraft loader service.
+   - Bridge only APIs evidenced by supported mods, prioritizing entrypoints, registries, configuration, events, networking, menus/screens and client rendering.
+   - Handle 1.20.1-to-1.21.1 Minecraft API changes deliberately.
+
+5. **Pilot validation**
+   - Start with Symbiote 1.1.3 and its exact JAR/metadata.
    - Test client and dedicated-server startup separately.
-   - Verify registration, model/texture loading, transformations/abilities, animation, UI/HUD, networking and save/reload behavior.
-   - Record each dependency and feature as working, partial or unsupported.
-
+   - Verify registration, models/textures, entities, abilities, networking, UI/HUD and save/reload behavior in separate stages.
+   - Record each feature as working, partial or unsupported; a metadata-translated JAR is not proof of gameplay compatibility.
 ## Compatibility policy
 
 This is an API compatibility layer, not a universal guarantee. A mod is supported only to the extent that the Minecraft/Forge APIs it uses have been bridged and its required dependencies are available. Compatibility reports should identify missing APIs and unsupported hooks rather than silently claiming success.
@@ -120,11 +105,13 @@ The report is printed to the Gradle console. The exact jar and dependency versio
 - Added a separate metadata detector for jars whose `mods.toml` declares JavaFML 47.x, Minecraft 1.20.1 and Forge 47.x.
 - The loader scans both `mods/` and `mods/1.20.1/`, then reports and safely skips recognized 1.20.1 jars instead of passing them to the 1.7.10/1.12.2 translator or NeoForge's native mod discovery.
 - Added detector tests for a Forge 1.20.1 example, NeoForge metadata, a different Minecraft version and a missing Forge dependency.
-- The detector now extracts each `[[dependencies.<modid>]]` entry (mod ID, version range, mandatory flag, ordering and side) and includes a dependency summary in the safe-skip warning. The test fixture models Alien Evolution's six declared required libraries.
+- The detector now extracts each `[[dependencies.<modid>]]` entry (mod ID, version range, mandatory flag, ordering and side) and includes a dependency summary in the safe-skip warning. The inspector test fixture models a multi-dependency Forge 1.20.1 mod; it is not a statement about Symbiote's dependency list.
 - Added a native dependency audit that scans installed NeoForge jars for mod IDs in `[[mods]]` sections only, then classifies Forge/Minecraft platform bridges, native ID candidates, and missing required/optional dependencies. The audit explicitly does not claim that a matching mod ID proves API or version compatibility.
 - Added a regression test ensuring IDs mentioned only in another mod's dependency list are not mistaken for installed mods.
 - Added an offline ASM-based API usage analyzer and a :loader:inspectForge1201 Gradle task. It reports entrypoints, mixin/coremod metadata, referenced game API classes, and method/field symbols without executing the jar; a synthetic bytecode test covers the report path.
 - Reviewed the upstream Palladium 1.20.1 common bootstrap and ability source. Documented PalladiumCore's registry/event/platform abstractions as an additional dependency bridge; the matching 1.20.1 PalladiumCore platform implementation still needs source-level verification.
-- These changes still need a local loader test run. They do **not** translate or load Alien Evolution yet.
+- Added a pure Forge-to-NeoForge metadata transformer. It rewrites the JavaFML loader range, the Forge platform dependency ID, and Forge `mandatory` flags into NeoForge dependency `type` values.
+- Added a metadata-only archive transformer that writes a separate derived JAR, replaces `META-INF/mods.toml`, removes stale signature files, preserves other archive entries, and records source/output SHA-256 digests. It never overwrites the source JAR.
+- Added unit tests for metadata conversion and archive-copy behavior. These latest tests still need to be run locally; metadata-only conversion does **not** rewrite classes or enable mod loading.
 
 The existing 1.7.10/1.12.2 NeoForge 1.21.1 runtime remains the baseline. The 1.20.1 API bridge, bytecode adaptation and gameplay validation remain future milestones.
