@@ -3,7 +3,7 @@ package org.kylepitcock.legacyconnector.core;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
-import net.neoforged.bus.api.IEventBus;
+import net.minecraftforge.eventbus.api.IEventBus;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
