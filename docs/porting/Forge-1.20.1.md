@@ -38,14 +38,20 @@ The Forge-side loader therefore needs to:
 
 The current NeoForge implementation must not be changed in-place until the Forge path is isolated and can be tested.
 
+## Current Forge input limitation
+
+Forge's stock folder locator scans only the top-level `mods/` directory and does not expose NeoForge's path-claiming API. Until we add and verify a safe alternative, original legacy jars must be placed in `mods/1.7.10/` or `mods/1.12.2/`. Do not treat top-level legacy jar support as implemented.
+
 ## Port sequence
 
 ### A. Forge bootstrap and discovery
 - [x] Add an isolated standalone Gradle build for the Forge loader module.
 - [x] Implement and register the Forge `IModLocator` service.
 - [x] Generate Forge `META-INF/mods.toml` metadata and Forge `@Mod` entrypoint descriptors for translated jars.
+- [x] Generate entrypoint constructors using Forge's `FMLJavaModLoadingContext` and obtain the mod bus/container through its Forge methods.
+- [x] Add a unit test for generated Forge metadata and entrypoint bytecode.
 - [ ] Build/compile the loader against the Forge 1.20.1 dependencies.
-- [ ] Load the runtime mod and return translated jars as Forge mod candidates.
+- [ ] Add and embed the Forge runtime mod so the generated bootstrap has its real runtime implementation.
 - [ ] Prove discovery with a tiny legacy fixture jar before adding the full compatibility matrix.
 
 ### B. Legacy translation pipeline
@@ -72,8 +78,11 @@ The current NeoForge implementation must not be changed in-place until the Forge
 - [x] Dedicated branch created: `port/forge-1.20.1`.
 - [x] Upstream loader/runtime architecture inspected.
 - [x] Forge 1.20.1 discovery contract inspected against Forge source.
-- [x] Added the Forge `IModLocator` adapter and initial Forge metadata generation.
-- [x] Added a standalone loader Gradle project with Java 17 bytecode output.
+- [x] Added the Forge `IModLocator` adapter and registered the service.
+- [x] Added Forge `mods.toml` generation, modern-mod metadata detection, and context-based entrypoint generation.
+- [x] Added a unit test and GitHub Actions build workflow for the standalone loader.
+- [x] Added a standalone loader Gradle project using a JDK 21 toolchain and Java 17 bytecode output.
 - [ ] Compile and test the Forge loader locally/CI; no successful build has been recorded yet.
+- [ ] Port and embed the runtime mod; the root runtime sources are still largely NeoForge-based.
 
 This status file is intentionally explicit: a branch and a migration plan are not evidence of a successful build. Update the checklist as code and in-game tests are completed.
