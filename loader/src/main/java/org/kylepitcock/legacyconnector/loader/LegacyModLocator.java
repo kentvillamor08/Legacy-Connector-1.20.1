@@ -106,6 +106,12 @@ public final class LegacyModLocator implements IModFileCandidateLocator {
 
             List<LegacyJar> legacy = new ArrayList<>();
             java.util.Set<String> seenNames = new java.util.HashSet<>();
+            List<Path> scannedModDirectories = List.of(
+                    modsDir, modsDir.resolve("1.7.10"), modsDir.resolve("1.12.2"), modsDir.resolve("1.20.1"));
+            Set<String> nativeModIds = Forge1201DependencyResolver.findNativeModIds(scannedModDirectories);
+            if (!nativeModIds.isEmpty()) {
+                LOG.debug("Legacy Connector: found {} native NeoForge mod ids for legacy dependency checks", nativeModIds.size());
+            }
             // FML also loaded mods/<minecraft version>/ (where dependency downloaders such as CodeChickenCore's put
             // CodeChickenLib); a jar present in both places is taken from mods/. These folders are also where jars that ship
             // launcher services (a shaded Mixin, as many 1.12.2 mods have) must go: NeoForge's early scan of mods/ itself
@@ -130,14 +136,11 @@ public final class LegacyModLocator implements IModFileCandidateLocator {
                             } else {
                                 Forge1201JarInfo forge1201 = LegacyJarInspector.inspectForge1201(p);
                                 if (forge1201 != null) {
-                                    String dependencies = forge1201.mods().stream()
-                                            .map(mod -> mod.modId() + " -> " + mod.dependencySummary())
-                                            .reduce((a, b) -> a + "; " + b)
-                                            .orElse("none declared");
+                                    String dependencies = Forge1201DependencyResolver.summarize(forge1201, nativeModIds);
                                     String message = "Legacy Connector recognized Forge 1.20.1 mod "
                                             + forge1201.displayName() + " (" + forge1201.modIds() + ") in "
                                             + p.getFileName() + ", but 1.20.1 translation is not enabled yet; the jar was skipped. "
-                                            + "Declared dependencies: " + dependencies;
+                                            + "Dependency audit: " + dependencies;
                                     context.addLocated(p);
                                     pipeline.addIssue(ModLoadingIssue.warning(message).withAffectedPath(p));
                                     LOG.warn(message);
