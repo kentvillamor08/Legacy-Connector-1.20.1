@@ -42,6 +42,41 @@ final class Forge1201JarInspectorTest {
     }
 
     @Test
+    void reportsNativeDependencyCandidatesWithoutClaimingCompatibility() throws IOException {
+        Path legacyJar = createJar("META-INF/mods.toml", forge1201Metadata());
+        Path nativeGecko = createJar("META-INF/neoforge.mods.toml", """
+                modLoader="javafml"
+                loaderVersion="[4,)"
+                [[mods]]
+                modId="geckolib"
+                version="4.8.0"
+                """);
+        Path nativeKube = createJar("META-INF/neoforge.mods.toml", """
+                modLoader="javafml"
+                loaderVersion="[4,)"
+                [[mods]]
+                modId="kubejs"
+                version="2101.7.0"
+                """);
+
+        Forge1201JarInfo info = LegacyJarInspector.inspectForge1201(legacyJar);
+        var nativeIds = Forge1201DependencyResolver.findNativeModIds(java.util.List.of(tempDir));
+        var resolutions = Forge1201DependencyResolver.resolve(info, nativeIds);
+
+        assertEquals(2, nativeIds.size());
+        assertEquals(Forge1201DependencyResolver.Status.NATIVE_ID_PRESENT,
+                resolutions.stream().filter(r -> r.modId().equals("geckolib")).findFirst().orElseThrow().status());
+        assertEquals(Forge1201DependencyResolver.Status.NATIVE_ID_PRESENT,
+                resolutions.stream().filter(r -> r.modId().equals("kubejs")).findFirst().orElseThrow().status());
+        assertEquals(Forge1201DependencyResolver.Status.REQUIRED_MISSING,
+                resolutions.stream().filter(r -> r.modId().equals("palladium")).findFirst().orElseThrow().status());
+        assertEquals(Forge1201DependencyResolver.Status.HOST_BRIDGE,
+                resolutions.stream().filter(r -> r.modId().equals("forge")).findFirst().orElseThrow().status());
+        org.junit.jupiter.api.Assertions.assertTrue(Forge1201DependencyResolver.summarize(info, nativeIds)
+                .contains("API/version not yet verified"));
+    }
+
+    @Test
     void ignoresNeoForgeMetadata() throws IOException {
         Path jar = createJar("META-INF/neoforge.mods.toml", forge1201Metadata());
 
