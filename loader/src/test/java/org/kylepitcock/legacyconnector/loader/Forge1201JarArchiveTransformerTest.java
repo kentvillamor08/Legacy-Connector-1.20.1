@@ -84,13 +84,13 @@ final class Forge1201JarArchiveTransformerTest {
             String metadata = new String(
                     zip.getInputStream(zip.getEntry("META-INF/neoforge.mods.toml")).readAllBytes(),
                     StandardCharsets.UTF_8);
-            assertTrue(metadata.contains("loaderVersion=\\"[1,)\\""));
-            assertTrue(metadata.contains("modId=\\"neoforge\\""));
-            assertTrue(metadata.contains("type=\\"required\\""));
-            assertTrue(metadata.contains("type=\\"optional\\""));
-            assertFalse(metadata.contains("modId=\\"forge\\""));
+            assertTrue(metadata.contains("loaderVersion=\"[1,)\""));
+            assertTrue(metadata.contains("modId=\"neoforge\""));
+            assertTrue(metadata.contains("type=\"required\""));
+            assertTrue(metadata.contains("type=\"optional\""));
+            assertFalse(metadata.contains("modId=\"forge\""));
             assertFalse(metadata.contains("mandatory="));
-            assertTrue(metadata.contains("license=\\"All Rights Reserved\\""));
+            assertTrue(metadata.contains("license=\"All Rights Reserved\""));
         }
     }
 
