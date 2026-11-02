@@ -82,6 +82,23 @@ Primary references: Alien Evolution's [Modrinth page](https://modrinth.com/mod/a
 
 This is an API compatibility layer, not a universal guarantee. A mod is supported only to the extent that the Minecraft/Forge APIs it uses have been bridged and its required dependencies are available. Compatibility reports should identify missing APIs and unsupported hooks rather than silently claiming success.
 
+## Inspecting the first real mod jar
+
+The loader now includes an offline bytecode inventory tool. It does not define, load or execute the target mod. It reports:
+
+- mods.toml mod IDs and declared dependencies.
+- Forge @Mod entrypoint classes.
+- Manifest-declared Mixin configurations and FML coremod entrypoints.
+- Minecraft/Forge/Mixin classes referenced by the bytecode.
+- Frequently referenced Minecraft/Forge method and field symbols.
+
+After placing the actual Forge 1.20.1 jar somewhere accessible on disk, run from the project root:
+
+```powershell
+.\gradlew.bat :loader:inspectForge1201 -Pforge1201Jar="F:\path\to\AlienEvo-1.1.3-forge.jar"
+```
+
+The report is printed to the Gradle console. The exact jar and dependency versions used for the pilot should be recorded; do not assume the mod's latest release or a dependency page alone defines the bytecode API surface.
 ## Current status
 
 - Added a separate metadata detector for jars whose `mods.toml` declares JavaFML 47.x, Minecraft 1.20.1 and Forge 47.x.
@@ -90,6 +107,7 @@ This is an API compatibility layer, not a universal guarantee. A mod is supporte
 - The detector now extracts each `[[dependencies.<modid>]]` entry (mod ID, version range, mandatory flag, ordering and side) and includes a dependency summary in the safe-skip warning. The test fixture models Alien Evolution's six declared required libraries.
 - Added a native dependency audit that scans installed NeoForge jars for mod IDs in `[[mods]]` sections only, then classifies Forge/Minecraft platform bridges, native ID candidates, and missing required/optional dependencies. The audit explicitly does not claim that a matching mod ID proves API or version compatibility.
 - Added a regression test ensuring IDs mentioned only in another mod's dependency list are not mistaken for installed mods.
+- Added an offline ASM-based API usage analyzer and a :loader:inspectForge1201 Gradle task. It reports entrypoints, mixin/coremod metadata, referenced game API classes, and method/field symbols without executing the jar; a synthetic bytecode test covers the report path.
 - These changes still need a local loader test run. They do **not** translate or load Alien Evolution yet.
 
 The existing 1.7.10/1.12.2 NeoForge 1.21.1 runtime remains the baseline. The 1.20.1 API bridge, bytecode adaptation and gameplay validation remain future milestones.
