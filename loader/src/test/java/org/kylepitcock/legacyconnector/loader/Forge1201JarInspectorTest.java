@@ -102,6 +102,15 @@ final class Forge1201JarInspectorTest {
         org.junit.jupiter.api.Assertions.assertTrue(analysis.methodReferences().stream()
                 .anyMatch(reference -> reference.owner().equals("net/minecraftforge/fml/ModList")
                         && reference.name().equals("get")));
+        assertEquals(1, analysis.methodCallSites().size());
+        var callSite = analysis.methodCallSites().get(0);
+        assertEquals("sample/AlienEvoMod", callSite.callerClass());
+        assertEquals("sample", callSite.callerMethod());
+        assertEquals("()V", callSite.callerDescriptor());
+        assertEquals("net/minecraftforge/fml/ModList", callSite.targetOwner());
+        assertEquals("get", callSite.targetName());
+        assertEquals("()Lnet/minecraftforge/fml/ModList;", callSite.targetDescriptor());
+        assertEquals(Opcodes.INVOKESTATIC, callSite.opcode());
         org.junit.jupiter.api.Assertions.assertTrue(analysis.fieldReferences().stream()
                 .anyMatch(reference -> reference.owner().equals("net/minecraftforge/registries/ForgeRegistries")
                         && reference.name().equals("ITEMS")));
