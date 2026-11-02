@@ -435,11 +435,11 @@ public final class RecipeBridge {
                     // An item that did not translate is air: clients refuse recipes with empty stacks (disconnect).
                     if (itemId(modern).equals("minecraft:air")) return null;
                     JsonObject j = new JsonObject();
-                    j.addProperty("type", "neoforge:components");
-                    j.addProperty("items", itemId(modern));
-                    JsonObject comps = new JsonObject();
-                    comps.addProperty("legacyconnector:legacy_meta", extra);
-                    j.add("components", comps);
+                    j.addProperty("type", "forge:partial_nbt");
+                    j.addProperty("item", itemId(modern));
+                    JsonObject nbt = new JsonObject();
+                    nbt.addProperty("legacyconnector:legacy_meta", extra);
+                    j.add("nbt", nbt);
                     return j;
                 }
                 ids.add(itemId(modern));
