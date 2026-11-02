@@ -335,7 +335,7 @@ public final class LegacyJarTransformer {
             outResources.put(COREMOD_RESOURCE, jar.coreModClass.trim().getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
         if (jar.hasMods()) {
-            outResources.put("META-INF/neoforge.mods.toml", ModMetadataGenerator.modsToml(jar));
+            outResources.put("META-INF/mods.toml", ModMetadataGenerator.modsToml(jar));
             outResources.put(ModMetadataGenerator.LEGACY_JSON, ModMetadataGenerator.legacyJson(jar));
             for (LegacyModDecl mod : jar.mods) {
                 outClasses.put(ModMetadataGenerator.entrypointName(mod) + ".class", ModMetadataGenerator.entrypointClass(jar, mod));
