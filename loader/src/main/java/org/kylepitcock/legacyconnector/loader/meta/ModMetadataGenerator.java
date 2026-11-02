@@ -127,7 +127,7 @@ public final class ModMetadataGenerator {
         av.visit("value", mod.fmlId());
         av.visitEnd();
 
-        MethodVisitor mv = cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "(Lnet/minecraftforge/eventbus/api/IEventBus;Lnet/minecraftforge/fml/ModContainer;)V", null, null);
+        MethodVisitor mv = cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "(Lnet/minecraftforge/fml/javafmlmod/FMLJavaModLoadingContext;)V", null, null);
         mv.visitCode();
         mv.visitVarInsn(Opcodes.ALOAD, 0);
         mv.visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false);
@@ -135,7 +135,11 @@ public final class ModMetadataGenerator {
         mv.visitLdcInsn(mod.legacyId);
         mv.visitLdcInsn(mod.mainClass.replace('/', '.'));
         mv.visitVarInsn(Opcodes.ALOAD, 1);
-        mv.visitVarInsn(Opcodes.ALOAD, 2);
+        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "net/minecraftforge/fml/javafmlmod/FMLJavaModLoadingContext", "getModEventBus",
+                "()Lnet/minecraftforge/eventbus/api/IEventBus;", false);
+        mv.visitVarInsn(Opcodes.ALOAD, 1);
+        mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "net/minecraftforge/fml/javafmlmod/FMLJavaModLoadingContext", "getContainer",
+                "()Lnet/minecraftforge/fml/javafmlmod/FMLModContainer;", false);
         mv.visitMethodInsn(Opcodes.INVOKESTATIC, BOOTSTRAP, "construct",
                 "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lnet/minecraftforge/eventbus/api/IEventBus;Lnet/minecraftforge/fml/ModContainer;)V", false);
         mv.visitInsn(Opcodes.RETURN);
