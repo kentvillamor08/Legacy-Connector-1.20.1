@@ -22,8 +22,8 @@ import net.minecraft.world.item.crafting.CraftingInput;
 import net.minecraft.world.item.crafting.CraftingRecipe;
 import net.minecraft.world.item.crafting.RecipeSerializer;
 import net.minecraft.world.level.Level;
-import net.neoforged.neoforge.registries.DeferredHolder;
-import net.neoforged.neoforge.registries.DeferredRegister;
+import net.minecraftforge.registries.RegistryObject;
+import net.minecraftforge.registries.DeferredRegister;
 import org.kylepitcock.legacyconnector.v1_7_10.bridge.RecipeBridge;
 
 /**
@@ -32,7 +32,7 @@ import org.kylepitcock.legacyconnector.v1_7_10.bridge.RecipeBridge;
  */
 public final class LegacyCraftingRecipe implements CraftingRecipe {
     public static final DeferredRegister<RecipeSerializer<?>> REGISTER = DeferredRegister.create(Registries.RECIPE_SERIALIZER, "legacyconnector");
-    public static final DeferredHolder<RecipeSerializer<?>, RecipeSerializer<LegacyCraftingRecipe>> SERIALIZER = REGISTER.register("legacy_recipe", Serializer::new);
+    public static final RegistryObject<RecipeSerializer<LegacyCraftingRecipe>> SERIALIZER = REGISTER.register("legacy_recipe", Serializer::new);
     private static final AtomicInteger FAILURES = new AtomicInteger();
 
     private final int index;
