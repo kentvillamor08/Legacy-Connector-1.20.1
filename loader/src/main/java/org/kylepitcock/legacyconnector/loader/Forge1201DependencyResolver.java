@@ -20,7 +20,7 @@ import java.util.zip.ZipFile;
  * mod version exposes the API expected by the old dependency.</p>
  */
 public final class Forge1201DependencyResolver {
-    private static final Pattern MOD_ID = Pattern.compile("(?m)^\\s*modId\\s*=\\s*[\\"']([a-zA-Z0-9_.-]+)[\\"']");
+    private static final Pattern MOD_ID = Pattern.compile("(?m)^\\s*modId\\s*=\\s*\"([a-zA-Z0-9_.-]+)\"");
 
     private Forge1201DependencyResolver() {}
 
