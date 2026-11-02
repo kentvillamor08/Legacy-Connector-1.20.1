@@ -100,6 +100,14 @@ After placing the actual Forge 1.20.1 jar somewhere accessible on disk, run from
 ```
 
 The report is printed to the Gradle console. The exact jar and dependency versions used for the pilot should be recorded; do not assume the mod's latest release or a dependency page alone defines the bytecode API surface.
+
+Run the read-only mapping decision audit against the same original input JAR:
+
+```powershell
+.\\gradlew.bat :loader:auditForge1201Mappings -Pforge1201Jar="F:\\path\\to\\symbiote-1.1.3.jar"
+```
+
+This command classifies reviewed namespace moves, known semantic adapters and unreviewed Forge API types. It does not rewrite the JAR. A package relocation is only a candidate until the exact class and member signatures are verified against the pinned NeoForge 21.1.x artifact.
 ## Current status
 
 - Added a separate metadata detector for jars whose `mods.toml` declares JavaFML 47.x, Minecraft 1.20.1 and Forge 47.x.
@@ -114,6 +122,7 @@ The report is printed to the Gradle console. The exact jar and dependency versio
 - Added a metadata-only archive transformer that writes a separate derived JAR, replaces `META-INF/mods.toml`, removes stale signature files, preserves other archive entries, and records source/output SHA-256 digests. It never overwrites the source JAR.
 - Added unit tests for metadata conversion and archive-copy behavior; the user ran `:loader:clean :loader:test --no-daemon` successfully after correcting Java string escaping in the archive test assertions.
 - Ran `:loader:transformForge1201Metadata` against the private Symbiote 1.1.3 JAR successfully. The derived archive copied 515 entries, removed zero signature entries, and produced distinct input/output SHA-256 digests. Its generated `META-INF/neoforge.mods.toml` was manually inspected and confirmed the expected JavaFML `[1,)`, NeoForge `[21.1.258,)`, and Minecraft `[1.21.1,1.22)` ranges with required dependency types.
+- Added a version-scoped Forge 47.x to NeoForge 21.1.x mapping catalog and a read-only `:loader:auditForge1201Mappings` task. The catalog separates namespace-relocation candidates from known semantic adapters and unreviewed Forge API types; its unit tests await the next local test run.
 - This validates metadata/archive transformation only; classes remain unmapped and the derived JAR is not loadable as a supported mod.
 
 The existing 1.7.10/1.12.2 NeoForge 1.21.1 runtime remains the baseline. The 1.20.1 API bridge, bytecode adaptation and gameplay validation remain future milestones.
