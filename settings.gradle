@@ -2,7 +2,10 @@ pluginManagement {
     repositories {
         mavenLocal()
         gradlePluginPortal()
-        maven { url = 'https://maven.neoforged.net/releases' }
+        // ForgeGradle 6 plugin repository.
+        maven { url = 'https://maven.minecraftforge.net' }
+        // Sponge MixinGradle plugin repository.
+        maven { url = 'https://repo.spongepowered.org/repository/maven-public/' }
     }
 }
 
@@ -12,8 +15,7 @@ plugins {
 
 rootProject.name = 'legacyconnector'
 
-// Service-layer half of the compatibility layer: discovers legacy mod jars and
-// rewrites them into NeoForge mods before FML ever sees them.
+// Service-layer half: discovers legacy jars, translates them, and exposes Forge mod candidates.
 include 'loader'
-// Pure-Java fixtures that imitate legacy (1.7.10 / 1.12.2) Forge mods for integration testing.
+// Java 8 fixture mods used to verify legacy translation and registration.
 include 'testmods'
