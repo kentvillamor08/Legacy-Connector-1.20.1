@@ -53,6 +53,22 @@ This is a release-listing audit, not a successful runtime test. Pin exact file v
 
 Primary references: Alien Evolution's [Modrinth page](https://modrinth.com/mod/alienevo) and [CurseForge page](https://www.curseforge.com/minecraft/mc-mods/alienevo); dependency projects' Modrinth pages for [Palladium](https://modrinth.com/mod/threetag-palladium), [GeckoLib](https://modrinth.com/mod/geckolib), [KubeJS](https://modrinth.com/mod/kubejs), [Rhino](https://modrinth.com/mod/rhino), [Architectury API](https://modrinth.com/mod/architectury-api) and [Pehkui](https://modrinth.com/mod/pehkui).
 
+## Palladium source review: additional bridge surface
+
+The upstream Palladium `1.20/main` common source was inspected after the initial dependency-list audit. Its `Palladium.init()` method is a real content/runtime bootstrap, not a thin marker mod. It registers blocks, block entities, creative tabs, items, abilities, condition serializers, power providers, icons, world features, attributes, effects, entity types, sounds, accessories, menus and recipe types/serializers. It then initializes the network, power managers, ability event handler, properties, entity systems, multiverse systems, lifecycle callbacks, commands and player-clone data transfer.
+
+The `Abilities` registry is built on `net.threetag.palladiumcore.registry.DeferredRegister` and `RegistrySupplier`; `Ability` itself exposes a Palladium registry and a configurable property system. The common bootstrap also imports PalladiumCore lifecycle, command, player-event and platform APIs. Therefore the dependency plan must include **PalladiumCore**, not only Palladium and the Minecraft/Forge API.
+
+The Palladium 1.20.1 build properties identify `palladiumcore_version=1.0.1+1.20.1`; they also pin 1.20.1-era versions of GeckoLib, KubeJS, Curios and Pehkui. Exact artifact versions must be taken from the actual selected Palladium/Ali​​en Evolution jars' metadata and dependency files before implementation. The public GitHub PalladiumCore repository's default source tree is older (Minecraft 1.19.2), so it is useful for understanding the abstraction shape but is **not** accepted as the source of truth for the 1.20.1 binary. We still need the matching 1.20.1 PalladiumCore sources/artifact before implementing its platform internals.
+
+Implementation consequence:
+
+1. Treat PalladiumCore's common registry/event/platform abstractions as a separate compatibility surface.
+2. Inspect the exact 1.20.1 Forge implementation of PalladiumCore and its `@ExpectPlatform`/Architectury-generated calls.
+3. Map those abstractions onto the native 1.21.1 NeoForge event bus, registries, lifecycle and platform services; do not merely relocate Forge package names.
+4. Only then translate Palladium itself and validate Alien Evolution's calls into the Palladium API.
+
+Source references: [Palladium 1.20/main](https://git.threetag.net/ThreeTAG/Palladium/src/branch/1.20/main), [`Palladium.java`](https://git.threetag.net/ThreeTAG/Palladium/src/branch/1.20/main/common/src/main/java/net/threetag/palladium/Palladium.java), [`Abilities.java`](https://git.threetag.net/ThreeTAG/Palladium/src/branch/1.20/main/common/src/main/java/net/threetag/palladium/power/ability/Abilities.java), [`Ability.java`](https://git.threetag.net/ThreeTAG/Palladium/src/branch/1.20/main/common/src/main/java/net/threetag/palladium/power/ability/Ability.java), and [PalladiumCore](https://github.com/ThreeTAG/PalladiumCore).
 ## Technical milestones
 
 1. **Jar identification**
@@ -108,6 +124,7 @@ The report is printed to the Gradle console. The exact jar and dependency versio
 - Added a native dependency audit that scans installed NeoForge jars for mod IDs in `[[mods]]` sections only, then classifies Forge/Minecraft platform bridges, native ID candidates, and missing required/optional dependencies. The audit explicitly does not claim that a matching mod ID proves API or version compatibility.
 - Added a regression test ensuring IDs mentioned only in another mod's dependency list are not mistaken for installed mods.
 - Added an offline ASM-based API usage analyzer and a :loader:inspectForge1201 Gradle task. It reports entrypoints, mixin/coremod metadata, referenced game API classes, and method/field symbols without executing the jar; a synthetic bytecode test covers the report path.
+- Reviewed the upstream Palladium 1.20.1 common bootstrap and ability source. Documented PalladiumCore's registry/event/platform abstractions as an additional dependency bridge; the matching 1.20.1 PalladiumCore platform implementation still needs source-level verification.
 - These changes still need a local loader test run. They do **not** translate or load Alien Evolution yet.
 
 The existing 1.7.10/1.12.2 NeoForge 1.21.1 runtime remains the baseline. The 1.20.1 API bridge, bytecode adaptation and gameplay validation remain future milestones.
