@@ -13,6 +13,15 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 repositories {
     mavenCentral()
     maven { url = 'https://maven.minecraftforge.net' }
+
+    // Mojang hosts libraries such as com.mojang:logging outside Maven Central.
+    // Restrict this repository to Mojang artifacts so it does not shadow other groups.
+    maven {
+        url = 'https://libraries.minecraft.net'
+        content {
+            includeGroup 'com.mojang'
+        }
+    }
 }
 
 configurations {
