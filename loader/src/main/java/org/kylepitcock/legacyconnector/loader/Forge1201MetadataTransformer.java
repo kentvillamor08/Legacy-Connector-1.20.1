@@ -129,17 +129,17 @@ public final class Forge1201MetadataTransformer {
             if (assignment == null) continue;
 
             if (assignment.key().equals("mandatory")) {
-                if (foundType) {
+                if (foundMandatory || foundType) {
                     throw new IllegalArgumentException(
-                            "Dependency section " + section.name() + " declares both mandatory and type");
+                            "Dependency section " + section.name() + " has duplicate or conflicting optionality fields");
                 }
                 lines[line] = replaceAssignment(lines[line], assignment, "type",
                         mandatory ? "required" : "optional");
                 foundMandatory = true;
             } else if (assignment.key().equals("type")) {
-                if (foundMandatory) {
+                if (foundMandatory || foundType) {
                     throw new IllegalArgumentException(
-                            "Dependency section " + section.name() + " declares both mandatory and type");
+                            "Dependency section " + section.name() + " has duplicate or conflicting optionality fields");
                 }
                 foundType = true;
                 String expected = mandatory ? "required" : "optional";
