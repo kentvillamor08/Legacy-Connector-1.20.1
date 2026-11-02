@@ -108,6 +108,14 @@ Run the read-only mapping decision audit against the same original input JAR:
 ```
 
 This command classifies reviewed namespace moves, known semantic adapters and unreviewed Forge API types. It does not rewrite the JAR. A package relocation is only a candidate until the exact class and member signatures are verified against the pinned NeoForge 21.1.x artifact.
+
+After the mapping catalog has been reviewed, verify the 82 remaining namespace-relocation candidates against the **actual target game's compile classpath** configured by the root NeoForge ModDev project:
+
+```powershell
+.\\gradlew.bat :verifyForge1201TargetApi -Pforge1201Jar="C:\\path\\to\\symbiote-1.1.3.jar"
+```
+
+This task runs in the root project's target compile classpath while the `:loader` module remains independent of Minecraft/NeoForge classes. It reads class-file structures with ASM and checks target class presence plus exact method/field descriptors, including inherited members where the visible hierarchy is complete. Missing classes, missing members, and incomplete hierarchy lookups are reported separately. No target class is loaded or initialized and no JAR bytes are changed. A structural match is not proof of behavioral compatibility; manual-adapter types and Minecraft 1.20.1-to-1.21.1 changes remain separate.
 ## Current status
 
 - Added a separate metadata detector for jars whose `mods.toml` declares JavaFML 47.x, Minecraft 1.20.1 and Forge 47.x.
@@ -124,8 +132,9 @@ This command classifies reviewed namespace moves, known semantic adapters and un
 - Ran `:loader:transformForge1201Metadata` against the private Symbiote 1.1.3 JAR successfully. The derived archive copied 515 entries, removed zero signature entries, and produced distinct input/output SHA-256 digests. Its generated `META-INF/neoforge.mods.toml` was manually inspected and confirmed the expected JavaFML `[1,)`, NeoForge `[21.1.258,)`, and Minecraft `[1.21.1,1.22)` ranges with required dependency types.
 - The user ran `:loader:auditForge1201Mappings` against the original Symbiote 1.1.3 JAR. The initial catalog classified 120 Forge API classes as 103 package-relocation candidates, 17 manual-adapter types, and zero unclassified Forge API types; it separately found 310 Minecraft API classes. These counts describe static references, not verified runtime compatibility.
 - Review of that audit exposed over-broad classifications for nested `ForgeConfigSpec` value types, the config-screen extension point, the old tick-event family, `Event.Result`, `ForgeMod`, `DeferredRegister`, and parts of the old networking API. Those have now been explicitly moved to the manual-adapter category.
-- Expanded the mapping catalog to 38 explicit manual-adapter types and added focused tests for nested configuration types, tick-event Pre/Post migration, config-screen registration, Forge attributes, event results, and deferred registries. The suite now contains 12 mapping-catalog test methods; the refined counts await a local rerun.
+- Expanded the mapping catalog to 38 explicit manual-adapter types and added focused tests for nested configuration types, tick-event Pre/Post migration, config-screen registration, Forge attributes, event results, and deferred registries. The user reran `:loader:clean :loader:test --no-daemon` successfully; the refined audit reported 82 package-relocation candidates, 38 manual-adapter types, and zero unclassified Forge API types (120 Forge API classes total, plus 310 Minecraft API classes).
 - Added a read-only Forge 47.x to NeoForge 21.1.x mapping catalog and `:loader:auditForge1201Mappings` task. It distinguishes reviewed namespace-relocation candidates from known semantic adapters and unreviewed Forge APIs; it does not rewrite the JAR or feed the discovery pipeline.
+- Added `Forge1201TargetApiVerifier` and the root task `:verifyForge1201TargetApi`. It uses the root NeoForge ModDev compile classpath to verify candidate target class files and referenced member descriptors without defining or initializing classes. Synthetic tests cover mapped descriptors, inherited-member lookup, missing members/classes, incomplete hierarchies, and exclusion of manual-adapter owners. These new verifier tests and the Gradle task have not yet been run by the user.
 - This validates metadata/archive transformation only; classes remain unmapped and the derived JAR is not loadable as a supported mod.
 
 The existing 1.7.10/1.12.2 NeoForge 1.21.1 runtime remains the baseline. The 1.20.1 API bridge, bytecode adaptation and gameplay validation remain future milestones.
