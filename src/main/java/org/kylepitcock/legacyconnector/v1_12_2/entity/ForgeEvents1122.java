@@ -58,7 +58,7 @@ public final class ForgeEvents1122 {
                 : legacyconnector.v1_12_2.net.minecraft.util.EnumHand.MAIN_HAND;
     }
 
-    public static void register(net.neoforged.bus.api.IEventBus game) {
+    public static void register(net.minecraftforge.eventbus.api.IEventBus game) {
         game.addListener((net.neoforged.neoforge.event.entity.player.CanPlayerSleepEvent e) -> {
             EntityPlayer p = player(e.getEntity());
             if (p == null) return;
@@ -190,7 +190,7 @@ public final class ForgeEvents1122 {
     }
 
     /** Entity, spawn, sound, container, dimension, taming, sleeping, minecart and save-file events (only built when a mod listens). */
-    private static void registerEntityEvents(net.neoforged.bus.api.IEventBus game) {
+    private static void registerEntityEvents(net.minecraftforge.eventbus.api.IEventBus game) {
         game.addListener((net.neoforged.neoforge.event.entity.living.MobSpawnEvent.PositionCheck e) -> {
             if (!wants(legacyconnector.v1_12_2.net.minecraftforge.event.entity.living.LivingSpawnEvent.CheckSpawn.class)) return;
             if (!(entity(e.getEntity()) instanceof legacyconnector.v1_12_2.net.minecraft.entity.EntityLiving mob)) return;
