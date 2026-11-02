@@ -1,26 +1,36 @@
 package org.kylepitcock.legacyconnector.core.data;
 
-import com.mojang.serialization.Codec;
-import net.minecraft.core.component.DataComponentType;
-import net.minecraft.core.registries.Registries;
-import net.minecraft.network.codec.ByteBufCodecs;
-import net.minecraftforge.registries.RegistryObject;
-import net.minecraftforge.registries.DeferredRegister;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
+import net.minecraft.world.item.ItemStack;
 
-/** Data components that carry legacy state no modern component expresses. */
+/**
+ * Small item-state helpers for compatibility data which has no vanilla 1.20.1 field.
+ *
+ * <p>1.20.1 predates vanilla data components. The legacy subtype value is therefore
+ * stored as a namespaced integer inside the stack's regular root tag.</p>
+ */
 public final class CompatComponents {
-    public static final DeferredRegister<DataComponentType<?>> REGISTER = DeferredRegister.create(Registries.DATA_COMPONENT_TYPE, "legacyconnector");
-
-    /**
-     * Legacy item metadata for subtypes that were not flattened into their own modern item (for example values a
-     * mod only creates at runtime). Persisted and synced, so such stacks survive saving and network transfer.
-     */
-    public static final RegistryObject<DataComponentType<Integer>> LEGACY_META = REGISTER.register("legacy_meta",
-            () -> DataComponentType.<Integer>builder().persistent(Codec.INT).networkSynchronized(ByteBufCodecs.VAR_INT).build());
+    private static final String LEGACY_META_KEY = "legacyconnector:legacy_meta";
 
     private CompatComponents() {}
 
-    public static DataComponentType<Integer> legacyMeta() {
-        return LEGACY_META.get();
+    public static Integer getLegacyMeta(ItemStack stack) {
+        if (stack == null) return null;
+        CompoundTag tag = stack.getTag();
+        return tag != null && tag.contains(LEGACY_META_KEY, Tag.TAG_INT) ? tag.getInt(LEGACY_META_KEY) : null;
+    }
+
+    public static void setLegacyMeta(ItemStack stack, int value) {
+        if (stack == null || stack.isEmpty()) return;
+        stack.getOrCreateTag().putInt(LEGACY_META_KEY, value);
+    }
+
+    public static void clearLegacyMeta(ItemStack stack) {
+        if (stack == null) return;
+        CompoundTag tag = stack.getTag();
+        if (tag == null || !tag.contains(LEGACY_META_KEY)) return;
+        tag.remove(LEGACY_META_KEY);
+        if (tag.isEmpty()) stack.setTag(null);
     }
 }
