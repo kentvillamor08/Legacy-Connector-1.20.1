@@ -80,10 +80,10 @@ public final class ModMetadataGenerator {
     private static void dependency(StringBuilder sb, String owner, String target, boolean required, String ordering) {
         sb.append("[[dependencies.").append(owner).append("]]\n");
         sb.append("modId=").append(q(target)).append('\n');
-        sb.append("mandatory=").append(required).append('\\n');
+        sb.append("mandatory=").append(required).append('\n');
         // Legacy version ranges compare against legacy version strings that rarely follow Maven ordering.
         String versionRange = target.equals("forge") ? "[47.3.0,)" : target.equals("minecraft") ? "[1.20.1,1.20.2)" : "*";
-        sb.append("versionRange=").append(q(versionRange)).append('\\n');
+        sb.append("versionRange=").append(q(versionRange)).append('\n');
         sb.append("ordering=").append(q(ordering)).append('\n');
         sb.append("side=\"BOTH\"\n\n");
     }
