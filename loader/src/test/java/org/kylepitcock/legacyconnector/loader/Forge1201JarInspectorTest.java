@@ -50,6 +50,13 @@ final class Forge1201JarInspectorTest {
                 [[mods]]
                 modId="geckolib"
                 version="4.8.0"
+
+                [[dependencies.geckolib]]
+                modId="optional_dependency_not_installed"
+                mandatory=false
+                versionRange="*"
+                ordering="NONE"
+                side="BOTH"
                 """);
         Path nativeKube = createJar("META-INF/neoforge.mods.toml", """
                 modLoader="javafml"
@@ -64,6 +71,7 @@ final class Forge1201JarInspectorTest {
         var resolutions = Forge1201DependencyResolver.resolve(info, nativeIds);
 
         assertEquals(2, nativeIds.size());
+        org.junit.jupiter.api.Assertions.assertFalse(nativeIds.contains("optional_dependency_not_installed"));
         assertEquals(Forge1201DependencyResolver.Status.NATIVE_ID_PRESENT,
                 resolutions.stream().filter(r -> r.modId().equals("geckolib")).findFirst().orElseThrow().status());
         assertEquals(Forge1201DependencyResolver.Status.NATIVE_ID_PRESENT,
