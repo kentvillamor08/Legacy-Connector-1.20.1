@@ -139,7 +139,7 @@ final class Forge1201MetadataTransformerTest {
     @Test
     void rejectsInvalidReplacementRanges() {
         assertThrows(IllegalArgumentException.class, () -> Forge1201MetadataTransformer.transformToml(
-                SOURCE_METADATA, "[4,)", "[21.1.258,)", "[1.21.1,1.22)\\nmalicious=true"));
+                SOURCE_METADATA, "[4,)", "[21.1.258,)", "[1.21.1,1.22)\nmalicious=true"));
     }
 
     private static String transform(String source) {
