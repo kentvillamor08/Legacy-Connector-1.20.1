@@ -14,6 +14,7 @@ import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Type;
 import org.objectweb.asm.commons.Remapper;
 
 /**
@@ -33,7 +34,8 @@ public final class Forge1201TargetApiVerifier {
     public enum MemberStatus {
         VERIFIED,
         MISSING,
-        INCOMPLETE_HIERARCHY
+        INCOMPLETE_HIERARCHY,
+        REQUIRES_MANUAL_DESCRIPTOR_ADAPTER
     }
 
     public record MemberIssue(
@@ -133,6 +135,12 @@ public final class Forge1201TargetApiVerifier {
         for (var reference : candidateMethods) {
             String targetOwner = mapType(reference.owner());
             String targetDescriptor = mapMethodDescriptor(reference.descriptor());
+            if (descriptorNeedsManualAdapter(reference.descriptor(), true)) {
+                methodIssues.add(new MemberIssue(
+                        reference.owner(), reference.name(), reference.descriptor(),
+                        targetOwner, targetDescriptor, MemberStatus.REQUIRES_MANUAL_DESCRIPTOR_ADAPTER));
+                continue;
+            }
             Lookup lookup = findMethod(targetOwner, new MemberKey(reference.name(), targetDescriptor), new HashSet<>());
             if (lookup.found()) {
                 verifiedMethods++;
@@ -149,6 +157,12 @@ public final class Forge1201TargetApiVerifier {
         for (var reference : candidateFields) {
             String targetOwner = mapType(reference.owner());
             String targetDescriptor = mapFieldDescriptor(reference.descriptor());
+            if (descriptorNeedsManualAdapter(reference.descriptor(), false)) {
+                fieldIssues.add(new MemberIssue(
+                        reference.owner(), reference.name(), reference.descriptor(),
+                        targetOwner, targetDescriptor, MemberStatus.REQUIRES_MANUAL_DESCRIPTOR_ADAPTER));
+                continue;
+            }
             Lookup lookup = findField(targetOwner, new MemberKey(reference.name(), targetDescriptor), new HashSet<>());
             if (lookup.found()) {
                 verifiedFields++;
@@ -202,6 +216,31 @@ public final class Forge1201TargetApiVerifier {
 
     private static String mapFieldDescriptor(String descriptor) {
         return descriptorRemapper().mapDesc(descriptor);
+    }
+
+    private static boolean descriptorNeedsManualAdapter(String descriptor, boolean methodDescriptor) {
+        if (methodDescriptor) {
+            Type method = Type.getMethodType(descriptor);
+            if (containsManualAdapterType(method.getReturnType())) return true;
+            for (Type argument : method.getArgumentTypes()) {
+                if (containsManualAdapterType(argument)) return true;
+            }
+            return false;
+        }
+        return containsManualAdapterType(Type.getType(descriptor));
+    }
+
+    private static boolean containsManualAdapterType(Type type) {
+        if (type.getSort() == Type.ARRAY) {
+            return containsManualAdapterType(type.getElementType());
+        }
+        if (type.getSort() != Type.OBJECT) return false;
+
+        String internalName = type.getInternalName();
+        if (!internalName.startsWith("net/minecraftforge/")) return false;
+        Forge1201MappingCatalog.Kind kind = Forge1201MappingCatalog.classify(internalName).kind();
+        return kind == Forge1201MappingCatalog.Kind.MANUAL_ADAPTER_REQUIRED
+                || kind == Forge1201MappingCatalog.Kind.UNMAPPED_FORGE_API;
     }
 
     private TargetClass readClass(String internalName) throws IOException {
