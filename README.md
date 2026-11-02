@@ -1,142 +1,99 @@
-# Legacy Connector
+# Legacy Connector — Forge 1.20.1 Port
 
-[![CurseForge](https://img.shields.io/badge/CurseForge-F16436?style=for-the-badge&logo=curseforge&logoColor=white)](https://www.curseforge.com/minecraft/mc-mods/legacy-connector) [![Modrinth](https://img.shields.io/badge/Modrinth-00AF5C?style=for-the-badge&logo=modrinth&logoColor=white)](https://modrinth.com/mod/legacyconnector) [![Ko-fi](https://img.shields.io/badge/Ko--fi-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white)](https://ko-fi.com/kylepitcock)
+A development fork of [Legacy Connector](https://github.com/kylepitcock/Legacy-Connector), exploring support for running **unmodified legacy Forge mods on Minecraft 1.20.1 with Minecraft Forge**.
 
-Run **unmodified legacy Forge mods on NeoForge 1.21.1**. Drop 1.7.10 or 1.12.2 mod jars into your `mods` folder next to
-this mod; it is translated at load time, the same way [Sinytra Connector](https://github.com/Sinytra/Connector)
-runs Fabric mods on NeoForge. The original jar is never modified. Legacy jars can also go in `mods/1.7.10/` or
-`mods/1.12.2/`; mods that bundle their own Mixin (common in 1.12.2: Spartan Weaponry, MixinBooter mods) must, because
-NeoForge loads such jars from `mods/` as launcher plugins before they can be translated, and the game stops with
-"Module ... contains package org.spongepowered...".
+The goal is to bring the original project's legacy-mod translation approach to Forge 1.20.1, with support targeted at Forge 1.7.10 and Forge 1.12.2 mods.
 
-> **Status: beta (0.3.x).** 1.7.10 is in beta: content mods (Iron Chest, AgriCraft, BiblioCraft, Botania, Biomes O' Plenty, HBM,
-> Thaumcraft, Witchery and many more) run with their blocks, items, entities, recipes, GUIs, world generation and dimensions, large
-> tech packs load most of their mods, and Galacticraft with its addons runs with per-planet gravity and silent space. 1.12.2 is in
-> alpha: big content mods (Botania, Blood Magic, Mekanism, EnderIO, Immersive Engineering, Tinkers' Construct, Quark, Biomes O' Plenty,
-> Scape and Run: Parasites and more) load and play in a real client with their own models, GUIs, mobs and world generation. Some
-> features are still missing (see [Known compatibility issues](docs/wiki/Compatibility-and-Status.md#known-compatibility-issues)); back up your worlds before trying a new
-> mod set.
+> [!WARNING]
+> **Work in progress — not ready for players.** This branch is an active porting effort. The Forge 1.20.1 loader, runtime bridges, build configuration, and compatibility layer are not yet complete. There is no usable release jar at this stage. Do not treat the upstream NeoForge compatibility results as proof that a mod works in this port.
 
-Legacy content enters the game through the same hooks a modern mod uses: mod biomes through the pack's biome placement
-(a TerraBlender region when TerraBlender is installed), world generators as placed features in biome modifiers, village buildings
-in the vanilla village pools, structure chest loot through loot tables, items and machines as capabilities. So it works together
-with the pack's other mods instead of being painted over them, and data packs can tune it like any modern content.
+## Project status
 
-**Compatibility list and reports: https://kylepitcock.github.io/Legacy-Connector/** (check a mod, or report how it worked for you).
-
-Screenshots of legacy mods running on 1.21.1 are at the [end of this page](#screenshots).
-
-## Status
-
-| Legacy version | Status |
+| Component | Current status |
 |---|---|
-| 1.7.10 | **Beta.** Content mods, large tech packs, mod biomes, dimensions and entities work; Galacticraft with its addons runs; Thaumcraft, Witchery and the Reika mods (DragonAPI, RotaryCraft, ReactorCraft, ElectriCraft, ChromatiCraft) load inside All the Mods 10. In-game self tests of the GT New Horizons pack and a 130-jar list rate 166 mods as working and 57 as partly working; 20 fail during loading. |
-| 1.12.2 | **Alpha (issue #64).** Big content mods (Botania, Mekanism, EnderIO, Immersive Engineering, Tinkers' Construct, Quark, ...) load and play in a real client with their own models, GUIs, mobs and world generation, and mod dimensions (the Aether) can be entered. OpenComputers, Mekanism and RFTools machines are being brought up. |
-| 1.16.5 | Planned. |
-| 1.2.5 | Planned (after 1.16.5). |
+| Target Minecraft | 1.20.1 |
+| Target mod loader | Minecraft Forge 47.3.x |
+| Legacy versions being targeted | Forge 1.7.10 and Forge 1.12.2 |
+| Development JDK | Java 21 (provisional toolchain choice) |
+| Legacy jar discovery on Forge | In progress |
+| Translation pipeline on Forge | Not yet ported/verified |
+| Runtime API bridges | Not yet ported/verified |
+| Player release | Not available |
 
-Legacy tile entities and items are NeoForge item, fluid and energy capabilities by default (RF, IC2 EU, BuildCraft MJ, Forge fluids, inventories), so hoppers, Create and modern cables work with them ([details](docs/wiki/Addon-API.md#capabilities)).
+Track the implementation milestones in the [Forge 1.20.1 port roadmap](docs/porting/Forge-1.20.1.md).
 
-Per-mod results, known issues and what is not supported: [Compatibility and status](docs/wiki/Compatibility-and-Status.md). After
-launching, read `logs/legacyconnector-report.txt`: for every legacy jar it lists the detected version and mod ids, references that
-could not be linked, and which legacy APIs were synthesized.
+## What this project is trying to do
 
-## Configuration
+Legacy Forge mods were built against older Minecraft and Forge APIs. They cannot normally be dropped into a modern Forge instance and expected to load.
 
-Settings live in `config/legacyconnector.properties`, written with defaults and comments on first start.
+The original Legacy Connector addresses that problem by inspecting legacy mod jars and translating them at load time. Its architecture includes:
 
-| Key | Default | Effect |
-| --- | --- | --- |
-| `oreBackgrounds.enabled` | `true` | Replace the old stone/netherrack/end stone behind legacy ore textures |
-| `oreBackgrounds.stone`, `.netherrack`, `.endStone` | `stone`, `netherrack`, `end_stone` | Vanilla block texture used instead (e.g. `deepslate`, `tuff`), or `legacy` to keep the old rock |
-| `modernizeTextures` | `true` | Replace old vanilla art inside legacy mod textures with the modern vanilla textures: exact copies of old block, item and GUI textures, and old backgrounds (smooth stone, cobblestone, planks, bricks, ...) mods painted their art on (recognised from fingerprints, the mod's own art stays) |
-| `textures.modernLeaves` | `true` | Rebuild legacy leaf textures that recolour the old vanilla leaves in the modern leaf pattern, in the mod's colours |
-| `deepLayer.enabled` | `true` | Spread legacy ores down to the bottom of the world (below y=0) without adding any: the total per chunk stays the original mod's |
-| `deepLayer.excludeGenerators` | empty | Comma separated generator class prefixes that must not run below y=0 |
-| `blocks.flattenSubtypes` | `true` | Each legacy block subtype that has its own item becomes its own block (`mod:name_3`), as in the 1.13 flattening |
-| `events.skip` | empty | Legacy event handlers to leave unregistered (`full.ClassName#method`), for tracking down a handler that misbehaves |
+- **Legacy jar discovery:** identifies old Forge mod jars and determines which legacy Minecraft/Forge generation they target.
+- **Bytecode translation:** updates legacy class references and applies compatibility transformations without modifying the original jar.
+- **API shims:** supplies implementations of older Minecraft, Forge, and FML APIs that legacy mods expect.
+- **Missing API synthesis:** generates compatibility classes and members when the shim does not yet provide them.
+- **Runtime bridges:** connects legacy registration and behavior to modern game systems, including registries, events, items, blocks, entities, GUIs, capabilities, networking, rendering, and world generation.
+- **Translation cache and reports:** avoids repeating completed translation work and records unresolved references or skipped mods.
 
-All keys and the deepslate ore twins are described on the [Configuration](docs/wiki/Configuration.md) page.
+The goal of this fork is to preserve and adapt that architecture for **Forge 1.20.1**, not to replace it with a simple remapping-only loader.
+
+## What carries over from upstream
+
+The upstream project's development has demonstrated a broad compatibility approach for legacy 1.7.10 and 1.12.2 mods on **NeoForge 1.21.1**. Its documentation describes work on content registration, items and blocks, entities, GUIs, world generation, dimensions, recipes, capabilities, rendering, and many mod-specific compatibility cases.
+
+Those results and implementation notes are valuable references for this port, but they are **upstream NeoForge results**. They do not mean the same mods or features already work on Forge 1.20.1.
+
+For the original project's compatibility history, see the [upstream compatibility and status notes](https://github.com/kylepitcock/Legacy-Connector/blob/master/docs/wiki/Compatibility-and-Status.md) and [upstream documentation](https://github.com/kylepitcock/Legacy-Connector/tree/master/docs/wiki).
+
+## Development
+
+This port is being developed on the `port/forge-1.20.1` branch.
+
+The build system is still being migrated from the upstream NeoForge 1.21.1 setup to Forge 1.20.1. Consequently, the upstream Gradle run and build instructions are not yet valid for this branch.
+
+Once the Forge build is ready, this section will document:
+
+1. Required JDK and Gradle setup.
+2. How to import the project into IntelliJ IDEA.
+3. How to run a Forge 1.20.1 development client and server.
+4. How to build the distributable loader.
+5. How to test the 1.7.10 and 1.12.2 fixture mods.
+
+### Porting principles
+
+- Keep the original legacy mod jars unchanged.
+- Do not claim compatibility until it has been tested on Forge 1.20.1.
+- Keep the upstream NeoForge implementation available as a reference while building the Forge implementation.
+- Prefer isolated compatibility adapters over blind global package or method replacements.
+- Test both client and dedicated-server behavior.
+- Record unsupported APIs and unresolved references clearly instead of silently pretending they work.
 
 ## Documentation
 
-Technical documentation is in [`docs/wiki`](docs/wiki/Home.md) (start at [Home](docs/wiki/Home.md)):
-[Architecture](docs/wiki/Architecture.md), [Bridges](docs/wiki/Bridges.md), [World generation](docs/wiki/World-Generation.md),
-[Mod dimensions](docs/wiki/Mod-Dimensions.md), [Entities](docs/wiki/Entities.md), [Rendering](docs/wiki/Rendering.md),
-[Create and Sable](docs/wiki/Create-and-Sable.md), [Changing legacy recipes](docs/wiki/Recipes.md),
-[Performance](docs/wiki/Performance.md), [Compatibility and status](docs/wiki/Compatibility-and-Status.md) and
-[Development](docs/wiki/Development.md). Per-mod results are on the
-[compatibility site](https://kylepitcock.github.io/Legacy-Connector/).
+- [Forge 1.20.1 port roadmap](docs/porting/Forge-1.20.1.md)
+- [Original upstream architecture](https://github.com/kylepitcock/Legacy-Connector/blob/master/docs/wiki/Architecture.md)
+- [Original upstream API bridges](https://github.com/kylepitcock/Legacy-Connector/blob/master/docs/wiki/Bridges.md)
+- [Original upstream development notes](https://github.com/kylepitcock/Legacy-Connector/blob/master/docs/wiki/Development.md)
+- [Original upstream compatibility notes](https://github.com/kylepitcock/Legacy-Connector/blob/master/docs/wiki/Compatibility-and-Status.md)
 
-## Writing addons for legacy mods
+Some existing documentation and screenshots in this repository describe the upstream NeoForge 1.21.1 implementation. Treat them as historical/technical references until they are reviewed and updated for the Forge 1.20.1 port.
 
-Addons for legacy mods (a mod that registers content for, or hooks into, a translated 1.7.10 or 1.12.2 mod) are described in
-[Addon API](docs/wiki/Addon-API.md).
+## Reporting issues
 
-## Screenshots
+Please include:
 
-All taken in a real game client (NeoForge 1.21.1) with unmodified 1.7.10 mods that have no modern version, running next to modern content.
+- Minecraft version and Forge version.
+- Java version.
+- The legacy mod jar name and its original Minecraft/Forge version.
+- Whether the issue occurs on a clean Forge instance or with other mods installed.
+- The relevant part of `latest.log` and, when available, `logs/legacyconnector-report.txt`.
 
-A Thaumcraft 4 workshop: infusion altar with items on its pedestals, crucible over lava, alchemical furnace with alembics, essentia
-jars, arcane workbench, research table, an aura node over a stabiliser, infused stones with crystal clusters, and greatwood and
-silverwood trees grown by Thaumcraft's own generators:
+Do not upload or commit third-party legacy mod jars. Provide their names and versions instead.
 
-![A Thaumcraft workshop](docs/images/thaumcraft-workshop.png)
+## Credits and license
 
-**A Create Aeronautics airship (Sable physics) carrying 1.7.10 blocks: Thaumcraft essentia jars, crucible and arcane workbench, an Iron Chest, a RotaryCraft engine and ChromatiCraft crystals**
+This project is a fork of [Legacy Connector by Kyle Pitcock](https://github.com/kylepitcock/Legacy-Connector). The original project and its implementation are the foundation for this work; the upstream author and contributors retain their copyright notices.
 
-![A Create Aeronautics airship carrying legacy blocks](docs/images/create-aeronautics-ship.png)
+This fork is maintained separately and is not an official release of, or endorsed by, the upstream project.
 
-The Thaumonomicon, drawn by Thaumcraft's own font renderer and book code, and the Thaumometer held in both hands after scanning
-stone (the Terra aspect in its lens, research points gained in the corner):
-
-![The Thaumonomicon](docs/images/thaumonomicon.png)
-
-![Scanning with the Thaumometer](docs/images/thaumometer.png)
-
-A Witchery ritual site: chalk ritual circle around a heart glyph, candelabras, the altar with a chalice and crystal ball, a witch's
-oven with its fume funnel, kettle, distillery and spinning wheel (all drawn by Witchery's own tile entity renderers), a crop patch of
-belladonna, mandrake, snowbell, wolfsbane, garlic and wormwood, rowan saplings, a coven witch, a mandrake and a toad:
-
-![A Witchery ritual site](docs/images/witchery-ritual.png)
-
-Fisk's Superheroes: Doctor Octopus's suit with its tentacles deployed, and the suit's abilities (tentacle jab, grab and strike) on
-Fisk's own HUD:
-
-![Fisk's Superheroes Doctor Octopus](docs/images/fisk-doc-ock.png)
-
-OreSpawn's The King on the plains, with a modern boss bar (OreSpawn itself shows its bosses' health only while you aim at them from 16 blocks or closer):
-
-![OreSpawn's The King with its boss bar](docs/images/orespawn-king-bossbar.png)
-
-A vanilla village in All the Mods 10 (Complementary shaders) with the buildings 1.7.10 mods add to villages: Witchery's town walls,
-keep and watchtowers and Thaumcraft's wizard tower, all built by their legacy village code beside modern mods' trees and terrain:
-
-![Legacy village components in a modern village](docs/images/legacy-village-components.png)
-
-A nuclear explosion from HBM's Nuclear Tech Mod: the fireball and mushroom cloud with its condensation rings, flying debris, the
-fallout-tinted sky and the scorched crater, all from HBM's own explosion and effect code:
-
-![An HBM nuclear explosion](docs/images/hbm-nuke.png)
-
-1.12.2: Atum 2, the desert dimension, generated by Atum's own chunk generator with its biomes, sandstorm haze and sky colour:
-Atum's creatures (camel, nomad, a mummy burning in daylight, bonestorm, desert wolf and scarab) by a sandstone pyramid:
-
-![Atum's creatures](docs/images/atum-creatures.png)
-
-1.12.2: Scape and Run: Parasites. Primitive and adapted parasites (longarms, summoner, manducater, viscera, buglin, an infected human, bear and golem),
-drawn by the mod's own renderers under Complementary shaders:
-
-![Scape and Run: Parasites on 1.21.1](docs/images/srparasites-lineup.png)
-
-1.12.2: The Midnight, its own dimension: the Deceitful Bog with giant Bogshrooms, Nightstone ground, glowing plants and the mod's night sky,
-generated by the mod's own chunk generator and biomes:
-
-![The Midnight's Deceitful Bog](docs/images/midnight-bog.png)
-
-## Legal
-
-Legacy Connector is released under the [MIT License](LICENSE).
-
-This project contains no Minecraft, Forge or third-party mod code. Do not commit or redistribute legacy mod jars;
-users supply their own.
+The project is distributed under the [MIT License](LICENSE). The original license and copyright notice are retained. Please preserve the license and attribution when redistributing this fork or substantial portions of its source.
