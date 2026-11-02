@@ -1,7 +1,7 @@
 package org.kylepitcock.legacyconnector.loader;
 
-import net.neoforged.fml.loading.progress.ProgressMeter;
-import net.neoforged.fml.loading.progress.StartupNotificationManager;
+import net.minecraftforge.fml.loading.progress.ProgressMeter;
+import net.minecraftforge.fml.loading.progress.StartupNotificationManager;
 
 /**
  * A progress bar in FML's early loading window ("Translating legacy mods 3/12") while legacy jars are translated, so that a
