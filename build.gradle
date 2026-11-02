@@ -427,9 +427,11 @@ tasks.register('verifyForge1201TargetApi', JavaExec) {
     group = 'verification'
     description = 'Checks Forge 1.20.1 relocation candidates and referenced member signatures against the configured NeoForge/Minecraft compile classpath.'
     dependsOn project(':loader').tasks.named('classes')
-    classpath = project(':loader').sourceSets.main.runtimeClasspath
-            + project(':loader').sourceSets.main.compileClasspath
-            + sourceSets.main.compileClasspath
+    classpath = (
+            project(':loader').sourceSets.main.runtimeClasspath
+                    + project(':loader').sourceSets.main.compileClasspath
+                    + sourceSets.main.compileClasspath
+    )
     mainClass = 'org.kylepitcock.legacyconnector.loader.Forge1201TargetApiVerifier'
     systemProperty 'legacyconnector.targetNeoForgeVersion', project.neo_version
 
