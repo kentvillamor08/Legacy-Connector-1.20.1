@@ -5,7 +5,7 @@ import legacyconnector.v1_12_2.net.minecraftforge.client.event.TextureStitchEven
 import legacyconnector.v1_12_2.net.minecraftforge.common.MinecraftForge;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.server.packs.PackType;
-import net.neoforged.bus.api.IEventBus;
+import net.minecraftforge.eventbus.api.IEventBus;
 import net.neoforged.neoforge.client.event.EntityRenderersEvent;
 import net.neoforged.neoforge.client.event.TextureAtlasStitchedEvent;
 import org.kylepitcock.legacyconnector.core.LegacyMods;
