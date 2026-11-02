@@ -675,7 +675,7 @@ public final class ItemBridge {
         if (item == null) return net.minecraft.world.item.ItemStack.EMPTY;
         if (item == discovering) {
             var probe = new net.minecraft.world.item.ItemStack(Items.BARRIER, Math.max(count, 1));
-            probe.set(CompatComponents.legacyMeta(), meta);
+            CompatComponents.setLegacyMeta(probe, meta);
             return probe;
         }
         if (item.mcc$vanilla != null) {
@@ -692,13 +692,13 @@ public final class ItemBridge {
                 // The wildcard (OreDictionary.WILDCARD_VALUE) reads back as itself: the ore dictionary's own vanilla entries
                 // (treeLeaves = leaves:*) and mods' registrations (Thaumcraft's aspects for wool:*, red_flower:*) are keyed by it.
                 // It read back as 0, so only the first subtype (oak leaves, white wool) matched.
-                if (!stack.isEmpty()) stack.set(CompatComponents.legacyMeta(), meta);
+                if (!stack.isEmpty()) CompatComponents.setLegacyMeta(stack, meta);
             } else if (stack.isDamageableItem() && meta > 0) {
                 stack.setDamageValue(meta);
             } else if (!stack.isDamageableItem() && meta > 0) {
                 // A metadata value the flattening has no item for (log2 with 2, 3) still reads back as it was given.
                 Object[] reverse = vanillaReverse(modern);
-                if (reverse == null || !Integer.valueOf(meta).equals(reverse[1])) stack.set(CompatComponents.legacyMeta(), meta);
+                if (reverse == null || !Integer.valueOf(meta).equals(reverse[1])) CompatComponents.setLegacyMeta(stack, meta);
             }
             return stack;
         }
@@ -709,19 +709,19 @@ public final class ItemBridge {
         if (item.mcc$variants.isEmpty()) {
             LOG.debug("ItemStack created for unregistered legacy item {}", item);
             var probe = new net.minecraft.world.item.ItemStack(Items.BARRIER, Math.max(count, 1));
-            probe.set(CompatComponents.legacyMeta(), meta);
+            CompatComponents.setLegacyMeta(probe, meta);
             return probe;
         }
         if (item.isDamageable()) {
             var stack = new net.minecraft.world.item.ItemStack(item.mcc$variants.get(0), count);
-            if (meta == Short.MAX_VALUE) stack.set(CompatComponents.legacyMeta(), meta);
+            if (meta == Short.MAX_VALUE) CompatComponents.setLegacyMeta(stack, meta);
             else if (meta > 0) stack.setDamageValue(meta);
             return stack;
         }
         net.minecraft.world.item.Item variant = item.mcc$variants.get(meta);
         if (variant != null) return new net.minecraft.world.item.ItemStack(variant, count);
         var stack = new net.minecraft.world.item.ItemStack(item.mcc$variants.values().iterator().next(), count);
-        stack.set(CompatComponents.legacyMeta(), meta);
+        CompatComponents.setLegacyMeta(stack, meta);
         return stack;
     }
 
@@ -820,7 +820,7 @@ public final class ItemBridge {
     }
 
     public static int legacyDamage(Item item, net.minecraft.world.item.ItemStack stack) {
-        Integer explicit = stack.get(CompatComponents.legacyMeta());
+        Integer explicit = CompatComponents.getLegacyMeta(stack);
         if (explicit != null) return explicit;
         if (item == null) return 0;
         if (stack.getItem() instanceof net.minecraft.world.item.MapItem) {
@@ -847,36 +847,36 @@ public final class ItemBridge {
         if (stack.is(Items.BARRIER) && item != discovering && !item.mcc$variants.isEmpty()) {
             // A stack made before the item was registered (a crop's seed prototype, built while the mod initialises) was a
             // placeholder: it becomes the real item once the item has its modern counterparts (Witchery's crops dropped barriers).
-            Integer pm = stack.get(CompatComponents.legacyMeta());
+            Integer pm = CompatComponents.getLegacyMeta(stack);
             net.minecraft.world.item.ItemStack real = toModern(item, stack.getCount(), pm == null ? 0 : pm);
             if (real.is(Items.BARRIER) || real.isEmpty()) return stack;
             net.minecraft.world.item.ItemStack moved = stack.transmuteCopy(real.getItem(), stack.getCount());
-            Integer rm = real.get(CompatComponents.legacyMeta());
-            if (rm != null) moved.set(CompatComponents.legacyMeta(), rm);
-            else moved.remove(CompatComponents.legacyMeta());
+            Integer rm = CompatComponents.getLegacyMeta(real);
+            if (rm != null) CompatComponents.setLegacyMeta(moved, rm);
+            else CompatComponents.clearLegacyMeta(moved);
             return moved;
         }
         if (!(stack.getItem() instanceof LegacyItemHolder)) return stack;
-        Integer meta = stack.get(CompatComponents.legacyMeta());
+        Integer meta = CompatComponents.getLegacyMeta(stack);
         if (meta == null) return stack;
         net.minecraft.world.item.Item variant = item.mcc$variants.get(meta);
         if (variant == null || variant == stack.getItem()) return stack;
         net.minecraft.world.item.ItemStack moved = stack.transmuteCopy(variant, stack.getCount());
-        moved.remove(CompatComponents.legacyMeta());
+        CompatComponents.clearLegacyMeta(moved);
         return moved;
     }
 
     public static net.minecraft.world.item.ItemStack withLegacyDamage(Item item, net.minecraft.world.item.ItemStack stack, int damage) {
-        if (stack.getItem() instanceof net.minecraft.world.item.MapItem && stack.get(CompatComponents.legacyMeta()) == null) {
+        if (stack.getItem() instanceof net.minecraft.world.item.MapItem && CompatComponents.getLegacyMeta(stack) == null) {
             stack.set(net.minecraft.core.component.DataComponents.MAP_ID, new net.minecraft.world.level.saveddata.maps.MapId(Math.max(0, damage)));
             return stack;
         }
         if (stack.isDamageableItem()) {
             if (damage == Short.MAX_VALUE) {
-                stack.set(CompatComponents.legacyMeta(), damage);
+                CompatComponents.setLegacyMeta(stack, damage);
                 return stack;
             }
-            stack.remove(CompatComponents.legacyMeta()); // no longer the wildcard
+            CompatComponents.clearLegacyMeta(stack); // no longer the wildcard
             stack.setDamageValue(Math.max(0, damage));
             return stack;
         }
@@ -887,15 +887,15 @@ public final class ItemBridge {
             // Same modern item (an item without subtypes keeps its damage as the meta component): change the stack in place, so
             // a view of a slot's stack changes the slot. Witchery's taglock kit becomes "full" with setItemDamage(1) on the held
             // stack; a copy left the slot's kit empty and the Rite of Transposition never found a bound taglock.
-            Integer meta = replacement.get(CompatComponents.legacyMeta());
-            if (meta != null) stack.set(CompatComponents.legacyMeta(), meta);
-            else stack.remove(CompatComponents.legacyMeta());
+            Integer meta = CompatComponents.getLegacyMeta(replacement);
+            if (meta != null) CompatComponents.setLegacyMeta(stack, meta);
+            else CompatComponents.clearLegacyMeta(stack);
             return stack;
         }
         net.minecraft.world.item.ItemStack moved = stack.transmuteCopy(replacement.getItem(), stack.getCount());
-        Integer meta = replacement.get(CompatComponents.legacyMeta());
-        if (meta != null) moved.set(CompatComponents.legacyMeta(), meta);
-        else moved.remove(CompatComponents.legacyMeta());
+        Integer meta = CompatComponents.getLegacyMeta(replacement);
+        if (meta != null) CompatComponents.setLegacyMeta(moved, meta);
+        else CompatComponents.clearLegacyMeta(moved);
         return moved;
     }
 
