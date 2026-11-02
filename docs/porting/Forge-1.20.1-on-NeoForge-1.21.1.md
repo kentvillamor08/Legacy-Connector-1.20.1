@@ -36,6 +36,23 @@ Its published dependency list includes Palladium, GeckoLib, KubeJS, Rhino, Archi
 
 Palladium is expected to be a major part of this pilot because its currently listed game-version support is 1.20.1.
 
+## Alien Evolution dependency profile
+
+The current published Alien Evolution listing identifies these required dependencies: Palladium, GeckoLib, KubeJS, Rhino, Architectury API and Pehkui.
+
+| Dependency | 1.21.1 NeoForge availability | Pilot handling |
+|---|---|---|
+| Palladium | The project listing is still on Minecraft 1.20.1; its NeoForge listing refers to that game version, not 1.21.1. | Treat as a core 1.20.1 compatibility target alongside Alien Evolution. |
+| GeckoLib | A 1.21.1 NeoForge release is listed. | Prefer the native 1.21.1 release. |
+| KubeJS | A 1.21.1 NeoForge release is listed. | Prefer the native 1.21.1 release. Confirm the exact required Rhino/other dependencies for the selected KubeJS file. |
+| Rhino | A 1.21.1 NeoForge release is listed. | Prefer the native 1.21.1 release. |
+| Architectury API | 1.21.x NeoForge support is listed. | Prefer a matching native 1.21.1 release. |
+| Pehkui | A 1.21.1 NeoForge release is listed. | Prefer the native 1.21.1 release. |
+
+This is a release-listing audit, not a successful runtime test. Pin exact file versions and check their dependency metadata when building the test pack. In particular, do not assume that a dependency's general project page means a particular file supports both the same Minecraft version and loader.
+
+Primary references: Alien Evolution's [Modrinth page](https://modrinth.com/mod/alienevo) and [CurseForge page](https://www.curseforge.com/minecraft/mc-mods/alienevo); dependency projects' Modrinth pages for [Palladium](https://modrinth.com/mod/threetag-palladium), [GeckoLib](https://modrinth.com/mod/geckolib), [KubeJS](https://modrinth.com/mod/kubejs), [Rhino](https://modrinth.com/mod/rhino), [Architectury API](https://modrinth.com/mod/architectury-api) and [Pehkui](https://modrinth.com/mod/pehkui).
+
 ## Technical milestones
 
 1. **Jar identification**
