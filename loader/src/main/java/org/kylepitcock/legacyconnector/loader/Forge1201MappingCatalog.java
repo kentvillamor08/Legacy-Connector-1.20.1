@@ -240,18 +240,20 @@ public final class Forge1201MappingCatalog {
     }
 
     /**
-     * Returns whether an internal name is a reviewed NeoForge relocation or an explicit
-     * replacement target type.
+     * Returns whether an internal name is in a reviewed NeoForge package relocation or is
+     * the target of an explicit Forge -> NeoForge type replacement.
      */
     public static boolean isNeoForgeRelocationTarget(String targetInternalName) {
         if (targetInternalName == null || targetInternalName.isBlank()) return false;
         return PACKAGE_MOVES.stream().anyMatch(move -> targetInternalName.startsWith(move.targetPrefix()))
-                || EXPLICIT_TYPE_REPLACEMENTS.containsValue(targetInternalName);
+                || (targetInternalName.startsWith("net/neoforged/")
+                        && EXPLICIT_TYPE_REPLACEMENTS.containsValue(targetInternalName));
     }
 
     public static boolean isReviewedTargetApiType(String targetInternalName) {
         if (targetInternalName == null || targetInternalName.isBlank()) return false;
         return isNeoForgeRelocationTarget(targetInternalName)
+                || EXPLICIT_TYPE_REPLACEMENTS.containsValue(targetInternalName)
                 || REVIEWED_TARGET_API_TYPES.contains(targetInternalName);
     }
 
