@@ -123,6 +123,21 @@ final class Forge1201SrgNameMappings {
                         })
                         .toList();
 
+        List<Forge1201ApiUsageAnalyzer.ApiFieldCallSite> normalizedFieldCallSites =
+                source.fieldCallSites().stream()
+                        .map(callSite -> {
+                            if (!isMinecraftOwner(callSite.targetOwner())
+                                    || !SRG_FIELD.matcher(callSite.targetName()).matches()) {
+                                return callSite;
+                            }
+                            String mapped = fields.get(callSite.targetName());
+                            return mapped == null ? callSite : new Forge1201ApiUsageAnalyzer.ApiFieldCallSite(
+                                    callSite.callerClass(), callSite.callerMethod(), callSite.callerDescriptor(),
+                                    callSite.targetOwner(), mapped, callSite.targetDescriptor(),
+                                    callSite.opcode(), callSite.count());
+                        })
+                        .toList();
+
         Forge1201ApiUsageAnalyzer.Analysis normalized = new Forge1201ApiUsageAnalyzer.Analysis(
                 source.metadata(),
                 source.classCount(),
@@ -132,6 +147,7 @@ final class Forge1201SrgNameMappings {
                 source.packageReferences(),
                 source.referencedApiClasses(),
                 normalizedCallSites,
+                normalizedFieldCallSites,
                 normalizedMethods,
                 normalizedFields);
 
