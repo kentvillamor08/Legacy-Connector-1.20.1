@@ -35,6 +35,7 @@ public final class Forge1201RegistryAdapter {
     private static final String DEFERRED_HOLDER_DESC = "L" + DEFERRED_HOLDER + ";";
     private static final String SUPPLIER_DESC = "Ljava/util/function/Supplier;";
     private static final String RESOURCE_LOCATION_DESC = "Lnet/minecraft/resources/ResourceLocation;";
+    private static final String RESOURCE_KEY_DESC = "Lnet/minecraft/resources/ResourceKey;";
     private static final String OBJECT_DESC = "Ljava/lang/Object;";
     private static final String STRING_DESC = "Ljava/lang/String;";
 
@@ -51,6 +52,10 @@ public final class Forge1201RegistryAdapter {
     private static final String REGISTRY_GET_KEY_DESC = "(" + OBJECT_DESC + ")" + RESOURCE_LOCATION_DESC;
     private static final String REGISTRY_GET_VALUE_SOURCE_DESC = "(" + RESOURCE_LOCATION_DESC + ")" + OBJECT_DESC;
     private static final String REGISTRY_GET_VALUE_TARGET_NAME = "get";
+    private static final String REGISTRY_GET_RESOURCE_KEY_SOURCE_NAME = "m_6246_";
+    private static final String REGISTRY_GET_RESOURCE_KEY_TARGET_NAME = "get";
+    private static final String REGISTRY_GET_RESOURCE_KEY_SOURCE_DESC =
+            "(" + RESOURCE_KEY_DESC + ")" + OBJECT_DESC;
 
     private Forge1201RegistryAdapter() {}
 
@@ -59,9 +64,10 @@ public final class Forge1201RegistryAdapter {
             int deferredRegisterCreateCalls,
             int deferredRegisterRegisterCalls,
             int builtInRegistryFieldReads,
-            int registryLookupCalls) {
+            int registryLookupCalls,
+            int registryResourceKeyLookupCalls) {
         public static Stats empty() {
-            return new Stats(0, 0, 0, 0, 0);
+            return new Stats(0, 0, 0, 0, 0, 0);
         }
 
         public Stats plus(Stats other) {
@@ -71,7 +77,8 @@ public final class Forge1201RegistryAdapter {
                     deferredRegisterCreateCalls + other.deferredRegisterCreateCalls,
                     deferredRegisterRegisterCalls + other.deferredRegisterRegisterCalls,
                     builtInRegistryFieldReads + other.builtInRegistryFieldReads,
-                    registryLookupCalls + other.registryLookupCalls);
+                    registryLookupCalls + other.registryLookupCalls,
+                    registryResourceKeyLookupCalls + other.registryResourceKeyLookupCalls);
         }
     }
 
@@ -83,6 +90,7 @@ public final class Forge1201RegistryAdapter {
         int registerEntries = 0;
         int builtInFields = 0;
         int registryLookups = 0;
+        int registryResourceKeyLookups = 0;
 
         for (MethodNode method : classNode.methods) {
             // Replacing an invocation requires a new ASM node because instruction opcodes are immutable.
@@ -148,11 +156,23 @@ public final class Forge1201RegistryAdapter {
                     call.name = REGISTRY_GET_VALUE_TARGET_NAME;
                     call.itf = true;
                     registryLookups++;
+                    continue;
+                }
+
+                // This 1.20.1 Registry#get(ResourceKey) call carries its SRG method name.
+                // NeoForge 21.1.258 exposes the same exact descriptor as get(ResourceKey).
+                if (call.owner.equals(REGISTRY)
+                        && call.getOpcode() == Opcodes.INVOKEINTERFACE
+                        && call.name.equals(REGISTRY_GET_RESOURCE_KEY_SOURCE_NAME)
+                        && call.desc.equals(REGISTRY_GET_RESOURCE_KEY_SOURCE_DESC)) {
+                    call.name = REGISTRY_GET_RESOURCE_KEY_TARGET_NAME;
+                    registryResourceKeyLookups++;
                 }
             }
         }
 
-        return new Stats(holderGets, registerCreates, registerEntries, builtInFields, registryLookups);
+        return new Stats(holderGets, registerCreates, registerEntries, builtInFields,
+                registryLookups, registryResourceKeyLookups);
     }
 
     private static RegistryField registryField(String sourceName) {
@@ -160,6 +180,8 @@ public final class Forge1201RegistryAdapter {
             case "ITEMS" -> new RegistryField("ITEM", "L" + DEFAULTED_REGISTRY + ";");
             case "BLOCKS" -> new RegistryField("BLOCK", "L" + DEFAULTED_REGISTRY + ";");
             case "SOUND_EVENTS" -> new RegistryField("SOUND_EVENT", REGISTRY_DESC);
+            case "BLOCK_ENTITY_TYPES" -> new RegistryField("BLOCK_ENTITY_TYPE", REGISTRY_DESC);
+            case "ENTITY_TYPES" -> new RegistryField("ENTITY_TYPE", "L" + DEFAULTED_REGISTRY + ";");
             default -> null;
         };
     }
