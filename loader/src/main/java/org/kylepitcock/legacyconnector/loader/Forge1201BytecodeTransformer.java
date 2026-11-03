@@ -22,6 +22,7 @@ import java.util.zip.ZipFile;
 import java.util.zip.ZipOutputStream;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.commons.ClassRemapper;
 import org.objectweb.asm.commons.Remapper;
 
@@ -52,7 +53,10 @@ public final class Forge1201BytecodeTransformer {
             int signaturesRemoved,
             List<String> relocatedTypes,
             List<String> manualAdapterTypes,
-            List<String> unmappedForgeApiTypes) {
+            List<String> unmappedForgeApiTypes,
+            String adapterProfileId,
+            int adapterRulesApplied,
+            int adapterOperationsApplied) {
         public Result {
             relocatedTypes = List.copyOf(relocatedTypes);
             manualAdapterTypes = List.copyOf(manualAdapterTypes);
@@ -61,6 +65,14 @@ public final class Forge1201BytecodeTransformer {
     }
 
     public static Result transform(Path input, Path output) throws IOException {
+        return transform(input, output, null);
+    }
+
+    /**
+     * Runs the package relocation pass with an optional external, fail-fast call-site adapter profile.
+     * The profile is applied to original Forge-namespaced class files before package relocation.
+     */
+    public static Result transform(Path input, Path output, Path adapterProfilePath) throws IOException {
         if (input == null || output == null) {
             throw new IllegalArgumentException("Input and output paths are required");
         }
@@ -89,6 +101,11 @@ public final class Forge1201BytecodeTransformer {
                         "Input still contains Forge mods.toml; run the metadata stage first");
             }
         }
+
+        Forge1201CallSiteAdapter.Profile adapterProfile = adapterProfilePath == null
+                ? null : Forge1201CallSiteAdapter.load(adapterProfilePath);
+        Forge1201CallSiteAdapter.Session adapterSession = adapterProfile == null
+                ? null : new Forge1201CallSiteAdapter.Session(adapterProfile);
 
         String inputDigest = sha256(source);
         String temporaryPrefix = destination.getFileName().toString();
@@ -149,7 +166,14 @@ public final class Forge1201BytecodeTransformer {
                         byte[] originalClassBytes = contents;
                         ClassWriter writer = new ClassWriter(0);
                         try {
-                            reader.accept(new ClassRemapper(writer, remapper), 0);
+                            if (adapterSession == null) {
+                                reader.accept(new ClassRemapper(writer, remapper), 0);
+                            } else {
+                                ClassNode classNode = new ClassNode();
+                                reader.accept(classNode, 0);
+                                adapterSession.apply(classNode);
+                                classNode.accept(new ClassRemapper(writer, remapper));
+                            }
                         } catch (RuntimeException malformed) {
                             throw new IOException("Could not remap class entry " + sourceName, malformed);
                         }
@@ -178,6 +202,10 @@ public final class Forge1201BytecodeTransformer {
                 }
             }
 
+            Forge1201CallSiteAdapter.Stats adapterStats = adapterSession == null
+                    ? new Forge1201CallSiteAdapter.Stats(null, 0, 0)
+                    : adapterSession.finish();
+
             moveAtomically(temporary, destination);
             return new Result(
                     source,
@@ -191,7 +219,10 @@ public final class Forge1201BytecodeTransformer {
                     signaturesRemoved,
                     List.copyOf(remapper.relocatedTypes),
                     List.copyOf(remapper.manualAdapterTypes),
-                    List.copyOf(remapper.unmappedForgeApiTypes));
+                    List.copyOf(remapper.unmappedForgeApiTypes),
+                    adapterStats.profileId(),
+                    adapterStats.rulesApplied(),
+                    adapterStats.operationsApplied());
         } catch (IOException | RuntimeException failure) {
             Files.deleteIfExists(temporary);
             throw failure;
