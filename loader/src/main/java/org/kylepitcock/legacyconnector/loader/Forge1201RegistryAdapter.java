@@ -85,7 +85,8 @@ public final class Forge1201RegistryAdapter {
         int registryLookups = 0;
 
         for (MethodNode method : classNode.methods) {
-            for (AbstractInsnNode instruction : method.instructions) {
+            // Replacing an invocation requires a new ASM node because instruction opcodes are immutable.
+            for (AbstractInsnNode instruction : method.instructions.toArray()) {
                 if (instruction instanceof FieldInsnNode field
                         && field.getOpcode() == Opcodes.GETSTATIC
                         && field.owner.equals(FORGE_REGISTRIES)) {
@@ -105,9 +106,8 @@ public final class Forge1201RegistryAdapter {
                         && call.getOpcode() == Opcodes.INVOKEVIRTUAL
                         && call.name.equals("get")
                         && call.desc.equals(REGISTRY_OBJECT_GET_DESC)) {
-                    call.owner = SUPPLIER;
-                    call.setOpcode(Opcodes.INVOKEINTERFACE);
-                    call.itf = true;
+                    method.instructions.set(call, new MethodInsnNode(
+                            Opcodes.INVOKEINTERFACE, SUPPLIER, "get", REGISTRY_OBJECT_GET_DESC, true));
                     holderGets++;
                     continue;
                 }
