@@ -177,7 +177,7 @@ A separate modern path has now been added without changing the pre-1.20 `LegacyJ
 - `.gradlew.bat :loader:transformForge1201` completed with **BUILD SUCCESSFUL** and created the preliminary private output JAR.
 - Input SHA-256: `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c`.
 - Output SHA-256: `85ed9c007e5355f8a36834ba920a9744bba3feaba393ed1448bf1b155983a4db`.
-- 278 classes scanned; 58 class byte arrays changed; 0 class-entry paths relocated; 182 non-class resources copied; 0 signature entries removed.
+- 278 classes scanned; 58 class-file byte arrays differ after ASM serialization; 0 class-entry paths relocated; 182 non-class resources copied; 0 signature entries removed.
 - 77 reviewed API types were package-relocated; 44 semantic-adapter types were deliberately left unchanged; 0 unreviewed Forge API types were found.
 - The zero class-entry path relocations are expected for this mod: its own declared classes live under `com/scout/symbiote`; the 77 relocations are referenced Forge API types/descriptors inside the mod's bytecode, not 77 Symbiote-owned class definitions.
 - Zero signatures removed means the source contained no matching top-level signature files; it is not a transformation failure.
@@ -218,3 +218,25 @@ The user ran both required commands successfully on 2026-11-03. The generated fi
 The zero class-entry path relocations are expected: the mod's own class definitions are in `com/scout/symbiote`; package relocation occurred inside the mod's API references and descriptors. Zero signature removals simply means the source contained no matching top-level signature entries. The compiler printed a deprecation note, but the loader test task completed successfully.
 
 **Next validation step:** upload the output JAR to the private testbench (do not put it in the active mods folder). Then add a read-only post-transform verifier that scans the resulting class files and checks relocated NeoForge class/member references against the actual 21.1.258 target compile classpath. Keep manual adapters and remaining Minecraft 1.20.1 member changes as separate reports. The source and output digests must be retained so the exact tested artifact is unambiguous.
+
+
+## Read-only verification of the translated JAR
+
+A second inspection path has been added for the output of `:loader:transformForge1201`:
+
+- `Forge1201ApiUsageAnalyzer.analyzeTranslated(Path)` accepts the translated artifact's `META-INF/neoforge.mods.toml` and inventories the relocated `net/neoforged` symbols plus any Forge API types that remain unchanged.
+- `Forge1201TargetApiVerifier.verifyTranslated(...)` checks the relocated NeoForge classes and exact method/field descriptors against the target compile classpath. It also marks descriptors that still contain a manual-adapter type.
+- `Forge1201TranslatedJarVerifier` prints a post-transform report, including target classes/members found or missing and the remaining Forge API types categorized as manual or unreviewed.
+- The root task `:verifyForge1201TranslatedJar` provides the configured NeoForge 21.1.258 target classpath. It does not load or execute the transformed mod.
+- New synthetic tests cover translated metadata recognition, NeoForge annotation/member inventory, target namespace recognition, and target member verification using already-relocated owners.
+
+**Validation status:** this translated-JAR verifier and its new tests were just committed after the previous successful user run. They have not yet been tested by the user. Run:
+
+```powershell
+.\gradlew.bat :loader:clean :loader:test --no-daemon
+
+.\gradlew.bat :verifyForge1201TranslatedJar `
+  -Pforge1201TranslatedJar="C:\Users\Administrator\legacy-connector-testbench\symbiote-1.1.3-neoforge-1.21.1-preliminary.jar"
+```
+
+The first command validates the additional analysis/verifier test coverage. The second reads the exact preliminary JAR already generated locally and checks its relocated references against the configured target game compile classpath. This structural check still does not verify Minecraft-version semantic changes or mod startup/gameplay behavior.
