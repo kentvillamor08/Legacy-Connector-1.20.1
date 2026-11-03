@@ -252,7 +252,7 @@ final class Forge1201CallSiteAdapterTest {
                           }
                         ],
                         "expectedMatches": 1,
-                        "minimumMaxStack": 3,
+                        "minimumMaxStack": 5,
                         "minimumMaxLocals": 4
                       }
                     ]
@@ -281,7 +281,7 @@ final class Forge1201CallSiteAdapterTest {
         assertTrue(countVars(method, Opcodes.FLOAD, 3) >= 1);
         assertTrue(countVars(method, Opcodes.FSTORE, 3) >= 2);
         assertEquals(4, method.maxLocals);
-        assertTrue(method.maxStack >= 3);
+        assertTrue(method.maxStack >= 5);
 
         List<String> calls = new ArrayList<>();
         for (AbstractInsnNode instruction : method.instructions) {
