@@ -205,6 +205,8 @@ final class Forge1201RegistryAdapterTest {
         source.superName = "java/lang/Object";
         MethodNode method = new MethodNode(
                 Opcodes.ASM9, Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "create", "()V", null, null);
+        method.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.ACONST_NULL));
+        method.instructions.add(new org.objectweb.asm.tree.LdcInsnNode("symbiote"));
         method.instructions.add(new MethodInsnNode(
                 Opcodes.INVOKESTATIC, sourceOwner, "create", resourceKeyDescriptor, false));
         method.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.POP));
