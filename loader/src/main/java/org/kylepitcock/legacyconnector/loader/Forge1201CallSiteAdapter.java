@@ -53,9 +53,8 @@ public final class Forge1201CallSiteAdapter {
     private static final String OP_CHECKCAST_TYPE = "checkcast-type";
     private static final String OP_INSTRUCTION_SEQUENCE = "instruction-sequence";
 
-    private static final String FORGE_DIST = "net/minecraftforge/api/distmarker/Dist";
-    private static final String FORGE_DIST_DESCRIPTOR = "L" + FORGE_DIST + ";";
-    private static final String FORGE_FML_ENVIRONMENT = "net/minecraftforge/fml/loading/FMLEnvironment";
+    private static final String NEOFORGE_DIST_DESCRIPTOR = "Lnet/neoforged/api/distmarker/Dist;";
+    private static final String NEOFORGE_FML_ENVIRONMENT = "net/neoforged/fml/loading/FMLEnvironment";
 
     private Forge1201CallSiteAdapter() {}
 
@@ -314,7 +313,7 @@ public final class Forge1201CallSiteAdapter {
 
     /**
      * Replaces DistExecutor's static owner with one private helper that keeps the Supplier lazy
-     * and checks FMLEnvironment.dist before obtaining and running its Runnable.
+     * and checks FMLEnvironment.getDist() before obtaining and running its Runnable.
      */
     private static void rewriteLazyDistGate(
             ClassNode classNode,
@@ -363,11 +362,12 @@ public final class Forge1201CallSiteAdapter {
                 null,
                 null);
         LabelNode skip = new LabelNode();
-        helper.instructions.add(new FieldInsnNode(
-                Opcodes.GETSTATIC,
-                FORGE_FML_ENVIRONMENT,
-                "dist",
-                FORGE_DIST_DESCRIPTOR));
+        helper.instructions.add(new MethodInsnNode(
+                Opcodes.INVOKESTATIC,
+                NEOFORGE_FML_ENVIRONMENT,
+                "getDist",
+                "()" + NEOFORGE_DIST_DESCRIPTOR,
+                false));
         helper.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
         helper.instructions.add(new org.objectweb.asm.tree.JumpInsnNode(Opcodes.IF_ACMPNE, skip));
         helper.instructions.add(new VarInsnNode(Opcodes.ALOAD, 1));
