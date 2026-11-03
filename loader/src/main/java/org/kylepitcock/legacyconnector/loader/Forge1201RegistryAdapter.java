@@ -72,6 +72,8 @@ public final class Forge1201RegistryAdapter {
             "(ILnet/minecraft/world/entity/player/Inventory;" + FRIENDLY_BYTE_BUF_DESC + ")";
     private static final String MENU_FACTORY_INSTANTIATED_TARGET_PREFIX =
             "(ILnet/minecraft/world/entity/player/Inventory;" + REGISTRY_FRIENDLY_BYTE_BUF_DESC + ")";
+    private static final String MENU_FACTORY_IMPLEMENTATION_DESC =
+            "(ILnet/minecraft/world/entity/player/Inventory;" + FRIENDLY_BYTE_BUF_DESC + ")V";
     private static final String LAMBDA_METAFACTORY_OWNER = "java/lang/invoke/LambdaMetafactory";
     private Forge1201RegistryAdapter() {}
 
@@ -217,6 +219,8 @@ public final class Forge1201RegistryAdapter {
                 || !samMethodType.getDescriptor().equals(MENU_FACTORY_SAM_SOURCE_DESC)
                 || !(lambda.bsmArgs[1] instanceof org.objectweb.asm.Handle implementation)
                 || implementation.getTag() != Opcodes.H_NEWINVOKESPECIAL
+                || !implementation.getName().equals("<init>")
+                || !implementation.getDesc().equals(MENU_FACTORY_IMPLEMENTATION_DESC)
                 || !(lambda.bsmArgs[2] instanceof Type instantiatedMethodType)
                 || instantiatedMethodType.getSort() != Type.METHOD
                 || !instantiatedMethodType.getDescriptor().startsWith(MENU_FACTORY_INSTANTIATED_SOURCE_PREFIX)) {
