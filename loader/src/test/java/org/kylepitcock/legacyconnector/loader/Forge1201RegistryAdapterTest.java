@@ -181,6 +181,7 @@ final class Forge1201RegistryAdapterTest {
                 Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "registerMenu", "()V", null, null);
         method.instructions.add(new FieldInsnNode(Opcodes.GETSTATIC,
                 "net/minecraftforge/registries/ForgeRegistries", "MENU_TYPES", FORGE_REGISTRY_DESC));
+        method.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.POP));
         method.instructions.add(new org.objectweb.asm.tree.InvokeDynamicInsnNode(
                 "create",
                 "()L" + oldContainerFactory + ";",
