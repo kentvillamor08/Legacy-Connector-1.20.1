@@ -290,6 +290,17 @@ public final class Forge1201MappingCatalog {
                 || REVIEWED_TARGET_API_TYPES.contains(targetInternalName);
     }
 
+    /**
+     * Identifies all vanilla Minecraft and Mojang rendering/math API owners for broad
+     * source-to-target member verification.
+     */
+    public static boolean isMinecraftApiType(String internalName) {
+        if (internalName == null || internalName.isBlank()) return false;
+        return internalName.startsWith("net/minecraft/")
+                || internalName.startsWith("com/mojang/blaze3d/")
+                || internalName.startsWith("com/mojang/math/");
+    }
+
     public static String manualAdapterReason(String sourceInternalName) {
         return MANUAL_ADAPTERS.get(sourceInternalName);
     }
