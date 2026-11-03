@@ -420,6 +420,28 @@ tasks.named('compileJava', JavaCompile) {
 }
 
 
+// Verify the actual output of :loader:transformForge1201 against the target compile classpath.
+tasks.register('verifyForge1201TranslatedJar', JavaExec) {
+    group = 'verification'
+    description = 'Checks relocated NeoForge API references in a preliminary translated JAR against the configured target compile classpath.'
+    dependsOn project(':loader').tasks.named('classes')
+    classpath = (
+            project(':loader').sourceSets.main.runtimeClasspath
+                    + project(':loader').sourceSets.main.compileClasspath
+                    + sourceSets.main.compileClasspath
+    )
+    mainClass = 'org.kylepitcock.legacyconnector.loader.Forge1201TranslatedJarVerifier'
+    systemProperty 'legacyconnector.targetNeoForgeVersion', project.neo_version
+
+    doFirst {
+        def jarPath = project.findProperty('forge1201TranslatedJar')
+        if (jarPath == null || jarPath.toString().isBlank()) {
+            throw new GradleException('Supply -Pforge1201TranslatedJar=<path-to-preliminary-translated-jar>')
+        }
+        setArgs([jarPath.toString()])
+    }
+}
+
 // Verify Forge 1.20.1 package-relocation candidates against the actual target game's compile classpath.
 // The loader module itself remains isolated from Minecraft/NeoForge classes; only this root development task
 // supplies the target compile classpath to the read-only ASM verifier.
