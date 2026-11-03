@@ -147,6 +147,7 @@ public final class Forge1201BytecodeTransformer {
                         String mappedInternalName = remapper.map(originalInternalName);
                         outputName = remapClassEntryName(sourceName, originalInternalName, mappedInternalName);
 
+                        byte[] originalClassBytes = contents;
                         ClassWriter writer = new ClassWriter(0);
                         try {
                             reader.accept(new ClassRemapper(writer, remapper), 0);
@@ -154,7 +155,7 @@ public final class Forge1201BytecodeTransformer {
                             throw new IOException("Could not remap class entry " + sourceName, malformed);
                         }
                         contents = writer.toByteArray();
-                        if (!Arrays.equals(contents, readClassBytesAgain(zip, entry))) {
+                        if (!Arrays.equals(contents, originalClassBytes)) {
                             classesChanged++;
                         }
                         if (!outputName.equals(sourceName)) classEntriesRelocated++;
@@ -195,12 +196,6 @@ public final class Forge1201BytecodeTransformer {
         } catch (IOException | RuntimeException failure) {
             Files.deleteIfExists(temporary);
             throw failure;
-        }
-    }
-
-    private static byte[] readClassBytesAgain(ZipFile zip, ZipEntry entry) throws IOException {
-        try (InputStream in = zip.getInputStream(entry)) {
-            return in.readAllBytes();
         }
     }
 
