@@ -37,7 +37,15 @@ final class Forge1201SrgNameMappingsTest {
                 null,
                 Map.of(),
                 List.of("net/minecraft/network/FriendlyByteBuf"),
-                List.of(),
+                List.of(new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                        "sample/NetClient", "writeSample", "()V",
+                        "net/minecraft/network/FriendlyByteBuf", "m_130070_",
+                        "(Ljava/lang/String;)Lnet/minecraft/network/FriendlyByteBuf;",
+                        org.objectweb.asm.Opcodes.INVOKEVIRTUAL, 2)),
+                List.of(new Forge1201ApiUsageAnalyzer.ApiFieldCallSite(
+                        "sample/NetClient", "writeSample", "()V",
+                        "net/minecraft/network/FriendlyByteBuf", "f_345678_", "I",
+                        org.objectweb.asm.Opcodes.GETSTATIC, 1)),
                 List.of(
                         new Forge1201ApiUsageAnalyzer.ApiMemberReference(
                                 "net/minecraft/network/FriendlyByteBuf",
@@ -66,6 +74,8 @@ final class Forge1201SrgNameMappingsTest {
         assertEquals("readSomething", result.analysis().methodReferences().get(1).name());
         assertEquals("m_999999_", result.analysis().methodReferences().get(2).name());
         assertEquals("FIELD_SAMPLE", result.analysis().fieldReferences().get(0).name());
+        assertEquals("writeUtf", result.analysis().methodCallSites().get(0).targetName());
+        assertEquals("FIELD_SAMPLE", result.analysis().fieldCallSites().get(0).targetName());
 
         assertEquals(2, result.methodMappings().size());
         assertEquals(1, result.fieldMappings().size());
@@ -89,7 +99,7 @@ final class Forge1201SrgNameMappingsTest {
                 Forge1201SrgNameMappings.load(methodsCsv, fieldsCsv);
 
         Forge1201ApiUsageAnalyzer.Analysis source = new Forge1201ApiUsageAnalyzer.Analysis(
-                null, 1, List.of(), List.of(), null, Map.of(), List.of(), List.of(),
+                null, 1, List.of(), List.of(), null, Map.of(), List.of(), List.of(), List.of(),
                 List.of(
                         new Forge1201ApiUsageAnalyzer.ApiMemberReference(
                                 "net/minecraft/network/FriendlyByteBuf", "writeUtf", "()V", 1),
@@ -132,6 +142,7 @@ final class Forge1201SrgNameMappingsTest {
                 null,
                 Map.of(),
                 List.of(owner),
+                List.of(),
                 List.of(),
                 List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
                         owner, "m_130070_", descriptor, 1)),
