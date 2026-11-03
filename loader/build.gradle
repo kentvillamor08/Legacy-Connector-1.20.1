@@ -19,6 +19,8 @@ configurations {
     forge1710
     mcp1710
     mcp1122
+    // Verification-only source mappings. This is never part of the loader/runtime artifact.
+    forge1201SrgMappings
 }
 
 dependencies {
@@ -37,6 +39,8 @@ dependencies {
     forge1710 "net.minecraftforge:forge:${forge_1_7_10}:userdev@jar"
     mcp1710 "de.oceanlabs.mcp:mcp_stable:${mcp_1_7_10}@zip"
     mcp1122 "de.oceanlabs.mcp:mcp_stable:${mcp_1_12_2}@zip"
+    // Forge 1.20.1's exact SRG -> Mojang-named mapping set; resolved only by the audit task.
+    forge1201SrgMappings "de.oceanlabs.mcp:mcp_config:1.20.1-20230612.114412:srg2off@jar"
 
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
@@ -243,3 +247,23 @@ tasks.register('auditForge1201Mappings', JavaExec) {
     }
 }
 
+
+
+// Source namespace normalizer used only by the read-only Forge 1.20.1 -> NeoForge 1.21.1
+// translated-JAR verifier. The MCPConfig mapping artifact is kept in Gradle's cache and is
+// never copied into the distributable loader or runtime mod.
+def forge1201SrgMappingDir = layout.buildDirectory.dir('generated/forge1201/srg-mappings')
+tasks.register('extractForge1201SrgMappings', Sync) {
+    from({ zipTree(configurations.forge1201SrgMappings.singleFile) }) {
+        include 'methods.csv', 'fields.csv'
+    }
+    into forge1201SrgMappingDir
+    doLast {
+        ['methods.csv', 'fields.csv'].each { name ->
+            def mappingFile = forge1201SrgMappingDir.get().file(name).asFile
+            if (!mappingFile.isFile() || mappingFile.length() == 0) {
+                throw new GradleException("Forge 1.20.1 SRG mapping archive is missing ${name}")
+            }
+        }
+    }
+}
