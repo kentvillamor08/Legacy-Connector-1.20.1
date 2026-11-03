@@ -55,6 +55,7 @@ public final class Forge1201BytecodeTransformer {
             List<String> manualAdapterTypes,
             List<String> unmappedForgeApiTypes,
             Forge1201RegistryAdapter.Stats registryAdapters,
+            Forge1201MenuAdapter.Stats menuAdapters,
             String adapterProfileId,
             int adapterRulesApplied,
             int adapterOperationsApplied) {
@@ -120,6 +121,7 @@ public final class Forge1201BytecodeTransformer {
         int resourcesCopied = 0;
         int signaturesRemoved = 0;
         Forge1201RegistryAdapter.Stats registryAdapters = Forge1201RegistryAdapter.Stats.empty();
+        Forge1201MenuAdapter.Stats menuAdapters = Forge1201MenuAdapter.Stats.empty();
         Set<String> sourceEntries = new HashSet<>();
         Set<String> outputEntries = new HashSet<>();
 
@@ -171,6 +173,7 @@ public final class Forge1201BytecodeTransformer {
                             ClassNode classNode = new ClassNode();
                             reader.accept(classNode, 0);
                             if (adapterSession != null) adapterSession.apply(classNode);
+                            menuAdapters = menuAdapters.plus(Forge1201MenuAdapter.apply(classNode));
                             registryAdapters = registryAdapters.plus(Forge1201RegistryAdapter.apply(classNode));
                             classNode.accept(new ClassRemapper(writer, remapper));
                         } catch (RuntimeException malformed) {
@@ -220,6 +223,7 @@ public final class Forge1201BytecodeTransformer {
                     List.copyOf(remapper.manualAdapterTypes),
                     List.copyOf(remapper.unmappedForgeApiTypes),
                     registryAdapters,
+                    menuAdapters,
                     adapterStats.profileId(),
                     adapterStats.rulesApplied(),
                     adapterStats.operationsApplied());
