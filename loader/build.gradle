@@ -61,6 +61,7 @@ repositories {
             includeGroup 'de.oceanlabs.mcp'
             includeModule 'net.minecraftforge', 'forge'
             includeModule 'net.minecraftforge', 'installertools'
+            includeModule 'net.minecraftforge', 'srgutils'
         }
     }
 }
