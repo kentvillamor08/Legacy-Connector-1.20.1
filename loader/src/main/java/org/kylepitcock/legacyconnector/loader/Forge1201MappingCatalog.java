@@ -172,13 +172,32 @@ public final class Forge1201MappingCatalog {
      * These are included in target API verification even though they are not NeoForge package moves.
      */
     private static final Set<String> REVIEWED_TARGET_API_TYPES = Set.of(
+            // Registry and menu-opening migration surface.
             "net/minecraft/core/registries/BuiltInRegistries",
             "net/minecraft/core/Registry",
             "net/minecraft/core/DefaultedRegistry",
             "net/minecraft/server/level/ServerPlayer",
             "net/minecraft/world/MenuProvider",
             "net/minecraft/network/FriendlyByteBuf",
-            "net/minecraft/network/RegistryFriendlyByteBuf"
+            "net/minecraft/network/RegistryFriendlyByteBuf",
+
+            // Attribute/effect API migration surface. Minecraft 1.21.1 moved these
+            // public values and lookup parameters to Holder-based descriptors.
+            "net/minecraft/client/player/LocalPlayer",
+            "net/minecraft/world/entity/LivingEntity",
+            "net/minecraft/world/entity/player/Player",
+            "net/minecraft/world/entity/Mob",
+            "net/minecraft/world/entity/PathfinderMob",
+            "net/minecraft/world/entity/ai/attributes/Attribute",
+            "net/minecraft/world/entity/ai/attributes/AttributeInstance",
+            "net/minecraft/world/entity/ai/attributes/AttributeModifier",
+            "net/minecraft/world/entity/ai/attributes/AttributeModifier$Operation",
+            "net/minecraft/world/entity/ai/attributes/AttributeSupplier",
+            "net/minecraft/world/entity/ai/attributes/AttributeSupplier$Builder",
+            "net/minecraft/world/entity/ai/attributes/Attributes",
+            "net/minecraft/world/effect/MobEffect",
+            "net/minecraft/world/effect/MobEffectInstance",
+            "net/minecraft/world/effect/MobEffects"
     );
 
     private static final List<PackageMove> ORDERED_PACKAGE_MOVES = PACKAGE_MOVES.stream()
