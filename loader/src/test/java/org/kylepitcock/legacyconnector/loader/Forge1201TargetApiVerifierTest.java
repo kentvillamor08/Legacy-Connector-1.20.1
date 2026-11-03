@@ -50,6 +50,35 @@ final class Forge1201TargetApiVerifierTest {
     }
 
     @Test
+    void verifiesAlreadyRelocatedNeoForgeOwnerAndMemberReferences() throws Exception {
+        Map<String, byte[]> classes = Map.of(
+                TARGET_MOD, targetModClass("net/neoforged/fml/Base", false, true),
+                TARGET_BUS, targetInterface(TARGET_BUS),
+                "net/neoforged/fml/Base", targetBaseClass());
+
+        Forge1201TargetApiVerifier.Result result = verify(
+                analysis(
+                        List.of(TARGET_MOD, TARGET_BUS),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                TARGET_MOD, "register",
+                                "(Lnet/neoforged/bus/api/IEventBus;)V", 1)),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                TARGET_MOD, "BUS",
+                                "Lnet/neoforged/bus/api/IEventBus;", 1))),
+                classes);
+
+        assertEquals(2, result.candidateClassCount());
+        assertEquals(2, result.verifiedClassCount());
+        assertTrue(result.missingTargetClasses().isEmpty());
+        assertEquals(1, result.uniqueMethodReferences());
+        assertEquals(1, result.verifiedMethodReferences());
+        assertTrue(result.methodIssues().isEmpty());
+        assertEquals(1, result.uniqueFieldReferences());
+        assertEquals(1, result.verifiedFieldReferences());
+        assertTrue(result.fieldIssues().isEmpty());
+    }
+
+    @Test
     void reportsChangedOrMissingTargetMemberSignatures() throws Exception {
         Map<String, byte[]> classes = Map.of(
                 TARGET_MOD, targetModClass("java/lang/Object", false, true),
