@@ -6,7 +6,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,6 +47,9 @@ final class Forge1201SrgNameMappings {
         Map<String, String> result = new HashMap<>();
         try (BufferedReader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
             String header = reader.readLine();
+            if (header != null && header.startsWith("\uFEFF")) {
+                header = header.substring(1);
+            }
             if (header == null || !header.trim().equals("searge,name,side,desc")) {
                 throw new IOException("Unexpected " + kind + " mapping CSV header in " + path
                         + ": " + header);
