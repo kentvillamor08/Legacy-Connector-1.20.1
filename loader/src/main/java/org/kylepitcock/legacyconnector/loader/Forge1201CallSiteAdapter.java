@@ -509,7 +509,7 @@ public final class Forge1201CallSiteAdapter {
                 }
                 String rawValue = value.getAsString();
                 // Validate the supported constant type now, not only when the operation executes.
-                InstructionSpec spec = new InstructionSpec(kind, -1, -1, null, null, null,
+                InstructionSpec spec = new InstructionSpec(kind, Opcodes.LDC, -1, null, null, null,
                         null, valueType, rawValue);
                 constantValue(spec);
                 yield spec;
