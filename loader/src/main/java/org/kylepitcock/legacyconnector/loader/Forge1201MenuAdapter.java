@@ -36,7 +36,7 @@ public final class Forge1201MenuAdapter {
     private static final String LAMBDA_METAFACTORY_DESC =
             "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;"
                     + "Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;"
-                    + "Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;"
+                    + "Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;";
     private static final String OPEN_SCREEN_SOURCE_DESC =
             "(L" + SERVER_PLAYER + ";L" + MENU_PROVIDER + ";L" + CONSUMER + ";)V";
     private static final String OPEN_MENU_TARGET_DESC =
