@@ -41,8 +41,8 @@ public final class Forge1201ApiUsageAnalyzer {
     }
 
     /**
-     * A direct bytecode invocation from a mod-owned method to a Forge/optional API method.
-     * This preserves the caller method, unlike the global constant-pool member inventory.
+     * A direct bytecode invocation from a mod-owned method to a Minecraft, Forge, or optional API method.
+     * This preserves the caller method, unlike the global member inventory.
      */
     public record ApiMethodCallSite(
             String callerClass,
@@ -61,7 +61,33 @@ public final class Forge1201ApiUsageAnalyzer {
         }
     }
 
+    public record ApiFieldCallSite(
+            String callerClass,
+            String callerMethod,
+            String callerDescriptor,
+            String targetOwner,
+            String targetName,
+            String targetDescriptor,
+            int opcode,
+            int count) {
+        public String display() {
+            return targetOwner.replace('/', '.') + "#" + targetName + ":" + targetDescriptor
+                    + " <= " + callerClass.replace('/', '.') + "#" + callerMethod + callerDescriptor
+                    + " [" + opcodeName(opcode) + "]"
+                    + (count > 1 ? " (x" + count + ")" : "");
+        }
+    }
+
     private record CallSiteKey(
+            String callerClass,
+            String callerMethod,
+            String callerDescriptor,
+            String targetOwner,
+            String targetName,
+            String targetDescriptor,
+            int opcode) {}
+
+    private record FieldCallSiteKey(
             String callerClass,
             String callerMethod,
             String callerDescriptor,
@@ -79,6 +105,7 @@ public final class Forge1201ApiUsageAnalyzer {
             Map<String, Integer> packageReferences,
             List<String> referencedApiClasses,
             List<ApiMethodCallSite> methodCallSites,
+            List<ApiFieldCallSite> fieldCallSites,
             List<ApiMemberReference> methodReferences,
             List<ApiMemberReference> fieldReferences) {
 
@@ -88,6 +115,7 @@ public final class Forge1201ApiUsageAnalyzer {
             packageReferences = Map.copyOf(packageReferences);
             referencedApiClasses = List.copyOf(referencedApiClasses);
             methodCallSites = List.copyOf(methodCallSites);
+            fieldCallSites = List.copyOf(fieldCallSites);
             methodReferences = List.copyOf(methodReferences);
             fieldReferences = List.copyOf(fieldReferences);
         }
@@ -101,6 +129,7 @@ public final class Forge1201ApiUsageAnalyzer {
         private final Map<MemberKey, Integer> methods = new HashMap<>();
         private final Map<MemberKey, Integer> fields = new HashMap<>();
         private final Map<CallSiteKey, Integer> callSites = new HashMap<>();
+        private final Map<FieldCallSiteKey, Integer> fieldCallSites = new HashMap<>();
 
         private void recordClass(String internalName) {
             if (!isGameApi(internalName)) return;
@@ -140,11 +169,26 @@ public final class Forge1201ApiUsageAnalyzer {
                 String targetOwner,
                 String targetName,
                 String targetDescriptor) {
-            if (!isForgeOrOptionalApi(targetOwner)) return;
+            if (!isGameApi(targetOwner) && !isForgeOrOptionalApi(targetOwner)) return;
             CallSiteKey key = new CallSiteKey(
                     callerClass, callerMethod, callerDescriptor,
                     targetOwner, targetName, targetDescriptor, opcode);
             callSites.merge(key, 1, Integer::sum);
+        }
+
+        private void recordFieldCallSite(
+                String callerClass,
+                String callerMethod,
+                String callerDescriptor,
+                int opcode,
+                String targetOwner,
+                String targetName,
+                String targetDescriptor) {
+            if (!isGameApi(targetOwner) && !isForgeOrOptionalApi(targetOwner)) return;
+            FieldCallSiteKey key = new FieldCallSiteKey(
+                    callerClass, callerMethod, callerDescriptor,
+                    targetOwner, targetName, targetDescriptor, opcode);
+            fieldCallSites.merge(key, 1, Integer::sum);
         }
 
         private static boolean isForgeOrOptionalApi(String name) {
@@ -190,6 +234,27 @@ public final class Forge1201ApiUsageAnalyzer {
                             .thenComparing(ApiMethodCallSite::callerMethod)
                             .thenComparing(ApiMethodCallSite::callerDescriptor)
                             .thenComparingInt(ApiMethodCallSite::opcode))
+                    .toList();
+        }
+
+        List<ApiFieldCallSite> fieldCallSiteList() {
+            return fieldCallSites.entrySet().stream()
+                    .map(entry -> new ApiFieldCallSite(
+                            entry.getKey().callerClass(),
+                            entry.getKey().callerMethod(),
+                            entry.getKey().callerDescriptor(),
+                            entry.getKey().targetOwner(),
+                            entry.getKey().targetName(),
+                            entry.getKey().targetDescriptor(),
+                            entry.getKey().opcode(),
+                            entry.getValue()))
+                    .sorted(Comparator.comparing(ApiFieldCallSite::targetOwner)
+                            .thenComparing(ApiFieldCallSite::targetName)
+                            .thenComparing(ApiFieldCallSite::targetDescriptor)
+                            .thenComparing(ApiFieldCallSite::callerClass)
+                            .thenComparing(ApiFieldCallSite::callerMethod)
+                            .thenComparing(ApiFieldCallSite::callerDescriptor)
+                            .thenComparingInt(ApiFieldCallSite::opcode))
                     .toList();
         }
 
@@ -300,6 +365,14 @@ public final class Forge1201ApiUsageAnalyzer {
                                             callerClass, callerMethod, callerDescriptor,
                                             opcode, owner, targetName, targetDescriptor);
                                 }
+
+                                @Override
+                                public void visitFieldInsn(int opcode, String owner, String targetName,
+                                                           String targetDescriptor) {
+                                    references.recordFieldCallSite(
+                                            callerClass, callerMethod, callerDescriptor,
+                                            opcode, owner, targetName, targetDescriptor);
+                                }
                             };
                         }
 
@@ -331,6 +404,7 @@ public final class Forge1201ApiUsageAnalyzer {
                 references.packageCounts(),
                 references.classList(),
                 references.methodCallSiteList(),
+                references.fieldCallSiteList(),
                 references.methodList(),
                 references.fieldList());
     }
@@ -451,8 +525,11 @@ public final class Forge1201ApiUsageAnalyzer {
         System.out.println("\nReferenced API classes (" + analysis.referencedApiClasses().size() + "):");
         analysis.referencedApiClasses().forEach(name -> System.out.println("  " + name.replace('/', '.')));
 
-        System.out.println("\nForge / optional API method call sites (" + analysis.methodCallSites().size() + "):");
+        System.out.println("\nMinecraft / Forge / optional API method call sites (" + analysis.methodCallSites().size() + "):");
         analysis.methodCallSites().forEach(callSite -> System.out.println("  " + callSite.display()));
+
+        System.out.println("\nMinecraft / Forge / optional API field access call sites (" + analysis.fieldCallSites().size() + "):");
+        analysis.fieldCallSites().forEach(callSite -> System.out.println("  " + callSite.display()));
 
         System.out.println("\nMost-used API method references:");
         analysis.methodReferences().stream().limit(80).forEach(reference -> System.out.println("  " + reference.display()));
