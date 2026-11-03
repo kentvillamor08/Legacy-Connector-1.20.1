@@ -168,8 +168,9 @@ public final class Forge1201MappingCatalog {
     );
 
     /**
-     * Vanilla target types whose members are part of the reviewed registry migration surface.
-     * These are included in target API verification even though they are not NeoForge package moves.
+     * Vanilla target types whose members are included in focused source-to-target API audits.
+     * These types are not NeoForge package moves; they are explicit Minecraft-version review
+     * surfaces where signatures or registry-backed values can evolve between 1.20.1 and 1.21.1.
      */
     private static final Set<String> REVIEWED_TARGET_API_TYPES = Set.of(
             // Registry and menu-opening migration surface.
