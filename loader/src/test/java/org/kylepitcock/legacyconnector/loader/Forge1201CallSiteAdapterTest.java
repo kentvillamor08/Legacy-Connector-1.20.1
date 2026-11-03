@@ -267,8 +267,11 @@ final class Forge1201CallSiteAdapterTest {
         assertTrue((helper.access & Opcodes.ACC_PRIVATE) != 0);
         assertTrue((helper.access & Opcodes.ACC_STATIC) != 0);
         assertTrue((helper.access & Opcodes.ACC_SYNTHETIC) != 0);
-        assertTrue(containsField(
-                helper, "net/minecraftforge/fml/loading/FMLEnvironment", "dist", "L" + dist + ";"));
+        assertTrue(containsCall(
+                helper,
+                "net/neoforged/fml/loading/FMLEnvironment",
+                "getDist",
+                "()Lnet/neoforged/api/distmarker/Dist;"));
         assertTrue(containsCall(helper, "java/util/function/Supplier", "get"));
         assertTrue(containsCall(helper, "java/lang/Runnable", "run"));
         assertTrue(containsFrame(helper, Opcodes.F_SAME));
@@ -801,21 +804,22 @@ final class Forge1201CallSiteAdapterTest {
     }
 
 
-    private static boolean containsField(MethodNode method, String owner, String name, String descriptor) {
-        for (AbstractInsnNode instruction : method.instructions) {
-            if (instruction instanceof FieldInsnNode field
-                    && field.owner.equals(owner)
-                    && field.name.equals(name)
-                    && field.desc.equals(descriptor)) return true;
-        }
-        return false;
-    }
-
     private static boolean containsCall(MethodNode method, String owner, String name) {
         for (AbstractInsnNode instruction : method.instructions) {
             if (instruction instanceof MethodInsnNode call
                     && call.owner.equals(owner)
                     && call.name.equals(name)) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsCall(
+            MethodNode method, String owner, String name, String descriptor) {
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof MethodInsnNode call
+                    && call.owner.equals(owner)
+                    && call.name.equals(name)
+                    && call.desc.equals(descriptor)) return true;
         }
         return false;
     }
