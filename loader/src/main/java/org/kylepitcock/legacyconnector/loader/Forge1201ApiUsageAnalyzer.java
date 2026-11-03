@@ -454,7 +454,7 @@ public final class Forge1201ApiUsageAnalyzer {
      * Prints a compact ASM disassembly for explicitly selected methods. This is an inspection aid:
      * it does not execute or define classes and does not modify the input archive.
      */
-    private static void printSelectedMethodBytecode(Path jarPath, Set<String> selectedMethods) throws IOException {
+    static void printSelectedMethodBytecode(Path jarPath, Set<String> selectedMethods) throws IOException {
         Set<String> found = new LinkedHashSet<>();
         System.out.println("\nSelected method bytecode traces (read-only ASM disassembly):");
         try (ZipFile zip = new ZipFile(jarPath.toFile())) {
