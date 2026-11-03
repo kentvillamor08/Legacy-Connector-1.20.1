@@ -128,7 +128,7 @@ The supported profile schema is version 1. Each rule identifies one class by JVM
 - `field-descriptor`: replace a field instruction descriptor when owner, name, original descriptor and opcode all match.
 - `method-descriptor`: replace a method invocation descriptor when owner, name, original descriptor and invocation opcode all match.
 - `checkcast-type`: replace a specific `CHECKCAST` target type.
-- `entity-dimensions-eye-height-scale`: rewrite a recognized event-size pattern that stores eye height separately, preserving its multiplier and clamp while moving the value into `EntityDimensions`.
+- `instruction-sequence`: replace an exact sequence of typed ASM instructions with another sequence. Recipes support local-variable, field, method, type, constant, and no-operand instructions; optional minimum stack/local limits are applied after a rewrite. Patterns crossing labels, frames, or control-flow instructions are rejected.
 
 Example profile structure using synthetic names:
 
