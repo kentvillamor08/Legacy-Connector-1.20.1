@@ -125,6 +125,8 @@ public final class Forge1201JarTransformer {
                 + registry.builtInRegistryFieldReads());
         System.out.println("  IForgeRegistry lookup calls adapted to Registry: "
                 + registry.registryLookupCalls());
+        System.out.println("  Registry#get(ResourceKey) SRG names adapted: "
+                + registry.registryResourceKeyLookupCalls());
 
         printTypes("Types requiring semantic adapters (left unchanged)", bytecode.manualAdapterTypes());
         printTypes("Unreviewed Forge API types (left unchanged)", bytecode.unmappedForgeApiTypes());
