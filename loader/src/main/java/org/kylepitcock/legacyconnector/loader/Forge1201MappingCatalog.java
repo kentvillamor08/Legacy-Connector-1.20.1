@@ -66,8 +66,8 @@ public final class Forge1201MappingCatalog {
     );
 
     /**
-     * Explicit class substitutions reviewed against the Forge 47.x and NeoForge 21.1.x APIs.
-     * These are not namespace-wide moves: only the listed config type family is replaced.
+     * Explicit type substitutions reviewed against the Forge 47.x and NeoForge 21.1.x APIs.
+     * These are not namespace-wide moves: the config-spec family maps to ModConfigSpec, and RegistryObject maps to Supplier because the audited usage only calls get().
      */
     private static final Map<String, String> EXPLICIT_TYPE_REPLACEMENTS = Map.of(
             "net/minecraftforge/common/ForgeConfigSpec",
@@ -240,8 +240,8 @@ public final class Forge1201MappingCatalog {
     }
 
     /**
-     * Returns whether an internal name is inside a target package introduced by one
-     * of the reviewed Forge -> NeoForge package relocations.
+     * Returns whether an internal name is a reviewed NeoForge relocation or an explicit
+     * replacement target type.
      */
     public static boolean isNeoForgeRelocationTarget(String targetInternalName) {
         if (targetInternalName == null || targetInternalName.isBlank()) return false;
