@@ -79,7 +79,9 @@ public final class Forge1201MappingCatalog {
             "net/minecraftforge/common/ForgeConfigSpec$IntValue",
             "net/neoforged/neoforge/common/ModConfigSpec$IntValue",
             "net/minecraftforge/common/ForgeConfigSpec$DoubleValue",
-            "net/neoforged/neoforge/common/ModConfigSpec$DoubleValue"
+            "net/neoforged/neoforge/common/ModConfigSpec$DoubleValue",
+            "net/minecraftforge/registries/RegistryObject",
+            "java/util/function/Supplier"
     );
 
     /**
@@ -97,8 +99,6 @@ public final class Forge1201MappingCatalog {
                     "No direct replacement; rework physical-side separation and class loading."),
             Map.entry("net/minecraftforge/registries/ForgeRegistries",
                     "Choose the correct vanilla BuiltInRegistries or NeoForgeRegistries key per registry."),
-            Map.entry("net/minecraftforge/registries/RegistryObject",
-                    "Migrate holder types and all consumers to the NeoForge DeferredHolder model."),
             Map.entry("net/minecraftforge/common/extensions/IForgeMenuType",
                     "Migrate to IMenuTypeExtension and verify menu factory descriptors."),
             Map.entry("net/minecraftforge/client/event/RegisterGuiOverlaysEvent",
@@ -139,8 +139,6 @@ public final class Forge1201MappingCatalog {
                     "The message-builder registration API is removed; define typed payloads, codecs, and handlers."),
             Map.entry("net/minecraftforge/network/PacketDistributor$PacketTarget",
                     "Old packet-target objects do not map directly to typed payload sending."),
-            Map.entry("net/minecraftforge/registries/DeferredRegister",
-                    "Review registration method descriptors and migrate all RegistryObject consumers to DeferredHolder."),
             Map.entry("net/minecraftforge/common/ForgeMod",
                     "Migrate each referenced attribute to its exact vanilla Attributes or NeoForge equivalent."),
             Map.entry("net/minecraftforge/client/ConfigScreenHandler",
@@ -165,6 +163,16 @@ public final class Forge1201MappingCatalog {
                     "Migrate render-frame callbacks to RenderFrameEvent.Pre/Post under the client event package."),
             Map.entry("net/minecraftforge/event/TickEvent$ServerTickEvent",
                     "Migrate to ServerTickEvent.Pre/Post under net.neoforged.neoforge.event.tick.")
+    );
+
+    /**
+     * Vanilla target types whose members are part of the reviewed registry migration surface.
+     * These are included in target API verification even though they are not NeoForge package moves.
+     */
+    private static final Set<String> REVIEWED_TARGET_API_TYPES = Set.of(
+            "net/minecraft/core/registries/BuiltInRegistries",
+            "net/minecraft/core/Registry",
+            "net/minecraft/core/DefaultedRegistry"
     );
 
     private static final List<PackageMove> ORDERED_PACKAGE_MOVES = PACKAGE_MOVES.stream()
@@ -239,6 +247,12 @@ public final class Forge1201MappingCatalog {
         if (targetInternalName == null || targetInternalName.isBlank()) return false;
         return PACKAGE_MOVES.stream().anyMatch(move -> targetInternalName.startsWith(move.targetPrefix()))
                 || EXPLICIT_TYPE_REPLACEMENTS.containsValue(targetInternalName);
+    }
+
+    public static boolean isReviewedTargetApiType(String targetInternalName) {
+        if (targetInternalName == null || targetInternalName.isBlank()) return false;
+        return isNeoForgeRelocationTarget(targetInternalName)
+                || REVIEWED_TARGET_API_TYPES.contains(targetInternalName);
     }
 
     public static String manualAdapterReason(String sourceInternalName) {
