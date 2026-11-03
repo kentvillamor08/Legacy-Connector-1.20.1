@@ -435,21 +435,24 @@ tasks.named('compileJava', JavaCompile) {
 tasks.register('verifyForge1201TranslatedJar', JavaExec) {
     group = 'verification'
     description = 'Checks relocated NeoForge API references in a preliminary translated JAR against the configured target compile classpath.'
-    dependsOn project(':loader').tasks.named('classes')
+    dependsOn project(':loader').tasks.named('classes'),
+            project(':loader').tasks.named('generateForge1201MemberMappings')
     classpath = (
             project(':loader').sourceSets.main.runtimeClasspath
                     + project(':loader').sourceSets.main.compileClasspath
                     + configurations.forge1201VerifierTargetClasspath
     )
-    mainClass = 'org.kylepitcock.legacyconnector.loader.Forge1201TranslatedJarVerifier'
-    systemProperty 'legacyconnector.targetNeoForgeVersion', project.neo_version
+    mainClass = 'org.kylepitcock.legacyconnector.loader.Forge1201SrgAwareVerifier'
 
     doFirst {
         def jarPath = project.findProperty('forge1201TranslatedJar')
         if (jarPath == null || jarPath.toString().isBlank()) {
             throw new GradleException('Supply -Pforge1201TranslatedJar=<path-to-preliminary-translated-jar>')
         }
-        setArgs([jarPath.toString()])
+        def mappings = project(':loader').layout.buildDirectory.file(
+                'generated/forge1201-mappings/forge1201-srg-members.tsv').get().asFile
+        if (!mappings.isFile()) throw new GradleException('Generated Forge 1.20.1 SRG name map is missing: ' + mappings)
+        setArgs([jarPath.toString(), 'translated', mappings.absolutePath, project.neo_version.toString()])
     }
 }
 
@@ -459,20 +462,23 @@ tasks.register('verifyForge1201TranslatedJar', JavaExec) {
 tasks.register('verifyForge1201TargetApi', JavaExec) {
     group = 'verification'
     description = 'Checks Forge 1.20.1 relocation candidates and referenced member signatures against the configured NeoForge/Minecraft compile classpath.'
-    dependsOn project(':loader').tasks.named('classes')
+    dependsOn project(':loader').tasks.named('classes'),
+            project(':loader').tasks.named('generateForge1201MemberMappings')
     classpath = (
             project(':loader').sourceSets.main.runtimeClasspath
                     + project(':loader').sourceSets.main.compileClasspath
                     + configurations.forge1201VerifierTargetClasspath
     )
-    mainClass = 'org.kylepitcock.legacyconnector.loader.Forge1201TargetApiVerifier'
-    systemProperty 'legacyconnector.targetNeoForgeVersion', project.neo_version
+    mainClass = 'org.kylepitcock.legacyconnector.loader.Forge1201SrgAwareVerifier'
 
     doFirst {
         def jarPath = project.findProperty('forge1201Jar')
         if (jarPath == null || jarPath.toString().isBlank()) {
             throw new GradleException('Supply -Pforge1201Jar=<path-to-original-forge-1.20.1-jar>')
         }
-        setArgs([jarPath.toString()])
+        def mappings = project(':loader').layout.buildDirectory.file(
+                'generated/forge1201-mappings/forge1201-srg-members.tsv').get().asFile
+        if (!mappings.isFile()) throw new GradleException('Generated Forge 1.20.1 SRG name map is missing: ' + mappings)
+        setArgs([jarPath.toString(), 'source', mappings.absolutePath, project.neo_version.toString()])
     }
 }

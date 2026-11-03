@@ -19,6 +19,7 @@ configurations {
     forge1710
     mcp1710
     mcp1122
+    forge1201McpConfig
 }
 
 dependencies {
@@ -37,6 +38,7 @@ dependencies {
     forge1710 "net.minecraftforge:forge:${forge_1_7_10}:userdev@jar"
     mcp1710 "de.oceanlabs.mcp:mcp_stable:${mcp_1_7_10}@zip"
     mcp1122 "de.oceanlabs.mcp:mcp_stable:${mcp_1_12_2}@zip"
+    forge1201McpConfig "de.oceanlabs.mcp:mcp_config:1.20.1-20230612.114412@zip"
 
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
@@ -243,3 +245,61 @@ tasks.register('auditForge1201Mappings', JavaExec) {
     }
 }
 
+
+
+// Forge 1.20.1 SRG -> Mojang mapping audit inputs. Mapping data stays under build/ or in the private testbench.
+def forge1201MappingDirectory = layout.buildDirectory.dir('generated/forge1201-mappings')
+def forge1201JoinedTsrg = forge1201MappingDirectory.map { it.file('joined.tsrg') }
+def forge1201GeneratedMemberMappings = forge1201MappingDirectory.map { it.file('forge1201-srg-members.tsv') }
+
+tasks.register('extractForge1201McpConfig') {
+    group = 'verification'
+    description = 'Extracts the pinned Forge 1.20.1 joined.tsrg table.'
+    inputs.files(configurations.forge1201McpConfig)
+    outputs.file(forge1201JoinedTsrg)
+    doLast {
+        def archive = configurations.forge1201McpConfig.singleFile
+        def zip = new java.util.zip.ZipFile(archive)
+        try {
+            def entry = zip.getEntry('config/joined.tsrg')
+            if (entry == null) throw new GradleException("MCPConfig archive has no config/joined.tsrg: ${archive}")
+            def output = forge1201JoinedTsrg.get().asFile
+            output.parentFile.mkdirs()
+            zip.getInputStream(entry).withCloseable { input ->
+                output.withOutputStream { stream -> input.transferTo(stream) }
+            }
+        } finally {
+            zip.close()
+        }
+    }
+}
+
+tasks.register('generateForge1201MemberMappings', JavaExec) {
+    group = 'verification'
+    description = 'Joins Forge 1.20.1 SRG IDs to Mojang source names using owner and exact descriptor.'
+    dependsOn tasks.named('classes'), tasks.named('extractForge1201McpConfig')
+    classpath = sourceSets.main.runtimeClasspath + sourceSets.main.compileClasspath
+    mainClass = 'org.kylepitcock.legacyconnector.loader.Forge1201SrgMemberMappingGenerator'
+    outputs.file(forge1201GeneratedMemberMappings)
+    doFirst {
+        def clientPath = project.findProperty('forge1201ClientMappings')
+        def serverPath = project.findProperty('forge1201ServerMappings')
+        if (clientPath == null || clientPath.toString().isBlank()
+                || serverPath == null || serverPath.toString().isBlank()) {
+            throw new GradleException(
+                    'Supply -Pforge1201ClientMappings=<Mojang 1.20.1 client.txt> and -Pforge1201ServerMappings=<Mojang 1.20.1 server.txt>')
+        }
+        def clientFile = file(clientPath.toString())
+        def serverFile = file(serverPath.toString())
+        if (!clientFile.isFile() || !serverFile.isFile()) {
+            throw new GradleException('Both Mojang 1.20.1 client and server mapping files must exist.')
+        }
+        inputs.files(clientFile, serverFile, forge1201JoinedTsrg)
+        setArgs([
+                forge1201JoinedTsrg.get().asFile.absolutePath,
+                clientFile.absolutePath,
+                serverFile.absolutePath,
+                forge1201GeneratedMemberMappings.get().asFile.absolutePath
+        ])
+    }
+}
