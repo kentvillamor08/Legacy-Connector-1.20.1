@@ -316,7 +316,7 @@ tasks.register('extractForge1201SrgMappings', JavaExec) {
                 throw new GradleException(side + ' mappings SHA-1 mismatch: expected '
                         + mappingInfo.sha1 + ', received ' + actualSha1)
             }
-            if (mappingInfo.size != null && bytes.length != mappingInfo.size as int) {
+            if (mappingInfo.size != null && bytes.length != mappingInfo.size.toString().toInteger()) {
                 throw new GradleException(side + ' mappings size mismatch: expected '
                         + mappingInfo.size + ', received ' + bytes.length)
             }
