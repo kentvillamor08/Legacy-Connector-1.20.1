@@ -204,9 +204,18 @@ public final class Forge1201TargetApiVerifier {
     }
 
     private boolean isCandidate(String sourceInternalName) {
-        return Forge1201MappingCatalog.classify(sourceInternalName).kind()
-                == Forge1201MappingCatalog.Kind.PACKAGE_RELOCATION_CANDIDATE
+        // Forge API types are checked after their reviewed package relocation. Vanilla
+        // Minecraft/Mojang types keep their package names, but their member names and
+        // descriptors can still differ between source 1.20.1 and target 1.21.1.
+        return isMinecraftType(sourceInternalName)
+                || Forge1201MappingCatalog.classify(sourceInternalName).kind()
+                        == Forge1201MappingCatalog.Kind.PACKAGE_RELOCATION_CANDIDATE
                 || Forge1201MappingCatalog.isNeoForgeRelocationTarget(sourceInternalName);
+    }
+
+    private static boolean isMinecraftType(String internalName) {
+        return internalName.startsWith("net/minecraft/")
+                || internalName.startsWith("com/mojang/");
     }
 
     private static String mapType(String sourceInternalName) {
