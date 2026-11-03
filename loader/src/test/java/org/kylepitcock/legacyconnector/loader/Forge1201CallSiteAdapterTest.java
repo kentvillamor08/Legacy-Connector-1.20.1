@@ -1,7 +1,6 @@
 package org.kylepitcock.legacyconnector.loader;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -222,7 +221,7 @@ final class Forge1201CallSiteAdapterTest {
     }
 
     private Path writeProfile(String json) throws IOException {
-        Path file = tempDir.resolve("adapter-profile-" + Files.list(tempDir).count() + ".json");
+        Path file = tempDir.resolve("adapter-profile.json");
         Files.writeString(file, json, StandardCharsets.UTF_8);
         return file;
     }
