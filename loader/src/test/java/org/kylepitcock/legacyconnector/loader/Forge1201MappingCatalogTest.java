@@ -116,11 +116,13 @@ final class Forge1201MappingCatalogTest {
             assertEquals(Forge1201MappingCatalog.Kind.EXPLICIT_TYPE_REPLACEMENT, decision.kind(), source);
             assertEquals(target, decision.targetInternalName(), source);
             org.junit.jupiter.api.Assertions.assertTrue(
-                    Forge1201MappingCatalog.isNeoForgeRelocationTarget(target), target);
+                    Forge1201MappingCatalog.isReviewedTargetApiType(target), target);
             assertNull(Forge1201MappingCatalog.manualAdapterReason(source), source);
         });
 
         assertEquals(6, replacements.size());
+        org.junit.jupiter.api.Assertions.assertFalse(
+                Forge1201MappingCatalog.isNeoForgeRelocationTarget("java/util/function/Supplier"));
     }
 
     @Test
