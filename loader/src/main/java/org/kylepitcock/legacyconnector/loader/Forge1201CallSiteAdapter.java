@@ -309,7 +309,7 @@ public final class Forge1201CallSiteAdapter {
     }
 
     private static List<List<AbstractInsnNode>> findSequenceMatches(
-            MethodNode method, List<InstructionSpec> pattern) {
+            MethodNode method, List<InstructionSpec> pattern) throws IOException {
         List<List<AbstractInsnNode>> matches = new ArrayList<>();
         for (AbstractInsnNode start : method.instructions) {
             if (start.getOpcode() < 0 || !matches(start, pattern.get(0))) continue;
@@ -331,7 +331,7 @@ public final class Forge1201CallSiteAdapter {
         return matches;
     }
 
-    private static boolean matches(AbstractInsnNode instruction, InstructionSpec spec) {
+    private static boolean matches(AbstractInsnNode instruction, InstructionSpec spec) throws IOException {
         if (instruction.getOpcode() != spec.opcode()) return false;
         return switch (spec.kind()) {
             case "var" -> instruction instanceof VarInsnNode variable && variable.var == spec.variable();
