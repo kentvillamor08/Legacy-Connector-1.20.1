@@ -95,6 +95,19 @@ public final class Forge1201TargetApiVerifier {
                 targetClassLoader.getResourceAsStream(internalName + ".class"));
     }
 
+    /**
+     * Verifies the package-relocated NeoForge API references in a metadata-translated JAR.
+     * Unlike {@link #verify(Path, ClassLoader)}, this path accepts the output of the
+     * preliminary transformer and does not try to reapply source package mappings.
+     */
+    public static Result verifyTranslated(Path translatedJar, ClassLoader targetClassLoader) throws IOException {
+        if (targetClassLoader == null) throw new IllegalArgumentException("Target classloader is required");
+        Forge1201ApiUsageAnalyzer.Analysis analysis =
+                Forge1201ApiUsageAnalyzer.analyzeTranslated(translatedJar);
+        return verify(analysis, internalName ->
+                targetClassLoader.getResourceAsStream(internalName + ".class"));
+    }
+
     public static Result verify(
             Forge1201ApiUsageAnalyzer.Analysis analysis,
             ClassBytesProvider classBytes) throws IOException {
@@ -191,7 +204,8 @@ public final class Forge1201TargetApiVerifier {
 
     private boolean isCandidate(String sourceInternalName) {
         return Forge1201MappingCatalog.classify(sourceInternalName).kind()
-                == Forge1201MappingCatalog.Kind.PACKAGE_RELOCATION_CANDIDATE;
+                == Forge1201MappingCatalog.Kind.PACKAGE_RELOCATION_CANDIDATE
+                || Forge1201MappingCatalog.isNeoForgeRelocationTarget(sourceInternalName);
     }
 
     private static String mapType(String sourceInternalName) {
