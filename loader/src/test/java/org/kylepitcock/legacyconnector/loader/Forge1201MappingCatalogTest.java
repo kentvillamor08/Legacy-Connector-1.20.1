@@ -95,14 +95,30 @@ final class Forge1201MappingCatalogTest {
     }
 
     @Test
-    void configSpecNestedTypesAreNotMistakenForSimplePackageMoves() {
-        var builder = Forge1201MappingCatalog.classify(
-                "net/minecraftforge/common/ForgeConfigSpec$Builder");
-        var intValue = Forge1201MappingCatalog.classify(
-                "net/minecraftforge/common/ForgeConfigSpec$IntValue");
+    void configSpecFamilyUsesOnlyExplicitlyReviewedTypeReplacements() {
+        var replacements = java.util.Map.of(
+                "net/minecraftforge/common/ForgeConfigSpec",
+                "net/neoforged/neoforge/common/ModConfigSpec",
+                "net/minecraftforge/common/ForgeConfigSpec$Builder",
+                "net/neoforged/neoforge/common/ModConfigSpec$Builder",
+                "net/minecraftforge/common/ForgeConfigSpec$BooleanValue",
+                "net/neoforged/neoforge/common/ModConfigSpec$BooleanValue",
+                "net/minecraftforge/common/ForgeConfigSpec$IntValue",
+                "net/neoforged/neoforge/common/ModConfigSpec$IntValue",
+                "net/minecraftforge/common/ForgeConfigSpec$DoubleValue",
+                "net/neoforged/neoforge/common/ModConfigSpec$DoubleValue");
 
-        assertEquals(Forge1201MappingCatalog.Kind.MANUAL_ADAPTER_REQUIRED, builder.kind());
-        assertEquals(Forge1201MappingCatalog.Kind.MANUAL_ADAPTER_REQUIRED, intValue.kind());
+        assertEquals(replacements, Forge1201MappingCatalog.explicitTypeReplacements());
+        replacements.forEach((source, target) -> {
+            var decision = Forge1201MappingCatalog.classify(source);
+            assertEquals(Forge1201MappingCatalog.Kind.EXPLICIT_TYPE_REPLACEMENT, decision.kind(), source);
+            assertEquals(target, decision.targetInternalName(), source);
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    Forge1201MappingCatalog.isNeoForgeRelocationTarget(target), target);
+            assertNull(Forge1201MappingCatalog.manualAdapterReason(source), source);
+        });
+
+        assertEquals(5, replacements.size());
     }
 
     @Test

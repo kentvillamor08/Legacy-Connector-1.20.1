@@ -17,6 +17,7 @@ public final class Forge1201MappingCatalog {
     public enum Kind {
         NOT_FORGE_API,
         PACKAGE_RELOCATION_CANDIDATE,
+        EXPLICIT_TYPE_REPLACEMENT,
         MANUAL_ADAPTER_REQUIRED,
         UNMAPPED_FORGE_API
     }
@@ -65,14 +66,29 @@ public final class Forge1201MappingCatalog {
     );
 
     /**
+     * Explicit class substitutions reviewed against the Forge 47.x and NeoForge 21.1.x APIs.
+     * These are not namespace-wide moves: only the listed config type family is replaced.
+     */
+    private static final Map<String, String> EXPLICIT_TYPE_REPLACEMENTS = Map.of(
+            "net/minecraftforge/common/ForgeConfigSpec",
+            "net/neoforged/neoforge/common/ModConfigSpec",
+            "net/minecraftforge/common/ForgeConfigSpec$Builder",
+            "net/neoforged/neoforge/common/ModConfigSpec$Builder",
+            "net/minecraftforge/common/ForgeConfigSpec$BooleanValue",
+            "net/neoforged/neoforge/common/ModConfigSpec$BooleanValue",
+            "net/minecraftforge/common/ForgeConfigSpec$IntValue",
+            "net/neoforged/neoforge/common/ModConfigSpec$IntValue",
+            "net/minecraftforge/common/ForgeConfigSpec$DoubleValue",
+            "net/neoforged/neoforge/common/ModConfigSpec$DoubleValue"
+    );
+
+    /**
      * Types whose migration is not a safe package-only rewrite. Their behavior, signatures,
      * ownership, or lifecycle contracts need a dedicated adapter or source-level change.
      */
     private static final Map<String, String> MANUAL_ADAPTERS = Map.ofEntries(
             Map.entry("net/minecraftforge/common/MinecraftForge",
                     "Static event-bus owner changes to NeoForge; verify bus registration semantics."),
-            Map.entry("net/minecraftforge/common/ForgeConfigSpec",
-                    "Migrate to ModConfigSpec and register it through the injected ModContainer."),
             Map.entry("net/minecraftforge/fml/ModLoadingContext",
                     "Use the injected ModContainer for configuration and extension-point registration."),
             Map.entry("net/minecraftforge/fml/javafmlmod/FMLJavaModLoadingContext",
@@ -127,14 +143,6 @@ public final class Forge1201MappingCatalog {
                     "Review registration method descriptors and migrate all RegistryObject consumers to DeferredHolder."),
             Map.entry("net/minecraftforge/common/ForgeMod",
                     "Migrate each referenced attribute to its exact vanilla Attributes or NeoForge equivalent."),
-            Map.entry("net/minecraftforge/common/ForgeConfigSpec$Builder",
-                    "The ForgeConfigSpec type family is replaced by ModConfigSpec; migrate the builder and value types."),
-            Map.entry("net/minecraftforge/common/ForgeConfigSpec$BooleanValue",
-                    "Migrate config value declarations and consumers to ModConfigSpec.BooleanValue."),
-            Map.entry("net/minecraftforge/common/ForgeConfigSpec$DoubleValue",
-                    "Migrate config value declarations and consumers to ModConfigSpec.DoubleValue."),
-            Map.entry("net/minecraftforge/common/ForgeConfigSpec$IntValue",
-                    "Migrate config value declarations and consumers to ModConfigSpec.IntValue."),
             Map.entry("net/minecraftforge/client/ConfigScreenHandler",
                     "Replace the old config screen extension-point API with IConfigScreenFactory registered through ModContainer."),
             Map.entry("net/minecraftforge/client/ConfigScreenHandler$ConfigScreenFactory",
@@ -173,9 +181,22 @@ public final class Forge1201MappingCatalog {
         return MANUAL_ADAPTERS.keySet();
     }
 
+    public static Map<String, String> explicitTypeReplacements() {
+        return EXPLICIT_TYPE_REPLACEMENTS;
+    }
+
     public static Decision classify(String sourceInternalName) {
         if (sourceInternalName == null || sourceInternalName.isBlank()) {
             throw new IllegalArgumentException("A source internal class name is required");
+        }
+
+        String explicitReplacement = EXPLICIT_TYPE_REPLACEMENTS.get(sourceInternalName);
+        if (explicitReplacement != null) {
+            return new Decision(
+                    sourceInternalName,
+                    Kind.EXPLICIT_TYPE_REPLACEMENT,
+                    explicitReplacement,
+                    "Explicit Forge ConfigSpec -> NeoForge ModConfigSpec substitution; builder and value APIs were reviewed.");
         }
 
         String manualReason = MANUAL_ADAPTERS.get(sourceInternalName);
@@ -216,7 +237,8 @@ public final class Forge1201MappingCatalog {
      */
     public static boolean isNeoForgeRelocationTarget(String targetInternalName) {
         if (targetInternalName == null || targetInternalName.isBlank()) return false;
-        return PACKAGE_MOVES.stream().anyMatch(move -> targetInternalName.startsWith(move.targetPrefix()));
+        return PACKAGE_MOVES.stream().anyMatch(move -> targetInternalName.startsWith(move.targetPrefix()))
+                || EXPLICIT_TYPE_REPLACEMENTS.containsValue(targetInternalName);
     }
 
     public static String manualAdapterReason(String sourceInternalName) {

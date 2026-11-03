@@ -343,7 +343,7 @@ public final class Forge1201BytecodeTransformer {
             if (internalName == null) return null;
             Forge1201MappingCatalog.Decision decision = Forge1201MappingCatalog.classify(internalName);
             return switch (decision.kind()) {
-                case PACKAGE_RELOCATION_CANDIDATE -> {
+                case PACKAGE_RELOCATION_CANDIDATE, EXPLICIT_TYPE_REPLACEMENT -> {
                     relocatedTypes.add(internalName + " -> " + decision.targetInternalName());
                     yield decision.targetInternalName();
                 }
