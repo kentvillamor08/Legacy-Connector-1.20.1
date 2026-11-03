@@ -130,6 +130,14 @@ public final class Forge1201JarTransformer {
         System.out.println("  Menu factory lambda buffer signatures adapted: "
                 + registry.menuFactoryLambdaAdaptations());
 
+        Forge1201MenuAdapter.Stats menu = bytecode.menuAdapters();
+        System.out.println("  NetworkHooks.openScreen calls adapted to ServerPlayer#openMenu: "
+                + menu.menuOpenCallsAdapted());
+        System.out.println("  Menu extra-data writer lambdas adapted: "
+                + menu.extraDataWriterLambdasAdapted());
+        System.out.println("  Menu-opening calls skipped (unrecognized writer shape): "
+                + menu.menuOpenCallsSkipped());
+
         printTypes("Types requiring semantic adapters (left unchanged)", bytecode.manualAdapterTypes());
         printTypes("Unreviewed Forge API types (left unchanged)", bytecode.unmappedForgeApiTypes());
 
