@@ -156,6 +156,38 @@ tasks.register('inspectForge1201', JavaExec) {
 }
 
  
+// Full preliminary Forge 1.20.1 preparation: metadata conversion followed by safe ASM package relocation.
+// This deliberately does not enable mod discovery or claim that semantic API adapters are complete.
+tasks.register('transformForge1201', JavaExec) {
+    group = 'verification'
+    description = 'Creates a preliminary NeoForge 1.21.1 Forge 1.20.1 JAR with reviewed package relocations; semantic adapters remain.'
+    dependsOn tasks.named('classes')
+    classpath = sourceSets.main.runtimeClasspath + sourceSets.main.compileClasspath
+    mainClass = 'org.kylepitcock.legacyconnector.loader.Forge1201JarTransformer'
+
+    doFirst {
+        def jarPath = project.findProperty('forge1201Jar')
+        def outputPath = project.findProperty('forge1201Output')
+        if (jarPath == null || jarPath.toString().isBlank()) {
+            throw new GradleException('Supply -Pforge1201Jar=<path-to-forge-1.20.1-jar>')
+        }
+        if (outputPath == null || outputPath.toString().isBlank()) {
+            throw new GradleException('Supply -Pforge1201Output=<path-to-new-transformed-jar>')
+        }
+
+        def loaderRange = project.findProperty('forge1201LoaderRange') ?: project.property('loader_version_range')
+        def neoRange = project.findProperty('forge1201NeoForgeRange') ?: "[${project.property('neo_version')},)"
+        def minecraftRange = project.findProperty('forge1201MinecraftRange') ?: project.property('minecraft_version_range')
+        setArgs([
+                jarPath.toString(),
+                outputPath.toString(),
+                loaderRange.toString(),
+                neoRange.toString(),
+                minecraftRange.toString()
+        ])
+    }
+}
+
 // Produces a separate metadata-only NeoForge JAR for inspection.
 // This does not remap classes and must not be added to the mod discovery pipeline.
 tasks.register('transformForge1201Metadata', JavaExec) {
