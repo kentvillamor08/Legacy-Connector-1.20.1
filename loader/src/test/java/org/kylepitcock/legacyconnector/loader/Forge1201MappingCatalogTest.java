@@ -108,7 +108,9 @@ final class Forge1201MappingCatalogTest {
                 "net/minecraftforge/common/ForgeConfigSpec$DoubleValue",
                 "net/neoforged/neoforge/common/ModConfigSpec$DoubleValue",
                 "net/minecraftforge/registries/RegistryObject",
-                "java/util/function/Supplier");
+                "java/util/function/Supplier",
+                "net/minecraftforge/common/extensions/IForgeMenuType",
+                "net/neoforged/neoforge/common/extensions/IMenuTypeExtension");
 
         assertEquals(replacements, Forge1201MappingCatalog.explicitTypeReplacements());
         replacements.forEach((source, target) -> {
@@ -120,7 +122,7 @@ final class Forge1201MappingCatalogTest {
             assertNull(Forge1201MappingCatalog.manualAdapterReason(source), source);
         });
 
-        assertEquals(6, replacements.size());
+        assertEquals(7, replacements.size());
         org.junit.jupiter.api.Assertions.assertFalse(
                 Forge1201MappingCatalog.isNeoForgeRelocationTarget("java/util/function/Supplier"));
     }
