@@ -4,7 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -114,6 +116,26 @@ final class Forge1201JarInspectorTest {
         org.junit.jupiter.api.Assertions.assertTrue(analysis.fieldReferences().stream()
                 .anyMatch(reference -> reference.owner().equals("net/minecraftforge/registries/ForgeRegistries")
                         && reference.name().equals("ITEMS")));
+    }
+
+    @Test
+    void tracesEveryMethodWhenClassWildcardIsSelected() throws IOException {
+        Path jar = createJarWithClass("META-INF/mods.toml", forge1201Metadata(),
+                "sample/AlienEvoMod.class", sampleForgeModClass());
+        PrintStream originalOut = System.out;
+        ByteArrayOutputStream captured = new ByteArrayOutputStream();
+        try (PrintStream replacementOut = new PrintStream(captured, true, StandardCharsets.UTF_8)) {
+            System.setOut(replacementOut);
+            Forge1201ApiUsageAnalyzer.printSelectedMethodBytecode(
+                    jar, java.util.Set.of("sample.AlienEvoMod#*"));
+        } finally {
+            System.setOut(originalOut);
+        }
+
+        String output = captured.toString(StandardCharsets.UTF_8);
+        org.junit.jupiter.api.Assertions.assertTrue(output.contains("sample.AlienEvoMod#sample()V"));
+        org.junit.jupiter.api.Assertions.assertTrue(output.contains("INVOKESTATIC"));
+        org.junit.jupiter.api.Assertions.assertFalse(output.contains("NOT FOUND"));
     }
 
     @Test
