@@ -214,7 +214,9 @@ final class Forge1201MappingCatalogTest {
                 "net/minecraft/world/effect/MobEffectInstance",
                 "net/minecraft/world/effect/MobEffects",
                 "net/minecraft/world/entity/MobType",
-                "net/minecraft/world/item/enchantment/EnchantmentHelper")) {
+                "net/minecraft/world/item/enchantment/Enchantment",
+                "net/minecraft/world/item/enchantment/EnchantmentHelper",
+                "net/minecraft/world/item/enchantment/Enchantments")) {
             org.junit.jupiter.api.Assertions.assertTrue(
                     Forge1201MappingCatalog.isReviewedTargetApiType(type), type);
         }
