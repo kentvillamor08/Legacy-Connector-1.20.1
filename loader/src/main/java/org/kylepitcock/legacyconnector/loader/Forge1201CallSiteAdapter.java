@@ -283,6 +283,15 @@ public final class Forge1201CallSiteAdapter {
             throws IOException {
         List<List<AbstractInsnNode>> matches = findSequenceMatches(method, operation.match());
         requireExpectedMatches(rule, operation, matches.size());
+        Set<AbstractInsnNode> claimedInstructions = new HashSet<>();
+        for (List<AbstractInsnNode> match : matches) {
+            for (AbstractInsnNode instruction : match) {
+                if (!claimedInstructions.add(instruction)) {
+                    throw new IOException("Instruction-sequence adapter in " + rule.key()
+                            + " produced overlapping matches");
+                }
+            }
+        }
 
         for (int index = matches.size() - 1; index >= 0; index--) {
             List<AbstractInsnNode> matched = matches.get(index);
@@ -373,6 +382,7 @@ public final class Forge1201CallSiteAdapter {
 
     private static void ensureNoControlFlowMarkerInside(Rule rule, List<AbstractInsnNode> matched)
             throws IOException {
+        if (matched.size() < 2) return;
         AbstractInsnNode cursor = matched.get(0).getNext();
         AbstractInsnNode last = matched.get(matched.size() - 1);
         while (cursor != null && cursor != last) {
