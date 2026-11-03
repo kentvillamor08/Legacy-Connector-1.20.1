@@ -180,8 +180,8 @@ Run from the project root after IntelliJ Ctrl+T:
 .\gradlew.bat :loader:clean :loader:test --no-daemon
 
 .\gradlew.bat :loader:transformForge1201 `
-  -Pforge1201Jar="C:\Users\\Administrator\\legacy-connector-testbench\\symbiote-1.1.3.jar" `
-  -Pforge1201Output="C:\Users\\Administrator\\legacy-connector-testbench\\symbiote-1.1.3-neoforge-1.21.1-preliminary.jar"
+  -Pforge1201Jar="C:\Users\Administrator\legacy-connector-testbench\symbiote-1.1.3.jar" `
+  -Pforge1201Output="C:\Users\Administrator\legacy-connector-testbench\symbiote-1.1.3-neoforge-1.21.1-preliminary.jar"
 ```
 
 Keep the resulting derivative JAR private with the original input. Do not place it in the active mods folder.
