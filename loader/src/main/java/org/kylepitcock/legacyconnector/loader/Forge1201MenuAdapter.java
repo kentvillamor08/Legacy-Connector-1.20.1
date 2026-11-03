@@ -33,6 +33,10 @@ public final class Forge1201MenuAdapter {
     private static final String REGISTRY_FRIENDLY_BYTE_BUF_DESC =
             "Lnet/minecraft/network/RegistryFriendlyByteBuf;";
     private static final String LAMBDA_METAFACTORY_OWNER = "java/lang/invoke/LambdaMetafactory";
+    private static final String LAMBDA_METAFACTORY_DESC =
+            "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;"
+                    + "Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;"
+                    + "Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;"
     private static final String OPEN_SCREEN_SOURCE_DESC =
             "(L" + SERVER_PLAYER + ";L" + MENU_PROVIDER + ";L" + CONSUMER + ";)V";
     private static final String OPEN_MENU_TARGET_DESC =
@@ -119,13 +123,15 @@ public final class Forge1201MenuAdapter {
                 || !Type.getReturnType(lambda.desc).getDescriptor().equals("L" + CONSUMER + ";")
                 || !lambda.bsm.getOwner().equals(LAMBDA_METAFACTORY_OWNER)
                 || !lambda.bsm.getName().equals("metafactory")
+                || lambda.bsm.getTag() != Opcodes.H_INVOKESTATIC
+                || !lambda.bsm.getDesc().equals(LAMBDA_METAFACTORY_DESC)
                 || lambda.bsmArgs.length != 3
                 || !(lambda.bsmArgs[0] instanceof Type samMethodType)
                 || samMethodType.getSort() != Type.METHOD
                 || !samMethodType.getDescriptor().equals(CONSUMER_SAM_DESC)
                 || !(lambda.bsmArgs[1] instanceof Handle implementation)
                 || implementation.getTag() != Opcodes.H_INVOKESTATIC
-                || !hasTrailingFriendlyBufferArgument(implementation.getDesc())
+                || !hasCompatibleCapturedArguments(lambda.desc, implementation.getDesc())
                 || !(lambda.bsmArgs[2] instanceof Type instantiatedMethodType)
                 || instantiatedMethodType.getSort() != Type.METHOD
                 || !instantiatedMethodType.getDescriptor().equals(WRITER_SOURCE_DESC)) {
@@ -138,11 +144,22 @@ public final class Forge1201MenuAdapter {
         return true;
     }
 
-    private static boolean hasTrailingFriendlyBufferArgument(String methodDescriptor) {
-        Type methodType = Type.getMethodType(methodDescriptor);
-        Type[] arguments = methodType.getArgumentTypes();
-        return methodType.getReturnType().equals(Type.VOID_TYPE)
-                && arguments.length >= 1
-                && arguments[arguments.length - 1].getDescriptor().equals(FRIENDLY_BYTE_BUF_DESC);
+    private static boolean hasCompatibleCapturedArguments(
+            String invokedynamicDescriptor, String implementationDescriptor) {
+        Type invokedynamicType = Type.getMethodType(invokedynamicDescriptor);
+        Type implementationType = Type.getMethodType(implementationDescriptor);
+        Type[] capturedArguments = invokedynamicType.getArgumentTypes();
+        Type[] implementationArguments = implementationType.getArgumentTypes();
+        if (!implementationType.getReturnType().equals(Type.VOID_TYPE)
+                || implementationArguments.length != capturedArguments.length + 1
+                || !implementationArguments[implementationArguments.length - 1]
+                        .getDescriptor().equals(FRIENDLY_BYTE_BUF_DESC)) {
+            return false;
+        }
+
+        for (int i = 0; i < capturedArguments.length; i++) {
+            if (!implementationArguments[i].equals(capturedArguments[i])) return false;
+        }
+        return true;
     }
 }
