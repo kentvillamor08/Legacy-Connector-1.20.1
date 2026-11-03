@@ -532,7 +532,7 @@ final class Forge1201CallSiteAdapterTest {
         try (java.util.zip.ZipOutputStream out =
                      new java.util.zip.ZipOutputStream(Files.newOutputStream(jar))) {
             out.putNextEntry(new java.util.zip.ZipEntry("META-INF/neoforge.mods.toml"));
-            out.write("modLoader=\\"javafml\\"\\n".getBytes(StandardCharsets.UTF_8));
+            out.write("modLoader=\"javafml\"\n".getBytes(StandardCharsets.UTF_8));
             out.closeEntry();
             out.putNextEntry(new java.util.zip.ZipEntry("sample/AdapterFixture.class"));
             out.write(classBytes);
