@@ -203,7 +203,9 @@ public final class Forge1201MappingCatalog {
             // Legacy MobType was removed in 1.21.1; include its source owner and
             // the helper that consumed it so the audit exposes the full migration.
             "net/minecraft/world/entity/MobType",
-            "net/minecraft/world/item/enchantment/EnchantmentHelper"
+            "net/minecraft/world/item/enchantment/Enchantment",
+            "net/minecraft/world/item/enchantment/EnchantmentHelper",
+            "net/minecraft/world/item/enchantment/Enchantments"
     );
 
     private static final List<PackageMove> ORDERED_PACKAGE_MOVES = PACKAGE_MOVES.stream()
