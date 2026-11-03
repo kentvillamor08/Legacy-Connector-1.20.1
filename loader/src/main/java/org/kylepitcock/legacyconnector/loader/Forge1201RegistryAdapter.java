@@ -1,11 +1,13 @@
 package org.kylepitcock.legacyconnector.loader;
 
 import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.InvokeDynamicInsnNode;
 
 /**
  * Rewrites the audited Forge registry call patterns to their NeoForge 1.21.1 equivalents.
@@ -23,6 +25,10 @@ public final class Forge1201RegistryAdapter {
     private static final String BUILT_IN_REGISTRIES = "net/minecraft/core/registries/BuiltInRegistries";
     private static final String REGISTRY = "net/minecraft/core/Registry";
     private static final String DEFAULTED_REGISTRY = "net/minecraft/core/DefaultedRegistry";
+    private static final String FORGE_CONTAINER_FACTORY = "net/minecraftforge/network/IContainerFactory";
+    private static final String FRIENDLY_BYTE_BUF_DESC = "Lnet/minecraft/network/FriendlyByteBuf;";
+    private static final String REGISTRY_FRIENDLY_BYTE_BUF_DESC =
+            "Lnet/minecraft/network/RegistryFriendlyByteBuf;";
     private static final String DEFERRED_REGISTER = "net/neoforged/neoforge/registries/DeferredRegister";
     private static final String DEFERRED_HOLDER = "net/neoforged/neoforge/registries/DeferredHolder";
     private static final String SUPPLIER = "java/util/function/Supplier";
@@ -56,7 +62,17 @@ public final class Forge1201RegistryAdapter {
     private static final String REGISTRY_GET_RESOURCE_KEY_TARGET_NAME = "get";
     private static final String REGISTRY_GET_RESOURCE_KEY_SOURCE_DESC =
             "(" + RESOURCE_KEY_DESC + ")" + OBJECT_DESC;
-
+    private static final String MENU_FACTORY_SAM_SOURCE_DESC =
+            "(ILnet/minecraft/world/entity/player/Inventory;" + FRIENDLY_BYTE_BUF_DESC
+                    + ")Lnet/minecraft/world/inventory/AbstractContainerMenu;";
+    private static final String MENU_FACTORY_SAM_TARGET_DESC =
+            "(ILnet/minecraft/world/entity/player/Inventory;" + REGISTRY_FRIENDLY_BYTE_BUF_DESC
+                    + ")Lnet/minecraft/world/inventory/AbstractContainerMenu;";
+    private static final String MENU_FACTORY_INSTANTIATED_SOURCE_PREFIX =
+            "(ILnet/minecraft/world/entity/player/Inventory;" + FRIENDLY_BYTE_BUF_DESC + ")";
+    private static final String MENU_FACTORY_INSTANTIATED_TARGET_PREFIX =
+            "(ILnet/minecraft/world/entity/player/Inventory;" + REGISTRY_FRIENDLY_BYTE_BUF_DESC + ")";
+    private static final String LAMBDA_METAFACTORY_OWNER = "java/lang/invoke/LambdaMetafactory";
     private Forge1201RegistryAdapter() {}
 
     public record Stats(
@@ -65,9 +81,10 @@ public final class Forge1201RegistryAdapter {
             int deferredRegisterRegisterCalls,
             int builtInRegistryFieldReads,
             int registryLookupCalls,
-            int registryResourceKeyLookupCalls) {
+            int registryResourceKeyLookupCalls,
+            int menuFactoryLambdaAdaptations) {
         public static Stats empty() {
-            return new Stats(0, 0, 0, 0, 0, 0);
+            return new Stats(0, 0, 0, 0, 0, 0, 0);
         }
 
         public Stats plus(Stats other) {
@@ -78,7 +95,8 @@ public final class Forge1201RegistryAdapter {
                     deferredRegisterRegisterCalls + other.deferredRegisterRegisterCalls,
                     builtInRegistryFieldReads + other.builtInRegistryFieldReads,
                     registryLookupCalls + other.registryLookupCalls,
-                    registryResourceKeyLookupCalls + other.registryResourceKeyLookupCalls);
+                    registryResourceKeyLookupCalls + other.registryResourceKeyLookupCalls,
+                    menuFactoryLambdaAdaptations + other.menuFactoryLambdaAdaptations);
         }
     }
 
@@ -91,6 +109,7 @@ public final class Forge1201RegistryAdapter {
         int builtInFields = 0;
         int registryLookups = 0;
         int registryResourceKeyLookups = 0;
+        int menuFactoryLambdaAdaptations = 0;
 
         for (MethodNode method : classNode.methods) {
             // Replacing an invocation requires a new ASM node because instruction opcodes are immutable.
@@ -105,6 +124,12 @@ public final class Forge1201RegistryAdapter {
                         field.desc = replacement.descriptor();
                         builtInFields++;
                     }
+                    continue;
+                }
+
+                if (instruction instanceof InvokeDynamicInsnNode lambda
+                        && adaptMenuFactoryLambda(lambda)) {
+                    menuFactoryLambdaAdaptations++;
                     continue;
                 }
 
@@ -172,7 +197,37 @@ public final class Forge1201RegistryAdapter {
         }
 
         return new Stats(holderGets, registerCreates, registerEntries, builtInFields,
-                registryLookups, registryResourceKeyLookups);
+                registryLookups, registryResourceKeyLookups, menuFactoryLambdaAdaptations);
+    }
+
+    /**
+     * Migrates the audited Forge IContainerFactory lambda's functional signature to the
+     * NeoForge 1.21.1 RegistryFriendlyByteBuf contract. Its implementation handle deliberately
+     * keeps FriendlyByteBuf: RegistryFriendlyByteBuf extends FriendlyByteBuf, so the target
+     * argument can be passed to the existing menu constructor without changing that method.
+     */
+    private static boolean adaptMenuFactoryLambda(InvokeDynamicInsnNode lambda) {
+        if (!lambda.name.equals("create")
+                || !lambda.desc.equals("()L" + FORGE_CONTAINER_FACTORY + ";")
+                || !lambda.bsm.getOwner().equals(LAMBDA_METAFACTORY_OWNER)
+                || !lambda.bsm.getName().equals("metafactory")
+                || lambda.bsmArgs.length != 3
+                || !(lambda.bsmArgs[0] instanceof Type samMethodType)
+                || samMethodType.getSort() != Type.METHOD
+                || !samMethodType.getDescriptor().equals(MENU_FACTORY_SAM_SOURCE_DESC)
+                || !(lambda.bsmArgs[1] instanceof org.objectweb.asm.Handle implementation)
+                || implementation.getTag() != Opcodes.H_NEWINVOKESPECIAL
+                || !(lambda.bsmArgs[2] instanceof Type instantiatedMethodType)
+                || instantiatedMethodType.getSort() != Type.METHOD
+                || !instantiatedMethodType.getDescriptor().startsWith(MENU_FACTORY_INSTANTIATED_SOURCE_PREFIX)) {
+            return false;
+        }
+
+        String targetInstantiatedDescriptor = MENU_FACTORY_INSTANTIATED_TARGET_PREFIX
+                + instantiatedMethodType.getReturnType().getDescriptor();
+        lambda.bsmArgs[0] = Type.getMethodType(MENU_FACTORY_SAM_TARGET_DESC);
+        lambda.bsmArgs[2] = Type.getMethodType(targetInstantiatedDescriptor);
+        return true;
     }
 
     private static RegistryField registryField(String sourceName) {
@@ -182,6 +237,7 @@ public final class Forge1201RegistryAdapter {
             case "SOUND_EVENTS" -> new RegistryField("SOUND_EVENT", REGISTRY_DESC);
             case "BLOCK_ENTITY_TYPES" -> new RegistryField("BLOCK_ENTITY_TYPE", REGISTRY_DESC);
             case "ENTITY_TYPES" -> new RegistryField("ENTITY_TYPE", "L" + DEFAULTED_REGISTRY + ";");
+            case "MENU_TYPES" -> new RegistryField("MENU", REGISTRY_DESC);
             default -> null;
         };
     }
