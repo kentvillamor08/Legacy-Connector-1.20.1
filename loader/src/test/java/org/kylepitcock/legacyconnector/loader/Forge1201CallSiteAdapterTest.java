@@ -871,7 +871,8 @@ final class Forge1201CallSiteAdapterTest {
 
         assertEquals(1, stats.rulesApplied());
         assertEquals(1, stats.operationsApplied());
-        assertFalse(containsCall(lambda, resourceLocation, "<init>"));
+        assertFalse(containsCall(lambda, resourceLocation, "<init>",
+                "(Ljava/lang/String;Ljava/lang/String;)V"));
         assertTrue(containsCall(lambda, resourceLocation, "fromNamespaceAndPath",
                 "(Ljava/lang/String;Ljava/lang/String;)" + resourceLocationDescriptor));
 
