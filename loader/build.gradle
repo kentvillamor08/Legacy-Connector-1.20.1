@@ -280,6 +280,14 @@ tasks.register('generateForge1201MemberMappings', JavaExec) {
     dependsOn tasks.named('classes'), tasks.named('extractForge1201McpConfig')
     classpath = sourceSets.main.runtimeClasspath + sourceSets.main.compileClasspath
     mainClass = 'org.kylepitcock.legacyconnector.loader.Forge1201SrgMemberMappingGenerator'
+    inputs.property('forge1201ClientMappingsPath', providers.gradleProperty('forge1201ClientMappings').orElse(''))
+    inputs.property('forge1201ServerMappingsPath', providers.gradleProperty('forge1201ServerMappings').orElse(''))
+    inputs.files(providers.provider {
+        [project.findProperty('forge1201ClientMappings'), project.findProperty('forge1201ServerMappings')]
+                .findAll { it != null && !it.toString().isBlank() }
+                .collect { project.file(it.toString()) }
+    })
+    inputs.file(forge1201JoinedTsrg)
     outputs.file(forge1201GeneratedMemberMappings)
     doFirst {
         def clientPath = project.findProperty('forge1201ClientMappings')
@@ -294,7 +302,6 @@ tasks.register('generateForge1201MemberMappings', JavaExec) {
         if (!clientFile.isFile() || !serverFile.isFile()) {
             throw new GradleException('Both Mojang 1.20.1 client and server mapping files must exist.')
         }
-        inputs.files(clientFile, serverFile, forge1201JoinedTsrg)
         setArgs([
                 forge1201JoinedTsrg.get().asFile.absolutePath,
                 clientFile.absolutePath,
