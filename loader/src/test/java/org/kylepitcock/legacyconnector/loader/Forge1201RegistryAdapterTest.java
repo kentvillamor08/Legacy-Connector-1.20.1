@@ -21,6 +21,7 @@ final class Forge1201RegistryAdapterTest {
     private static final String FORGE_REGISTRY = "net/minecraftforge/registries/IForgeRegistry";
     private static final String FORGE_REGISTRY_DESC = "L" + FORGE_REGISTRY + ";";
     private static final String RESOURCE_LOCATION_DESC = "Lnet/minecraft/resources/ResourceLocation;";
+    private static final String RESOURCE_KEY_DESC = "Lnet/minecraft/resources/ResourceKey;";
     private static final String OBJECT_DESC = "Ljava/lang/Object;";
     private static final String STRING_DESC = "Ljava/lang/String;";
     private static final String SUPPLIER_DESC = "Ljava/util/function/Supplier;";
@@ -45,6 +46,10 @@ final class Forge1201RegistryAdapterTest {
                 "net/minecraftforge/registries/ForgeRegistries", "BLOCKS", FORGE_REGISTRY_DESC));
         method.instructions.add(new FieldInsnNode(Opcodes.GETSTATIC,
                 "net/minecraftforge/registries/ForgeRegistries", "SOUND_EVENTS", FORGE_REGISTRY_DESC));
+        method.instructions.add(new FieldInsnNode(Opcodes.GETSTATIC,
+                "net/minecraftforge/registries/ForgeRegistries", "BLOCK_ENTITY_TYPES", FORGE_REGISTRY_DESC));
+        method.instructions.add(new FieldInsnNode(Opcodes.GETSTATIC,
+                "net/minecraftforge/registries/ForgeRegistries", "ENTITY_TYPES", FORGE_REGISTRY_DESC));
 
         String createSource = "(" + FORGE_REGISTRY_DESC + STRING_DESC + ")L"
                 + FORGE_DEFERRED_REGISTER + ";";
@@ -68,6 +73,9 @@ final class Forge1201RegistryAdapterTest {
         String getValue = "(" + RESOURCE_LOCATION_DESC + ")" + OBJECT_DESC;
         method.instructions.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE,
                 FORGE_REGISTRY, "getValue", getValue, true));
+        String getByResourceKey = "(" + RESOURCE_KEY_DESC + ")" + OBJECT_DESC;
+        method.instructions.add(new MethodInsnNode(Opcodes.INVOKEINTERFACE,
+                "net/minecraft/core/Registry", "m_6246_", getByResourceKey, true));
         method.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.RETURN));
         method.maxStack = 2;
         method.maxLocals = 0;
@@ -78,16 +86,19 @@ final class Forge1201RegistryAdapterTest {
         assertEquals(3, stats.registryObjectGetCalls());
         assertEquals(1, stats.deferredRegisterCreateCalls());
         assertEquals(1, stats.deferredRegisterRegisterCalls());
-        assertEquals(3, stats.builtInRegistryFieldReads());
+        assertEquals(5, stats.builtInRegistryFieldReads());
         assertEquals(2, stats.registryLookupCalls());
+        assertEquals(1, stats.registryResourceKeyLookupCalls());
 
         List<FieldInsnNode> fields = findFields(method);
-        assertEquals(List.of("ITEM", "BLOCK", "SOUND_EVENT"),
+        assertEquals(List.of("ITEM", "BLOCK", "SOUND_EVENT", "BLOCK_ENTITY_TYPE", "ENTITY_TYPE"),
                 fields.stream().map(field -> field.name).toList());
         assertEquals(List.of(
                 "Lnet/minecraft/core/DefaultedRegistry;",
                 "Lnet/minecraft/core/DefaultedRegistry;",
-                "Lnet/minecraft/core/Registry;"),
+                "Lnet/minecraft/core/Registry;",
+                "Lnet/minecraft/core/Registry;",
+                "Lnet/minecraft/core/DefaultedRegistry;"),
                 fields.stream().map(field -> field.desc).toList());
         fields.forEach(field -> assertEquals(
                 "net/minecraft/core/registries/BuiltInRegistries", field.owner));
@@ -123,9 +134,17 @@ final class Forge1201RegistryAdapterTest {
 
         MethodInsnNode getValueCall = calls.stream().filter(call -> call.name.equals("get"))
                 .filter(call -> call.owner.equals("net/minecraft/core/Registry"))
+                .filter(call -> call.desc.equals("(" + RESOURCE_LOCATION_DESC + ")Ljava/lang/Object;"))
                 .findFirst().orElseThrow();
         assertEquals(Opcodes.INVOKEINTERFACE, getValueCall.getOpcode());
-        assertEquals("(" + RESOURCE_LOCATION_DESC + ")Ljava/lang/Object;", getValueCall.desc);
+
+        MethodInsnNode getResourceKeyCall = calls.stream()
+                .filter(call -> call.owner.equals("net/minecraft/core/Registry"))
+                .filter(call -> call.desc.equals("(" + RESOURCE_KEY_DESC + ")Ljava/lang/Object;"))
+                .findFirst().orElseThrow();
+        assertEquals("get", getResourceKeyCall.name);
+        assertEquals(Opcodes.INVOKEINTERFACE, getResourceKeyCall.getOpcode());
+        assertTrue(getResourceKeyCall.itf);
     }
 
     @Test
