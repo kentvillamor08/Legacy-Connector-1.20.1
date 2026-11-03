@@ -6,9 +6,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.commons.ClassRemapper;
+import org.objectweb.asm.commons.Remapper;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
+import org.objectweb.asm.tree.FieldNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 
@@ -121,6 +126,114 @@ final class Forge1201RegistryAdapterTest {
                 .findFirst().orElseThrow();
         assertEquals(Opcodes.INVOKEINTERFACE, getValueCall.getOpcode());
         assertEquals("(" + RESOURCE_LOCATION_DESC + ")Ljava/lang/Object;", getValueCall.desc);
+    }
+
+    @Test
+    void remapsRegistryObjectFieldAndMethodGenericSignaturesToSupplier() {
+        String registryObject = "net/minecraftforge/registries/RegistryObject";
+        String supplier = "java/util/function/Supplier";
+        String sourceDescriptor = "L" + registryObject + ";";
+        String sourceSignature = "L" + registryObject + "<Lsample/Item;>;";
+        String targetSignature = "L" + supplier + "<Lsample/Item;>;";
+
+        ClassNode source = new ClassNode();
+        source.version = Opcodes.V17;
+        source.access = Opcodes.ACC_PUBLIC;
+        source.name = "sample/HolderSignatureFixture";
+        source.superName = "java/lang/Object";
+        source.fields.add(new FieldNode(
+                Opcodes.ACC_PUBLIC, "ITEM", sourceDescriptor, sourceSignature, null));
+
+        MethodNode accessor = new MethodNode(
+                Opcodes.ASM9, Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "item", "()" + sourceDescriptor, "()" + sourceSignature, null);
+        accessor.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.ACONST_NULL));
+        accessor.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.ARETURN));
+        accessor.maxStack = 1;
+        accessor.maxLocals = 0;
+        source.methods.add(accessor);
+
+        MethodNode consumer = new MethodNode(
+                Opcodes.ASM9, Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "consume", "(" + sourceDescriptor + ")V",
+                "(" + sourceSignature + ")V", null);
+        consumer.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.RETURN));
+        consumer.maxStack = 0;
+        consumer.maxLocals = 1;
+        source.methods.add(consumer);
+
+        ClassWriter writer = new ClassWriter(0);
+        source.accept(new ClassRemapper(writer, new Remapper() {
+            @Override
+            public String map(String internalName) {
+                var decision = Forge1201MappingCatalog.classify(internalName);
+                return decision.kind() == Forge1201MappingCatalog.Kind.EXPLICIT_TYPE_REPLACEMENT
+                        || decision.kind() == Forge1201MappingCatalog.Kind.PACKAGE_RELOCATION_CANDIDATE
+                        ? decision.targetInternalName() : internalName;
+            }
+        }));
+
+        ClassNode target = new ClassNode();
+        new ClassReader(writer.toByteArray()).accept(target, 0);
+
+        assertEquals("L" + supplier + ";", target.fields.get(0).desc);
+        assertEquals(targetSignature, target.fields.get(0).signature);
+        MethodNode mappedAccessor = target.methods.stream()
+                .filter(method -> method.name.equals("item"))
+                .findFirst().orElseThrow();
+        assertEquals("()L" + supplier + ";", mappedAccessor.desc);
+        assertEquals("()" + targetSignature, mappedAccessor.signature);
+
+        MethodNode mappedConsumer = target.methods.stream()
+                .filter(method -> method.name.equals("consume"))
+                .findFirst().orElseThrow();
+        assertEquals("(L" + supplier + ";)V", mappedConsumer.desc);
+        assertEquals("(" + targetSignature + ")V", mappedConsumer.signature);
+    }
+
+    @Test
+    void preservesResourceKeyBasedDeferredRegisterCreateOverload() {
+        String sourceOwner = "net/minecraftforge/registries/DeferredRegister";
+        String targetOwner = "net/neoforged/neoforge/registries/DeferredRegister";
+        String resourceKeyDescriptor = "(Lnet/minecraft/resources/ResourceKey;Ljava/lang/String;)L"
+                + sourceOwner + ";";
+
+        ClassNode source = new ClassNode();
+        source.version = Opcodes.V17;
+        source.access = Opcodes.ACC_PUBLIC;
+        source.name = "sample/ResourceKeyRegistryFixture";
+        source.superName = "java/lang/Object";
+        MethodNode method = new MethodNode(
+                Opcodes.ASM9, Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "create", "()V", null, null);
+        method.instructions.add(new MethodInsnNode(
+                Opcodes.INVOKESTATIC, sourceOwner, "create", resourceKeyDescriptor, false));
+        method.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.POP));
+        method.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.RETURN));
+        method.maxStack = 2;
+        method.maxLocals = 0;
+        source.methods.add(method);
+
+        Forge1201RegistryAdapter.apply(source);
+        MethodInsnNode untouched = findCalls(method).get(0);
+        assertEquals(sourceOwner, untouched.owner);
+        assertEquals(resourceKeyDescriptor, untouched.desc);
+
+        ClassWriter writer = new ClassWriter(0);
+        source.accept(new ClassRemapper(writer, new Remapper() {
+            @Override
+            public String map(String internalName) {
+                var decision = Forge1201MappingCatalog.classify(internalName);
+                return decision.kind() == Forge1201MappingCatalog.Kind.PACKAGE_RELOCATION_CANDIDATE
+                        ? decision.targetInternalName() : internalName;
+            }
+        }));
+        ClassNode target = new ClassNode();
+        new ClassReader(writer.toByteArray()).accept(target, 0);
+        MethodInsnNode mapped = findCalls(target.methods.get(0)).get(0);
+
+        assertEquals(targetOwner, mapped.owner);
+        assertEquals("(Lnet/minecraft/resources/ResourceKey;Ljava/lang/String;)L" + targetOwner + ";",
+                mapped.desc);
     }
 
     private static List<FieldInsnNode> findFields(MethodNode method) {
