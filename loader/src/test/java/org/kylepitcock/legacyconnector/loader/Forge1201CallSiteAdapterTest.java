@@ -111,6 +111,30 @@ final class Forge1201CallSiteAdapterTest {
                       {
                         "type": "instruction-sequence",
                         "match": [
+                          { "kind": "var", "opcode": "ALOAD", "var": 1 },
+                          {
+                            "kind": "field",
+                            "opcode": "GETFIELD",
+                            "owner": "net/minecraft/world/entity/EntityDimensions",
+                            "name": "width",
+                            "descriptor": "F"
+                          }
+                        ],
+                        "replaceWith": [
+                          { "kind": "var", "opcode": "ALOAD", "var": 1 },
+                          {
+                            "kind": "method",
+                            "opcode": "INVOKEVIRTUAL",
+                            "owner": "net/minecraft/world/entity/EntityDimensions",
+                            "name": "width",
+                            "descriptor": "()F"
+                          }
+                        ],
+                        "expectedMatches": 1
+                      },
+                      {
+                        "type": "instruction-sequence",
+                        "match": [
                           { "kind": "var", "opcode": "ALOAD", "var": 0 },
                           { "kind": "var", "opcode": "ALOAD", "var": 2 },
                           {
@@ -122,6 +146,8 @@ final class Forge1201CallSiteAdapterTest {
                           }
                         ],
                         "replaceWith": [
+                          { "kind": "var", "opcode": "ALOAD", "var": 0 },
+                          { "kind": "var", "opcode": "ALOAD", "var": 2 },
                           { "kind": "var", "opcode": "ALOAD", "var": 0 },
                           {
                             "kind": "method",
@@ -137,9 +163,40 @@ final class Forge1201CallSiteAdapterTest {
                             "name": "eyeHeight",
                             "descriptor": "()F"
                           },
-                          { "kind": "var", "opcode": "FSTORE", "var": 3 },
-                          { "kind": "var", "opcode": "ALOAD", "var": 0 },
+                          { "kind": "ldc", "valueType": "float", "value": 1.35 },
+                          { "kind": "insn", "opcode": "FMUL" },
+                          { "kind": "ldc", "valueType": "float", "value": 0.05 },
                           { "kind": "var", "opcode": "ALOAD", "var": 2 },
+                          {
+                            "kind": "method",
+                            "opcode": "INVOKEVIRTUAL",
+                            "owner": "net/minecraft/world/entity/EntityDimensions",
+                            "name": "height",
+                            "descriptor": "()F"
+                          },
+                          { "kind": "ldc", "valueType": "float", "value": 0.05 },
+                          { "kind": "insn", "opcode": "FSUB" },
+                          {
+                            "kind": "method",
+                            "opcode": "INVOKESTATIC",
+                            "owner": "java/lang/Math",
+                            "name": "min",
+                            "descriptor": "(FF)F"
+                          },
+                          {
+                            "kind": "method",
+                            "opcode": "INVOKESTATIC",
+                            "owner": "java/lang/Math",
+                            "name": "max",
+                            "descriptor": "(FF)F"
+                          },
+                          {
+                            "kind": "method",
+                            "opcode": "INVOKEVIRTUAL",
+                            "owner": "net/minecraft/world/entity/EntityDimensions",
+                            "name": "withEyeHeight",
+                            "descriptor": "(F)Lnet/minecraft/world/entity/EntityDimensions;"
+                          },
                           {
                             "kind": "method",
                             "opcode": "INVOKEVIRTUAL",
@@ -149,8 +206,7 @@ final class Forge1201CallSiteAdapterTest {
                           }
                         ],
                         "expectedMatches": 1,
-                        "minimumMaxStack": 3,
-                        "minimumMaxLocals": 4
+                        "minimumMaxStack": 6
                       },
                       {
                         "type": "instruction-sequence",
@@ -165,7 +221,7 @@ final class Forge1201CallSiteAdapterTest {
                           }
                         ],
                         "replaceWith": [
-                          { "kind": "var", "opcode": "FLOAD", "var": 3 }
+                          { "kind": "insn", "opcode": "FCONST_0" }
                         ],
                         "expectedMatches": 1
                       },
@@ -207,53 +263,32 @@ final class Forge1201CallSiteAdapterTest {
                             "descriptor": "(F)V"
                           }
                         ],
-                        "replaceWith": [
-                          { "kind": "var", "opcode": "ALOAD", "var": 0 },
-                          { "kind": "var", "opcode": "ALOAD", "var": 2 },
-                          { "kind": "ldc", "valueType": "float", "value": 0.05 },
-                          { "kind": "var", "opcode": "ALOAD", "var": 2 },
+                        "replaceWith": [],
+                        "expectedMatches": 1
+                      },
+                      {
+                        "type": "instruction-sequence",
+                        "match": [
+                          { "kind": "var", "opcode": "ALOAD", "var": 1 },
                           {
                             "kind": "field",
                             "opcode": "GETFIELD",
                             "owner": "net/minecraft/world/entity/EntityDimensions",
                             "name": "height",
                             "descriptor": "F"
-                          },
-                          { "kind": "ldc", "valueType": "float", "value": 0.05 },
-                          { "kind": "insn", "opcode": "FSUB" },
-                          { "kind": "var", "opcode": "FLOAD", "var": 3 },
-                          {
-                            "kind": "method",
-                            "opcode": "INVOKESTATIC",
-                            "owner": "java/lang/Math",
-                            "name": "min",
-                            "descriptor": "(FF)F"
-                          },
-                          {
-                            "kind": "method",
-                            "opcode": "INVOKESTATIC",
-                            "owner": "java/lang/Math",
-                            "name": "max",
-                            "descriptor": "(FF)F"
-                          },
+                          }
+                        ],
+                        "replaceWith": [
+                          { "kind": "var", "opcode": "ALOAD", "var": 1 },
                           {
                             "kind": "method",
                             "opcode": "INVOKEVIRTUAL",
                             "owner": "net/minecraft/world/entity/EntityDimensions",
-                            "name": "withEyeHeight",
-                            "descriptor": "(F)Lnet/minecraft/world/entity/EntityDimensions;"
-                          },
-                          {
-                            "kind": "method",
-                            "opcode": "INVOKEVIRTUAL",
-                            "owner": "net/minecraftforge/event/entity/EntityEvent$Size",
-                            "name": "setNewSize",
-                            "descriptor": "(Lnet/minecraft/world/entity/EntityDimensions;)V"
+                            "name": "height",
+                            "descriptor": "()F"
                           }
                         ],
-                        "expectedMatches": 1,
-                        "minimumMaxStack": 5,
-                        "minimumMaxLocals": 4
+                        "expectedMatches": 1
                       }
                     ]
                   }]
@@ -271,26 +306,28 @@ final class Forge1201CallSiteAdapterTest {
         Forge1201CallSiteAdapter.Stats stats = session.finish();
 
         assertEquals(1, stats.rulesApplied());
-        assertEquals(3, stats.operationsApplied());
+        assertEquals(5, stats.operationsApplied());
         assertEquals(2, countCalls(method, EVENT, "getNewSize", "()" + DIMENSIONS_DESC));
         assertEquals(1, countCalls(method, DIMENSIONS, "eyeHeight", "()F"));
         assertEquals(1, countCalls(method, DIMENSIONS, "withEyeHeight", "(F)" + DIMENSIONS_DESC));
-        assertEquals(2, countCalls(method, EVENT, "setNewSize", "(" + DIMENSIONS_DESC + ")V"));
+        assertEquals(1, countCalls(method, EVENT, "setNewSize", "(" + DIMENSIONS_DESC + ")V"));
+        assertEquals(1, countCalls(method, DIMENSIONS, "width", "()F"));
+        assertEquals(1, countCalls(method, DIMENSIONS, "height", "()F"));
         assertEquals(0, countCalls(method, EVENT, "getNewEyeHeight", "()F"));
         assertEquals(0, countCalls(method, EVENT, "setNewEyeHeight", "(F)V"));
-        assertTrue(countVars(method, Opcodes.FLOAD, 3) >= 1);
-        assertTrue(countVars(method, Opcodes.FSTORE, 3) >= 2);
+        assertEquals(0, countVars(method, Opcodes.FLOAD, 3));
+        assertEquals(1, countVars(method, Opcodes.FSTORE, 3));
         assertEquals(4, method.maxLocals);
-        assertTrue(method.maxStack >= 5);
+        assertTrue(method.maxStack >= 6);
 
         List<String> calls = new ArrayList<>();
         for (AbstractInsnNode instruction : method.instructions) {
             if (instruction instanceof MethodInsnNode call) calls.add(call.owner + "#" + call.name);
         }
         int withEyeHeightIndex = calls.indexOf(DIMENSIONS + "#withEyeHeight");
-        int secondSetSizeIndex = calls.lastIndexOf(EVENT + "#setNewSize");
+        int setNewSizeIndex = calls.lastIndexOf(EVENT + "#setNewSize");
         assertTrue(withEyeHeightIndex >= 0);
-        assertTrue(secondSetSizeIndex > withEyeHeightIndex);
+        assertTrue(setNewSizeIndex > withEyeHeightIndex);
     }
 
     @Test
