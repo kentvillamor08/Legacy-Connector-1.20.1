@@ -102,7 +102,7 @@ final class Forge1201SrgNameMappingsTest {
 
         assertEquals("writeUtf", result.analysis().methodReferences().get(0).name());
         assertEquals("m_130070_", result.analysis().methodReferences().get(1).name());
-        assertEquals("f_178333_", result.analysis().fieldReferences().get(0).name());
+        assertEquals("f_456789_", result.analysis().fieldReferences().get(0).name());
         assertTrue(result.methodMappings().isEmpty());
         assertTrue(result.fieldMappings().isEmpty());
         assertTrue(result.unmappedMethods().isEmpty());
