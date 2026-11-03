@@ -12,7 +12,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
-import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.Test;
@@ -24,7 +23,6 @@ import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
-import org.objectweb.asm.tree.TypeInsnNode;
 
 final class Forge1201JarTransformerTest {
     @TempDir
@@ -103,21 +101,15 @@ final class Forge1201JarTransformerTest {
             var invoke = caller.methods.stream()
                     .filter(method -> method.name.equals("invoke"))
                     .findFirst().orElseThrow();
-            MethodInsnNode methodCall = (MethodInsnNode) invoke.instructions.stream()
-                    .filter(instruction -> instruction instanceof MethodInsnNode)
-                    .findFirst().orElseThrow();
+            MethodInsnNode methodCall = firstInstruction(invoke, MethodInsnNode.class);
             assertEquals("net/neoforged/fml/ModList", methodCall.owner);
             assertEquals("()Lnet/neoforged/fml/ModList;", methodCall.desc);
 
-            FieldInsnNode field = (FieldInsnNode) invoke.instructions.stream()
-                    .filter(instruction -> instruction instanceof FieldInsnNode)
-                    .findFirst().orElseThrow();
+            FieldInsnNode field = firstInstruction(invoke, FieldInsnNode.class);
             assertEquals("net/minecraftforge/registries/ForgeRegistries", field.owner);
             assertEquals("Lnet/minecraftforge/registries/IForgeRegistry;", field.desc);
 
-            LdcInsnNode classLiteral = (LdcInsnNode) invoke.instructions.stream()
-                    .filter(instruction -> instruction instanceof LdcInsnNode)
-                    .findFirst().orElseThrow();
+            LdcInsnNode classLiteral = firstInstruction(invoke, LdcInsnNode.class);
             assertEquals("Lnet/neoforged/fml/ModList;", ((Type) classLiteral.cst).getDescriptor());
 
             var missing = caller.methods.stream()
@@ -172,6 +164,13 @@ final class Forge1201JarTransformerTest {
             }
         }
         return jar;
+    }
+
+    private static <T> T firstInstruction(org.objectweb.asm.tree.MethodNode method, Class<T> type) {
+        for (org.objectweb.asm.tree.AbstractInsnNode instruction : method.instructions) {
+            if (type.isInstance(instruction)) return type.cast(instruction);
+        }
+        throw new AssertionError("Instruction not found: " + type.getName());
     }
 
     private static byte[] callerClass() {
