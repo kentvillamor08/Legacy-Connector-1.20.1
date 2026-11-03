@@ -117,6 +117,14 @@ After the mapping catalog has been reviewed, verify the remaining namespace-relo
 
 This task runs in the root project's target compile classpath while the `:loader` module remains independent of Minecraft/NeoForge classes. It reads class-file structures with ASM and checks target class presence plus exact method/field descriptors, including inherited members where the visible hierarchy is complete. Missing classes, missing members, incomplete hierarchy lookups, and member descriptors that contain manual-adapter types are reported separately. No target class is loaded or initialized and no JAR bytes are changed. A structural match is not proof of behavioral compatibility; manual-adapter types and Minecraft 1.20.1-to-1.21.1 changes remain separate.
 
+## Upstream maintenance strategy
+
+The 1.20.1 port should remain an isolated extension of the maintained Legacy Connector codebase, not an unrelated standalone reimplementation. Shared 1.7.10/1.12.2 loader and runtime fixes should continue to arrive from the upstream project, while 1.20.1-only transformation and compatibility code stays in its own classes and package paths.
+
+Maintain a Git remote for the upstream repository and merge its current default branch into a disposable integration/preview branch before updating the active 1.20.1 port branch. Review conflicts rather than copying upstream folders wholesale. Prefer upstream's behavior for shared fixes after checking the affected code; preserve and retest the 1.20.1 adapter path when a shared file changes. Run the project's normal tests and static verifiers on the preview before promoting it.
+
+Avoid force-pushing the active port branch. If an upstream sync conflicts with 1.20.1 work, abort or retain the preview branch for investigation rather than resetting the working port.
+
 ## Scoped call-site adapters
 
 Some Forge-to-NeoForge changes cannot be represented by a package or descriptor remap alone. The bytecode transformer therefore accepts an optional external adapter profile. The public loader implements reusable, narrowly scoped operations; a profile supplies the exact original class/method selectors and expected instruction patterns for a particular mod.
