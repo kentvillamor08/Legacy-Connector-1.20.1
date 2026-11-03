@@ -213,6 +213,132 @@ final class Forge1201CallSiteAdapterTest {
     }
 
     @Test
+    void appliesProfileBeforePackageRelocationInsideJarTransform() throws Exception {
+        Path input = tempDir.resolve("metadata-translated.jar");
+        Path output = tempDir.resolve("profile-transformed.jar");
+        Path profileFile = writeProfile("""
+                {
+                  "schemaVersion": 1,
+                  "id": "jar-integration-profile",
+                  "rules": [{
+                    "className": "sample/AdapterFixture",
+                    "methodName": "adapt",
+                    "methodDescriptor": "()V",
+                    "operations": [
+                      {
+                        "type": "checkcast-type",
+                        "sourceType": "java/lang/String",
+                        "replacementType": "net/minecraft/client/resources/PlayerSkin$Model",
+                        "expectedMatches": 1
+                      },
+                      {
+                        "type": "method-descriptor",
+                        "owner": "net/minecraftforge/client/event/EntityRenderersEvent$AddLayers",
+                        "name": "getSkin",
+                        "descriptor": "(Ljava/lang/String;)Lnet/minecraft/client/renderer/entity/LivingEntityRenderer;",
+                        "replacementDescriptor": "(Lnet/minecraft/client/resources/PlayerSkin$Model;)Lnet/minecraft/client/renderer/entity/EntityRenderer;",
+                        "opcode": "INVOKEVIRTUAL",
+                        "expectedMatches": 1
+                      }
+                    ]
+                  }]
+                }
+                """);
+        createMetadataTranslatedJar(input, createRendererFixtureClass());
+
+        Forge1201BytecodeTransformer.Result result =
+                Forge1201BytecodeTransformer.transform(input, output, profileFile);
+
+        assertEquals("jar-integration-profile", result.adapterProfileId());
+        assertEquals(1, result.adapterRulesApplied());
+        assertEquals(2, result.adapterOperationsApplied());
+        try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(output.toFile())) {
+            ClassNode transformed = new ClassNode();
+            new org.objectweb.asm.ClassReader(zip.getInputStream(
+                    zip.getEntry("sample/AdapterFixture.class")).readAllBytes()).accept(transformed, 0);
+            MethodNode adapt = transformed.methods.stream()
+                    .filter(method -> method.name.equals("adapt")).findFirst().orElseThrow();
+
+            TypeInsnNode cast = null;
+            MethodInsnNode lookup = null;
+            for (AbstractInsnNode instruction : adapt.instructions) {
+                if (instruction instanceof TypeInsnNode typeInsn
+                        && typeInsn.getOpcode() == Opcodes.CHECKCAST) cast = typeInsn;
+                if (instruction instanceof MethodInsnNode call) lookup = call;
+            }
+            assertTrue(cast != null);
+            assertEquals("net/minecraft/client/resources/PlayerSkin$Model", cast.desc);
+            assertTrue(lookup != null);
+            assertEquals("net/neoforged/neoforge/client/event/EntityRenderersEvent$AddLayers", lookup.owner);
+            assertEquals("(Lnet/minecraft/client/resources/PlayerSkin$Model;)Lnet/minecraft/client/renderer/entity/EntityRenderer;",
+                    lookup.desc);
+        }
+    }
+
+    @Test
+    void staleProfileDoesNotFinalizeAnOutputJar() throws Exception {
+        Path input = tempDir.resolve("stale-input.jar");
+        Path output = tempDir.resolve("stale-output.jar");
+        Path profileFile = writeProfile("""
+                {
+                  "schemaVersion": 1,
+                  "id": "stale-jar-profile",
+                  "rules": [{
+                    "className": "sample/MissingClass",
+                    "methodName": "adapt",
+                    "methodDescriptor": "()V",
+                    "operations": [{
+                      "type": "checkcast-type",
+                      "sourceType": "java/lang/String",
+                      "replacementType": "sample/Model",
+                      "expectedMatches": 1
+                    }]
+                  }]
+                }
+                """);
+        createMetadataTranslatedJar(input, createRendererFixtureClass());
+
+        assertThrows(IOException.class, () -> Forge1201BytecodeTransformer.transform(input, output, profileFile));
+        assertFalse(Files.exists(output));
+    }
+
+    private static byte[] createRendererFixtureClass() {
+        org.objectweb.asm.ClassWriter writer =
+                new org.objectweb.asm.ClassWriter(org.objectweb.asm.ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "sample/AdapterFixture", null, "java/lang/Object", null);
+        var method = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "adapt", "()V", null, null);
+        method.visitCode();
+        method.visitInsn(Opcodes.ACONST_NULL);
+        method.visitTypeInsn(Opcodes.CHECKCAST,
+                "net/minecraftforge/client/event/EntityRenderersEvent$AddLayers");
+        method.visitInsn(Opcodes.ACONST_NULL);
+        method.visitTypeInsn(Opcodes.CHECKCAST, "java/lang/String");
+        method.visitMethodInsn(Opcodes.INVOKEVIRTUAL,
+                "net/minecraftforge/client/event/EntityRenderersEvent$AddLayers",
+                "getSkin",
+                "(Ljava/lang/String;)Lnet/minecraft/client/renderer/entity/LivingEntityRenderer;",
+                false);
+        method.visitInsn(Opcodes.POP);
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static void createMetadataTranslatedJar(Path jar, byte[] classBytes) throws IOException {
+        try (java.util.zip.ZipOutputStream out =
+                     new java.util.zip.ZipOutputStream(Files.newOutputStream(jar))) {
+            out.putNextEntry(new java.util.zip.ZipEntry("META-INF/neoforge.mods.toml"));
+            out.write("modLoader=\\"javafml\\"\\n".getBytes(StandardCharsets.UTF_8));
+            out.closeEntry();
+            out.putNextEntry(new java.util.zip.ZipEntry("sample/AdapterFixture.class"));
+            out.write(classBytes);
+            out.closeEntry();
+        }
+    }
+
+    @Test
     void rejectsUnsupportedProfileVersion() throws Exception {
         Path profileFile = writeProfile("""
                 {"schemaVersion": 99, "id": "future", "rules": []}
