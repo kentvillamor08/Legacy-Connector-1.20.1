@@ -95,7 +95,7 @@ final class Forge1201MappingCatalogTest {
     }
 
     @Test
-    void configSpecAndRegistryObjectUseOnlyExplicitlyReviewedTypeReplacements() {
+    void explicitTypeReplacementsAreLimitedToReviewedCompatibilityTypes() {
         var replacements = java.util.Map.of(
                 "net/minecraftforge/common/ForgeConfigSpec",
                 "net/neoforged/neoforge/common/ModConfigSpec",
