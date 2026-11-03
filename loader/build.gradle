@@ -19,8 +19,9 @@ configurations {
     forge1710
     mcp1710
     mcp1122
-    // Verification-only source mappings. This is never part of the loader/runtime artifact.
-    forge1201SrgMappings
+    // Verification-only source mappings. These configurations are never part of the loader/runtime artifact.
+    forge1201McpConfig
+    forge1201Installertools
 }
 
 dependencies {
@@ -39,8 +40,10 @@ dependencies {
     forge1710 "net.minecraftforge:forge:${forge_1_7_10}:userdev@jar"
     mcp1710 "de.oceanlabs.mcp:mcp_stable:${mcp_1_7_10}@zip"
     mcp1122 "de.oceanlabs.mcp:mcp_stable:${mcp_1_12_2}@zip"
-    // Forge 1.20.1's exact SRG -> Mojang-named mapping set; resolved only by the audit task.
-    forge1201SrgMappings "de.oceanlabs.mcp:mcp_config:1.20.1-20230612.114412:srg2off@jar"
+    // Source-version inputs for the read-only member audit. The MCPConfig archive contains joined.tsrg;
+    // Installertools combines it with Mojang's official client/server mappings to generate methods.csv/fields.csv.
+    forge1201McpConfig "de.oceanlabs.mcp:mcp_config:1.20.1-20230612.114412@zip"
+    forge1201Installertools "net.minecraftforge:installertools:1.4.3:fatjar"
 
     testImplementation platform('org.junit:junit-bom:5.10.2')
     testImplementation 'org.junit.jupiter:junit-jupiter'
@@ -57,6 +60,7 @@ repositories {
         content {
             includeGroup 'de.oceanlabs.mcp'
             includeModule 'net.minecraftforge', 'forge'
+            includeModule 'net.minecraftforge', 'installertools'
         }
     }
 }
@@ -249,20 +253,104 @@ tasks.register('auditForge1201Mappings', JavaExec) {
 
 
 
-// Source namespace normalizer used only by the read-only Forge 1.20.1 -> NeoForge 1.21.1
-// translated-JAR verifier. The MCPConfig mapping artifact is kept in Gradle's cache and is
-// never copied into the distributable loader or runtime mod.
+// Generate source SRG -> Mojang-name CSVs only for the read-only member audit.
+// MCPConfig's published 1.20.1 artifact is the configuration ZIP; its joined.tsrg is combined with
+// Mojang's pinned 1.20.1 client/server mappings by the same Installertools task MCPConfig uses.
 def forge1201SrgMappingDir = layout.buildDirectory.dir('generated/forge1201/srg-mappings')
-tasks.register('extractForge1201SrgMappings', Sync) {
-    from({ zipTree(configurations.forge1201SrgMappings.singleFile) }) {
-        include 'methods.csv', 'fields.csv'
+def forge1201SrgMappingInputsDir = layout.buildDirectory.dir('generated/forge1201/srg-mapping-inputs')
+def forge1201SrgMappingsJar = layout.buildDirectory.file('generated/forge1201/mappings/mappings.jar')
+
+tasks.register('extractForge1201SrgMappings', JavaExec) {
+    group = 'verification'
+    description = 'Generates Forge 1.20.1 SRG-to-Mojang member CSVs for the read-only translated-JAR audit.'
+    classpath = configurations.forge1201Installertools
+    mainClass = 'net.minecraftforge.installertools.ConsoleTool'
+    inputs.files(configurations.forge1201McpConfig, configurations.forge1201Installertools)
+    inputs.property('minecraftVersion', '1.20.1')
+    inputs.property('mcpConfigVersion', '1.20.1-20230612.114412')
+    outputs.dir forge1201SrgMappingDir
+
+    doFirst {
+        def inputDir = forge1201SrgMappingInputsDir.get().asFile
+        inputDir.mkdirs()
+        def joinedTsrg = new File(inputDir, 'joined.tsrg')
+        project.copy {
+            from zipTree(configurations.forge1201McpConfig.singleFile)
+            include 'config/joined.tsrg'
+            eachFile { details -> details.path = 'joined.tsrg' }
+            includeEmptyDirs = false
+            into inputDir
+        }
+        if (!joinedTsrg.isFile() || joinedTsrg.length() == 0) {
+            throw new GradleException('The pinned MCPConfig archive did not contain config/joined.tsrg')
+        }
+
+        // Resolve the official mappings for this exact Minecraft version from Mojang's version manifest.
+        def fetchBytes = { String uri ->
+            def connection = new URL(uri).openConnection()
+            connection.connectTimeout = 20000
+            connection.readTimeout = 60000
+            connection.instanceFollowRedirects = true
+            connection.inputStream.withCloseable { stream -> stream.bytes }
+        }
+        def manifestBytes = fetchBytes('https://piston-meta.mojang.com/mc/game/version_manifest_v2.json')
+        def manifest = new groovy.json.JsonSlurper().parseText(new String(manifestBytes, 'UTF-8'))
+        def versionEntry = manifest.versions.find { it.id == '1.20.1' }
+        if (versionEntry == null) {
+            throw new GradleException('Mojang version manifest does not contain Minecraft 1.20.1')
+        }
+        def versionBytes = fetchBytes(versionEntry.url.toString())
+        def versionInfo = new groovy.json.JsonSlurper().parseText(new String(versionBytes, 'UTF-8'))
+        def downloads = versionInfo.downloads
+        def digest = java.security.MessageDigest.getInstance('SHA-1')
+
+        def downloadVerified = { String side ->
+            def mappingInfo = downloads[side + '_mappings']
+            if (mappingInfo == null || !mappingInfo.url || !mappingInfo.sha1) {
+                throw new GradleException('Mojang version metadata is missing ' + side + ' mappings')
+            }
+            byte[] bytes = fetchBytes(mappingInfo.url.toString())
+            String actualSha1 = digest.digest(bytes).encodeHex().toString()
+            digest.reset()
+            if (!actualSha1.equalsIgnoreCase(mappingInfo.sha1.toString())) {
+                throw new GradleException(side + ' mappings SHA-1 mismatch: expected '
+                        + mappingInfo.sha1 + ', received ' + actualSha1)
+            }
+            if (mappingInfo.size != null && bytes.length != mappingInfo.size as int) {
+                throw new GradleException(side + ' mappings size mismatch: expected '
+                        + mappingInfo.size + ', received ' + bytes.length)
+            }
+            def destination = new File(inputDir, side + '-mappings.txt')
+            destination.bytes = bytes
+            destination
+        }
+
+        def clientMappings = downloadVerified('client')
+        def serverMappings = downloadVerified('server')
+        def mappingsJar = forge1201SrgMappingsJar.get().asFile
+        mappingsJar.parentFile.mkdirs()
+        setArgs([
+                '--task', 'MAPPINGS_CSV',
+                '--srg', joinedTsrg.absolutePath,
+                '--client', clientMappings.absolutePath,
+                '--server', serverMappings.absolutePath,
+                '--output', mappingsJar.absolutePath
+        ])
     }
-    into forge1201SrgMappingDir
+
     doLast {
+        def outputDir = forge1201SrgMappingDir.get().asFile
+        outputDir.mkdirs()
+        project.copy {
+            from zipTree(forge1201SrgMappingsJar.get().asFile)
+            include 'methods.csv'
+            include 'fields.csv'
+            into outputDir
+        }
         ['methods.csv', 'fields.csv'].each { name ->
-            def mappingFile = forge1201SrgMappingDir.get().file(name).asFile
+            def mappingFile = new File(outputDir, name)
             if (!mappingFile.isFile() || mappingFile.length() == 0) {
-                throw new GradleException("Forge 1.20.1 SRG mapping archive is missing ${name}")
+                throw new GradleException('Installertools did not generate ' + name)
             }
         }
     }
