@@ -273,6 +273,25 @@ final class Forge1201CallSiteAdapterTest {
         assertTrue(containsCall(helper, "java/lang/Runnable", "run"));
         assertTrue(containsFrame(helper, Opcodes.F_SAME));
 
+        int physicalSideBranchIndex = -1;
+        int supplierGetIndex = -1;
+        int helperInstructionIndex = 0;
+        for (AbstractInsnNode instruction : helper.instructions) {
+            if (instruction instanceof JumpInsnNode jump && jump.getOpcode() == Opcodes.IF_ACMPNE) {
+                physicalSideBranchIndex = helperInstructionIndex;
+            }
+            if (instruction instanceof MethodInsnNode call
+                    && call.owner.equals("java/util/function/Supplier")
+                    && call.name.equals("get")) {
+                supplierGetIndex = helperInstructionIndex;
+            }
+            helperInstructionIndex++;
+        }
+        assertTrue(physicalSideBranchIndex >= 0, "Expected a physical-side mismatch branch");
+        assertTrue(supplierGetIndex > physicalSideBranchIndex,
+                "The supplier must remain unevaluated until after the physical-side check");
+        assertTrue(helper.maxStack >= 2);
+
         ClassWriter writer = new ClassWriter(0);
         node.accept(writer);
         ClassNode roundTripped = new ClassNode();
