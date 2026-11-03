@@ -139,6 +139,37 @@ final class Forge1201JarInspectorTest {
     }
 
     @Test
+    void analyzesTranslatedNeoForgeMetadataJar() throws IOException {
+        Path jar = createJarWithClass("META-INF/neoforge.mods.toml", neoForgeMetadata(),
+                "sample/TranslatedMod.class", sampleTranslatedModClass());
+
+        Forge1201ApiUsageAnalyzer.Analysis analysis =
+                Forge1201ApiUsageAnalyzer.analyzeTranslated(jar);
+
+        assertNull(analysis.metadata());
+        assertEquals(1, analysis.classCount());
+        assertEquals(java.util.List.of("sample/TranslatedMod (sample)"), analysis.modEntrypoints());
+        org.junit.jupiter.api.Assertions.assertTrue(analysis.referencedApiClasses()
+                .contains("net/neoforged/fml/ModList"));
+        org.junit.jupiter.api.Assertions.assertTrue(analysis.referencedApiClasses()
+                .contains("net/minecraftforge/eventbus/api/Event$Result"));
+        org.junit.jupiter.api.Assertions.assertTrue(analysis.methodCallSites().stream()
+                .anyMatch(call -> call.targetOwner().equals("net/neoforged/fml/ModList")
+                        && call.targetName().equals("get")));
+        org.junit.jupiter.api.Assertions.assertTrue(analysis.methodReferences().stream()
+                .anyMatch(reference -> reference.owner().equals("net/neoforged/fml/ModList")
+                        && reference.name().equals("get")));
+    }
+
+    @Test
+    void refusesToAnalyzeForgeMetadataAsTranslatedJar() throws IOException {
+        Path jar = createJar("META-INF/mods.toml", forge1201Metadata());
+
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                () -> Forge1201ApiUsageAnalyzer.analyzeTranslated(jar));
+    }
+
+    @Test
     void ignoresNeoForgeMetadata() throws IOException {
         Path jar = createJar("META-INF/neoforge.mods.toml", forge1201Metadata());
 
@@ -180,6 +211,58 @@ final class Forge1201JarInspectorTest {
             out.closeEntry();
         }
         return jar;
+    }
+
+    private static byte[] sampleTranslatedModClass() {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "sample/TranslatedMod", null,
+                "java/lang/Object", null);
+        AnnotationVisitor mod = writer.visitAnnotation("Lnet/neoforged/fml/common/Mod;", true);
+        mod.visit("value", "sample");
+        mod.visitEnd();
+
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "sample",
+                "()V", null, null);
+        method.visitCode();
+        method.visitMethodInsn(Opcodes.INVOKESTATIC, "net/neoforged/fml/ModList",
+                "get", "()Lnet/neoforged/fml/ModList;", false);
+        method.visitInsn(Opcodes.POP);
+        method.visitFieldInsn(Opcodes.GETSTATIC, "sample/TranslatedMod",
+                "RESULT", "Lnet/minecraftforge/eventbus/api/Event$Result;");
+        method.visitInsn(Opcodes.POP);
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(1, 0);
+        method.visitEnd();
+        writer.visitField(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "RESULT",
+                "Lnet/minecraftforge/eventbus/api/Event$Result;", null, null).visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static String neoForgeMetadata() {
+        return """
+                modLoader="javafml"
+                loaderVersion="[1,)"
+
+                [[mods]]
+                modId="sample"
+                version="1.0.0"
+                displayName="Sample"
+
+                [[dependencies.sample]]
+                modId="minecraft"
+                type="required"
+                versionRange="[1.21.1,1.22)"
+                ordering="NONE"
+                side="BOTH"
+
+                [[dependencies.sample]]
+                modId="neoforge"
+                type="required"
+                versionRange="[21.1.258,)"
+                ordering="NONE"
+                side="BOTH"
+                """;
     }
 
     private static byte[] sampleForgeModClass() {
