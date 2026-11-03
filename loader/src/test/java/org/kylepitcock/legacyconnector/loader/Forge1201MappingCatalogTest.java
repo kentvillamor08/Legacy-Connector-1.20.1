@@ -195,4 +195,27 @@ final class Forge1201MappingCatalogTest {
                 "net/minecraft/world/entity/Entity"));
     }
 
+    @Test
+    void recognizesVanillaAttributeAndEffectMigrationSurface() {
+        for (String type : java.util.List.of(
+                "net/minecraft/client/player/LocalPlayer",
+                "net/minecraft/world/entity/LivingEntity",
+                "net/minecraft/world/entity/player/Player",
+                "net/minecraft/world/entity/Mob",
+                "net/minecraft/world/entity/PathfinderMob",
+                "net/minecraft/world/entity/ai/attributes/Attribute",
+                "net/minecraft/world/entity/ai/attributes/AttributeInstance",
+                "net/minecraft/world/entity/ai/attributes/AttributeModifier",
+                "net/minecraft/world/entity/ai/attributes/AttributeModifier$Operation",
+                "net/minecraft/world/entity/ai/attributes/AttributeSupplier",
+                "net/minecraft/world/entity/ai/attributes/AttributeSupplier$Builder",
+                "net/minecraft/world/entity/ai/attributes/Attributes",
+                "net/minecraft/world/effect/MobEffect",
+                "net/minecraft/world/effect/MobEffectInstance",
+                "net/minecraft/world/effect/MobEffects")) {
+            org.junit.jupiter.api.Assertions.assertTrue(
+                    Forge1201MappingCatalog.isReviewedTargetApiType(type), type);
+        }
+    }
+
 }
