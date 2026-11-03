@@ -413,12 +413,28 @@ final class Forge1201CallSiteAdapterTest {
                         "expectedMatches": 1
                       },
                       {
-                        "type": "method-descriptor",
-                        "owner": "net/minecraftforge/client/event/EntityRenderersEvent$AddLayers",
-                        "name": "getSkin",
-                        "descriptor": "(Ljava/lang/String;)Lnet/minecraft/client/renderer/entity/LivingEntityRenderer;",
-                        "replacementDescriptor": "(Lnet/minecraft/client/resources/PlayerSkin$Model;)Lnet/minecraft/client/renderer/entity/EntityRenderer;",
-                        "opcode": "INVOKEVIRTUAL",
+                        "type": "instruction-sequence",
+                        "match": [{
+                          "kind": "method",
+                          "opcode": "INVOKEVIRTUAL",
+                          "owner": "net/minecraftforge/client/event/EntityRenderersEvent$AddLayers",
+                          "name": "getSkin",
+                          "descriptor": "(Ljava/lang/String;)Lnet/minecraft/client/renderer/entity/LivingEntityRenderer;"
+                        }],
+                        "replaceWith": [
+                          {
+                            "kind": "method",
+                            "opcode": "INVOKEVIRTUAL",
+                            "owner": "net/minecraftforge/client/event/EntityRenderersEvent$AddLayers",
+                            "name": "getSkin",
+                            "descriptor": "(Lnet/minecraft/client/resources/PlayerSkin$Model;)Lnet/minecraft/client/renderer/entity/EntityRenderer;"
+                          },
+                          {
+                            "kind": "type",
+                            "opcode": "CHECKCAST",
+                            "typeName": "net/minecraft/client/renderer/entity/LivingEntityRenderer"
+                          }
+                        ],
                         "expectedMatches": 1
                       }
                     ]
@@ -440,15 +456,20 @@ final class Forge1201CallSiteAdapterTest {
             MethodNode adapt = transformed.methods.stream()
                     .filter(method -> method.name.equals("adapt")).findFirst().orElseThrow();
 
-            TypeInsnNode cast = null;
+            boolean modelCast = false;
+            boolean livingRendererCast = false;
             MethodInsnNode lookup = null;
             for (AbstractInsnNode instruction : adapt.instructions) {
                 if (instruction instanceof TypeInsnNode typeInsn
-                        && typeInsn.getOpcode() == Opcodes.CHECKCAST) cast = typeInsn;
+                        && typeInsn.getOpcode() == Opcodes.CHECKCAST) {
+                    modelCast |= typeInsn.desc.equals("net/minecraft/client/resources/PlayerSkin$Model");
+                    livingRendererCast |= typeInsn.desc.equals(
+                            "net/minecraft/client/renderer/entity/LivingEntityRenderer");
+                }
                 if (instruction instanceof MethodInsnNode call) lookup = call;
             }
-            assertTrue(cast != null);
-            assertEquals("net/minecraft/client/resources/PlayerSkin$Model", cast.desc);
+            assertTrue(modelCast);
+            assertTrue(livingRendererCast);
             assertTrue(lookup != null);
             assertEquals("net/neoforged/neoforge/client/event/EntityRenderersEvent$AddLayers", lookup.owner);
             assertEquals("(Lnet/minecraft/client/resources/PlayerSkin$Model;)Lnet/minecraft/client/renderer/entity/EntityRenderer;",
