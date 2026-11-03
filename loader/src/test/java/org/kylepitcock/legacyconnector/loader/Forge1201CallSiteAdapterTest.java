@@ -267,11 +267,11 @@ final class Forge1201CallSiteAdapterTest {
         assertTrue((helper.access & Opcodes.ACC_PRIVATE) != 0);
         assertTrue((helper.access & Opcodes.ACC_STATIC) != 0);
         assertTrue((helper.access & Opcodes.ACC_SYNTHETIC) != 0);
-        assertTrue(containsCall(
+        assertTrue(containsField(
                 helper,
                 "net/neoforged/fml/loading/FMLEnvironment",
-                "getDist",
-                "()Lnet/neoforged/api/distmarker/Dist;"));
+                "dist",
+                "Lnet/neoforged/api/distmarker/Dist;"));
         assertTrue(containsCall(helper, "java/util/function/Supplier", "get"));
         assertTrue(containsCall(helper, "java/lang/Runnable", "run"));
         assertTrue(containsFrame(helper, Opcodes.F_SAME));
@@ -820,6 +820,18 @@ final class Forge1201CallSiteAdapterTest {
                     && call.owner.equals(owner)
                     && call.name.equals(name)
                     && call.desc.equals(descriptor)) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsField(
+            MethodNode method, String owner, String name, String descriptor) {
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof FieldInsnNode field
+                    && field.getOpcode() == Opcodes.GETSTATIC
+                    && field.owner.equals(owner)
+                    && field.name.equals(name)
+                    && field.desc.equals(descriptor)) return true;
         }
         return false;
     }
