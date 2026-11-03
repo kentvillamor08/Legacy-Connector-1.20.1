@@ -285,13 +285,37 @@ A second inspection path has been added for the output of `:loader:transformForg
 - The root task `:verifyForge1201TranslatedJar` provides the configured NeoForge 21.1.258 target classpath. It does not load or execute the transformed mod.
 - New synthetic tests cover translated metadata recognition, NeoForge annotation/member inventory, target namespace recognition, and target member verification using already-relocated owners.
 
-**Validation status:** this translated-JAR verifier and its new tests were just committed after the previous successful user run. They have not yet been tested by the user. Run:
+**Validation status (2026-11-03):** The user has now run both the clean loader test suite and the translated-JAR verifier successfully. The verifier completed with 278 classes scanned, 76/76 relocated NeoForge classes found, 97/108 relocated method references matched, 14/14 relocated field references matched, 44 remaining known semantic-adapter types, and zero unreviewed Forge API types. Eleven method references remain changed/unresolved and require scoped adaptations. This is static verification only.
+
+## Scoped adapter engine — implementation committed, local validation pending
+
+The public loader now has a generic, opt-in adapter-profile engine. It supports exact field-descriptor, method-descriptor, CHECKCAST-type, and declarative instruction-sequence operations. Each rule selects one original class/method signature and declares exact match counts. Missing methods, stale instruction patterns, overlapping sequences, and unexpected counts abort the transform before the output JAR is finalized. With no profile supplied, the original package-relocation path is unchanged.
+
+The public test suite now includes synthetic ASM tests for descriptor and CHECKCAST changes, instruction-sequence rewriting, archive integration, and fail-closed behavior. These new tests have **not yet been run by the user**. The assistant could not execute Gradle in this environment because repository network access was unavailable.
+
+Profiles that contain mod-specific selectors or derived bytecode patterns must stay outside this public repository. To test a local profile, pass it with `-Pforge1201AdapterProfile=<path>` when running `:loader:transformForge1201`. The loader reports the selected profile ID and the number of adapter rules/operations applied.
+
+After IntelliJ Ctrl+T, run the clean tests first:
 
 ```powershell
 .\gradlew.bat :loader:clean :loader:test --no-daemon
-
-.\gradlew.bat :verifyForge1201TranslatedJar `
-  -Pforge1201TranslatedJar="C:\Users\Administrator\legacy-connector-testbench\symbiote-1.1.3-neoforge-1.21.1-preliminary.jar"
 ```
 
-The first command validates the additional analysis/verifier test coverage. The second reads the exact preliminary JAR already generated locally and checks its relocated references against the configured target game compile classpath. This structural check still does not verify Minecraft-version semantic changes or mod startup/gameplay behavior.
+Only if that succeeds, create a **new** adapted derivative from the unchanged original input (do not overwrite the existing preliminary artifact):
+
+```powershell
+.\gradlew.bat :loader:transformForge1201 `
+  -Pforge1201Jar="C:\Users\Administrator\legacy-connector-testbench\symbiote-1.1.3.jar" `
+  -Pforge1201Output="C:\Users\Administrator\legacy-connector-testbench\symbiote-1.1.3-neoforge-1.21.1-adapted-preliminary.jar" `
+  -Pforge1201AdapterProfile="C:\Users\Administrator\legacy-connector-testbench\profiles\symbiote-1.1.3-neoforge-21.1.258-adapters.json"
+```
+
+Then run the translated-JAR verifier against that new output:
+
+```powershell
+.\gradlew.bat :verifyForge1201TranslatedJar `
+  -Pforge1201TranslatedJar="C:\Users\Administrator\legacy-connector-testbench\symbiote-1.1.3-neoforge-1.21.1-adapted-preliminary.jar"
+```
+
+The output must remain private and must not be placed in the active mods folder. Even if the new verifier count improves, the JAR is still preliminary: it does not establish successful mod bootstrap, linkage of every Minecraft member, or gameplay behavior.
+
