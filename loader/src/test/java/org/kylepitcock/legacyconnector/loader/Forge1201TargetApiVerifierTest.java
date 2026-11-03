@@ -181,7 +181,7 @@ final class Forge1201TargetApiVerifierTest {
                 "[47,)",
                 List.of(new Forge1201JarInfo.Mod("fixture", "1.0", "Fixture", List.of())));
         return new Forge1201ApiUsageAnalyzer.Analysis(
-                metadata, 1, List.of(), List.of(), null, Map.of(), classes, List.of(), methods, fields);
+                metadata, 1, List.of(), List.of(), null, Map.of(), classes, List.of(), List.of(), methods, fields);
     }
 
     private static byte[] targetModClass(String superName, boolean registerMethod, boolean busField) {
