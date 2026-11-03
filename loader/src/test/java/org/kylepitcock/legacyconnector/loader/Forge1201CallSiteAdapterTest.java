@@ -13,9 +13,15 @@ import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FrameNode;
+import org.objectweb.asm.tree.JumpInsnNode;
+import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.LocalVariableNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
@@ -95,6 +101,227 @@ final class Forge1201CallSiteAdapterTest {
         assertEquals("(Lsample/Holder;)Z",
                 ((MethodInsnNode) method.instructions.get(1)).desc);
         assertEquals("sample/SkinModel", ((TypeInsnNode) method.instructions.get(2)).desc);
+    }
+
+    @Test
+    void rewritesInjectedConstructorDescriptorAndExplicitFrameLocals() throws Exception {
+        String className = "sample/BootstrapMod";
+        String forgeBus = "net/minecraftforge/eventbus/api/IEventBus";
+        String container = "net/neoforged/fml/ModContainer";
+        Path profileFile = writeProfile("""
+                {
+                  "schemaVersion": 1,
+                  "id": "synthetic-bootstrap-frame-profile",
+                  "rules": [{
+                    "className": "sample/BootstrapMod",
+                    "methodName": "<init>",
+                    "methodDescriptor": "()V",
+                    "operations": [
+                      {
+                        "type": "method-declaration-descriptor",
+                        "descriptor": "()V",
+                        "replacementDescriptor": "(Lnet/neoforged/bus/api/IEventBus;Lnet/neoforged/fml/ModContainer;)V",
+                        "expectedMatches": 1
+                      },
+                      {
+                        "type": "frame-local-type",
+                        "localIndex": 2,
+                        "sourceType": "net/minecraftforge/eventbus/api/IEventBus",
+                        "replacementType": "net/neoforged/fml/ModContainer",
+                        "expectedMatches": 1
+                      },
+                      {
+                        "type": "local-variable",
+                        "localIndex": 2,
+                        "name": "forgeBus",
+                        "descriptor": "Lnet/minecraftforge/eventbus/api/IEventBus;",
+                        "replacementName": "container",
+                        "replacementDescriptor": "Lnet/neoforged/fml/ModContainer;",
+                        "expectedMatches": 1
+                      }
+                    ]
+                  }]
+                }
+                """);
+
+        ClassNode node = new ClassNode();
+        node.version = Opcodes.V17;
+        node.access = Opcodes.ACC_PUBLIC;
+        node.name = className;
+        node.superName = "java/lang/Object";
+
+        MethodNode constructor = new MethodNode(
+                Opcodes.ASM9, Opcodes.ACC_PUBLIC, "<init>", "()V", null, null);
+        LabelNode localStart = new LabelNode();
+        LabelNode branchTarget = new LabelNode();
+        LabelNode localEnd = new LabelNode();
+        constructor.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        constructor.instructions.add(new MethodInsnNode(
+                Opcodes.INVOKESPECIAL, "java/lang/Object", "<init>", "()V", false));
+        constructor.instructions.add(new InsnNode(Opcodes.ACONST_NULL));
+        constructor.instructions.add(new VarInsnNode(Opcodes.ASTORE, 1));
+        constructor.instructions.add(new InsnNode(Opcodes.ACONST_NULL));
+        constructor.instructions.add(new VarInsnNode(Opcodes.ASTORE, 2));
+        constructor.instructions.add(localStart);
+        constructor.instructions.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        constructor.instructions.add(new JumpInsnNode(Opcodes.IFNULL, branchTarget));
+        constructor.instructions.add(new InsnNode(Opcodes.RETURN));
+        constructor.instructions.add(branchTarget);
+        constructor.instructions.add(new FrameNode(
+                Opcodes.F_FULL, 3, new Object[]{className, forgeBus, forgeBus}, 0, null));
+        constructor.instructions.add(localEnd);
+        constructor.instructions.add(new InsnNode(Opcodes.RETURN));
+        constructor.localVariables = new ArrayList<>();
+        constructor.localVariables.add(new LocalVariableNode(
+                "forgeBus", "L" + forgeBus + ";", null, localStart, localEnd, 2));
+        constructor.maxStack = 1;
+        constructor.maxLocals = 3;
+        node.methods.add(constructor);
+
+        Forge1201CallSiteAdapter.Session session = new Forge1201CallSiteAdapter.Session(
+                Forge1201CallSiteAdapter.load(profileFile));
+        session.apply(node);
+        Forge1201CallSiteAdapter.Stats stats = session.finish();
+
+        assertEquals(1, stats.rulesApplied());
+        assertEquals(3, stats.operationsApplied());
+        assertEquals(
+                "(Lnet/neoforged/bus/api/IEventBus;Lnet/neoforged/fml/ModContainer;)V",
+                constructor.desc);
+        assertEquals(container, findFrame(constructor).local.get(2));
+        assertEquals("container", constructor.localVariables.get(0).name);
+        assertEquals("L" + container + ";", constructor.localVariables.get(0).desc);
+
+        ClassWriter writer = new ClassWriter(0);
+        node.accept(writer);
+        ClassNode roundTripped = new ClassNode();
+        new ClassReader(writer.toByteArray()).accept(roundTripped, 0);
+        MethodNode writtenConstructor = roundTripped.methods.stream()
+                .filter(method -> method.name.equals("<init>"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(constructor.desc, writtenConstructor.desc);
+        assertEquals(container, findFrame(writtenConstructor).local.get(2));
+        assertEquals("L" + container + ";", writtenConstructor.localVariables.get(0).desc);
+    }
+
+    @Test
+    void replacesLazyDistExecutorCallsWithOneSyntheticPhysicalSideHelper() throws Exception {
+        String className = "sample/ClientBootstrap";
+        String dist = "net/minecraftforge/api/distmarker/Dist";
+        String owner = "net/minecraftforge/fml/DistExecutor";
+        String descriptor = "(L" + dist + ";Ljava/util/function/Supplier;)V";
+        String helperName = "$legacyconnector$runWhenOn";
+        Path profileFile = writeProfile("""
+                {
+                  "schemaVersion": 1,
+                  "id": "synthetic-lazy-dist-profile",
+                  "rules": [{
+                    "className": "sample/ClientBootstrap",
+                    "methodName": "register",
+                    "methodDescriptor": "(Lnet/minecraftforge/api/distmarker/Dist;Ljava/util/function/Supplier;)V",
+                    "operations": [{
+                      "type": "lazy-dist-gate",
+                      "owner": "net/minecraftforge/fml/DistExecutor",
+                      "name": "unsafeRunWhenOn",
+                      "descriptor": "(Lnet/minecraftforge/api/distmarker/Dist;Ljava/util/function/Supplier;)V",
+                      "replacementName": "$legacyconnector$runWhenOn",
+                      "expectedMatches": 2
+                    }]
+                  }]
+                }
+                """);
+
+        ClassNode node = new ClassNode();
+        node.version = Opcodes.V17;
+        node.access = Opcodes.ACC_PUBLIC;
+        node.name = className;
+        node.superName = "java/lang/Object";
+        MethodNode register = new MethodNode(
+                Opcodes.ASM9, Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "register", descriptor, null, null);
+        for (int i = 0; i < 2; i++) {
+            register.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            register.instructions.add(new VarInsnNode(Opcodes.ALOAD, 1));
+            register.instructions.add(new MethodInsnNode(
+                    Opcodes.INVOKESTATIC, owner, "unsafeRunWhenOn", descriptor, false));
+        }
+        register.instructions.add(new InsnNode(Opcodes.RETURN));
+        register.maxStack = 2;
+        register.maxLocals = 2;
+        node.methods.add(register);
+
+        Forge1201CallSiteAdapter.Session session = new Forge1201CallSiteAdapter.Session(
+                Forge1201CallSiteAdapter.load(profileFile));
+        session.apply(node);
+        Forge1201CallSiteAdapter.Stats stats = session.finish();
+
+        assertEquals(1, stats.rulesApplied());
+        assertEquals(1, stats.operationsApplied());
+        assertEquals(2, countCalls(register, className, helperName, descriptor));
+        List<MethodNode> helpers = node.methods.stream()
+                .filter(method -> method.name.equals(helperName) && method.desc.equals(descriptor))
+                .toList();
+        assertEquals(1, helpers.size());
+        MethodNode helper = helpers.get(0);
+        assertTrue((helper.access & Opcodes.ACC_PRIVATE) != 0);
+        assertTrue((helper.access & Opcodes.ACC_STATIC) != 0);
+        assertTrue((helper.access & Opcodes.ACC_SYNTHETIC) != 0);
+        assertTrue(containsField(
+                helper, "net/minecraftforge/fml/loading/FMLEnvironment", "dist", "L" + dist + ";"));
+        assertTrue(containsCall(helper, "java/util/function/Supplier", "get"));
+        assertTrue(containsCall(helper, "java/lang/Runnable", "run"));
+        assertTrue(containsFrame(helper, Opcodes.F_SAME));
+
+        ClassWriter writer = new ClassWriter(0);
+        node.accept(writer);
+        ClassNode roundTripped = new ClassNode();
+        new ClassReader(writer.toByteArray()).accept(roundTripped, 0);
+        MethodNode writtenHelper = roundTripped.methods.stream()
+                .filter(method -> method.name.equals(helperName))
+                .findFirst()
+                .orElseThrow();
+        assertTrue(containsFrame(writtenHelper, Opcodes.F_SAME));
+    }
+
+    @Test
+    void failsClosedWhenRequestedFrameLocalDoesNotMatch() throws Exception {
+        Path profileFile = writeProfile("""
+                {
+                  "schemaVersion": 1,
+                  "id": "stale-frame-profile",
+                  "rules": [{
+                    "className": "sample/FrameFixture",
+                    "methodName": "run",
+                    "methodDescriptor": "()V",
+                    "operations": [{
+                      "type": "frame-local-type",
+                      "localIndex": 1,
+                      "sourceType": "sample/Expected",
+                      "replacementType": "sample/Replacement",
+                      "expectedMatches": 1
+                    }]
+                  }]
+                }
+                """);
+        ClassNode node = new ClassNode();
+        node.name = "sample/FrameFixture";
+        MethodNode method = new MethodNode(Opcodes.ASM9, Opcodes.ACC_PUBLIC, "run", "()V", null, null);
+        method.instructions.add(new FrameNode(
+                Opcodes.F_FULL, 2, new Object[]{"sample/FrameFixture", "sample/Actual"}, 0, null));
+        method.instructions.add(new InsnNode(Opcodes.RETURN));
+        node.methods.add(method);
+
+        Forge1201CallSiteAdapter.Session session = new Forge1201CallSiteAdapter.Session(
+                Forge1201CallSiteAdapter.load(profileFile));
+        assertThrows(IOException.class, () -> session.apply(node));
+    }
+
+    private static FrameNode findFrame(MethodNode method) {
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof FrameNode frame) return frame;
+        }
+        throw new AssertionError("Expected a stack-map frame");
     }
 
     @Test
@@ -552,6 +779,33 @@ final class Forge1201CallSiteAdapterTest {
         Path file = tempDir.resolve("adapter-profile.json");
         Files.writeString(file, json, StandardCharsets.UTF_8);
         return file;
+    }
+
+
+    private static boolean containsField(MethodNode method, String owner, String name, String descriptor) {
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof FieldInsnNode field
+                    && field.owner.equals(owner)
+                    && field.name.equals(name)
+                    && field.desc.equals(descriptor)) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsCall(MethodNode method, String owner, String name) {
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof MethodInsnNode call
+                    && call.owner.equals(owner)
+                    && call.name.equals(name)) return true;
+        }
+        return false;
+    }
+
+    private static boolean containsFrame(MethodNode method, int type) {
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof FrameNode frame && frame.type == type) return true;
+        }
+        return false;
     }
 
     private static MethodNode createSizeMethod() {

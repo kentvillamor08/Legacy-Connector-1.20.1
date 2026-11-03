@@ -25,6 +25,7 @@ import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.LocalVariableNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.TypeInsnNode;
@@ -45,8 +46,16 @@ public final class Forge1201CallSiteAdapter {
 
     private static final String OP_FIELD_DESCRIPTOR = "field-descriptor";
     private static final String OP_METHOD_DESCRIPTOR = "method-descriptor";
+    private static final String OP_METHOD_DECLARATION_DESCRIPTOR = "method-declaration-descriptor";
+    private static final String OP_FRAME_LOCAL_TYPE = "frame-local-type";
+    private static final String OP_LOCAL_VARIABLE = "local-variable";
+    private static final String OP_LAZY_DIST_GATE = "lazy-dist-gate";
     private static final String OP_CHECKCAST_TYPE = "checkcast-type";
     private static final String OP_INSTRUCTION_SEQUENCE = "instruction-sequence";
+
+    private static final String FORGE_DIST = "net/minecraftforge/api/distmarker/Dist";
+    private static final String FORGE_DIST_DESCRIPTOR = "L" + FORGE_DIST + ";";
+    private static final String FORGE_FML_ENVIRONMENT = "net/minecraftforge/fml/loading/FMLEnvironment";
 
     private Forge1201CallSiteAdapter() {}
 
@@ -95,7 +104,9 @@ public final class Forge1201CallSiteAdapter {
             List<InstructionSpec> replacement,
             int minimumMaxStack,
             int minimumMaxLocals,
-            int expectedMatches) {
+            int expectedMatches,
+            int localIndex,
+            String replacementName) {
         public Operation {
             match = List.copyOf(match);
             replacement = List.copyOf(replacement);
@@ -171,6 +182,7 @@ public final class Forge1201CallSiteAdapter {
     public static final class Session {
         private final Profile profile;
         private final Map<String, Rule> pending = new LinkedHashMap<>();
+        private final Set<String> generatedLazyHelpers = new HashSet<>();
         private int operationsApplied;
 
         public Session(Profile profile) {
@@ -201,7 +213,7 @@ public final class Forge1201CallSiteAdapter {
 
                 MethodNode method = matches.get(0);
                 for (Operation operation : rule.operations()) {
-                    applyOperation(rule, method, operation);
+                    applyOperation(classNode, rule, method, operation, generatedLazyHelpers);
                     operationsApplied++;
                 }
                 pending.remove(rule.key());
@@ -218,15 +230,166 @@ public final class Forge1201CallSiteAdapter {
         }
     }
 
-    private static void applyOperation(Rule rule, MethodNode method, Operation operation) throws IOException {
+    private static void applyOperation(
+            ClassNode classNode,
+            Rule rule,
+            MethodNode method,
+            Operation operation,
+            Set<String> generatedLazyHelpers) throws IOException {
         switch (operation.type()) {
             case OP_FIELD_DESCRIPTOR -> replaceFieldDescriptor(rule, method, operation);
             case OP_METHOD_DESCRIPTOR -> replaceMethodDescriptor(rule, method, operation);
+            case OP_METHOD_DECLARATION_DESCRIPTOR -> replaceMethodDeclarationDescriptor(rule, method, operation);
+            case OP_FRAME_LOCAL_TYPE -> replaceFrameLocalType(rule, method, operation);
+            case OP_LOCAL_VARIABLE -> replaceLocalVariable(rule, method, operation);
+            case OP_LAZY_DIST_GATE -> rewriteLazyDistGate(classNode, rule, method, operation, generatedLazyHelpers);
             case OP_CHECKCAST_TYPE -> replaceCheckcastType(rule, method, operation);
             case OP_INSTRUCTION_SEQUENCE -> rewriteInstructionSequence(rule, method, operation);
             default -> throw new IOException("Unsupported adapter operation '" + operation.type()
                     + "' in " + rule.key());
         }
+    }
+
+    private static void replaceMethodDeclarationDescriptor(Rule rule, MethodNode method, Operation operation)
+            throws IOException {
+        int matches = method.desc.equals(operation.descriptor()) ? 1 : 0;
+        requireExpectedMatches(rule, operation, matches);
+        method.desc = operation.replacementDescriptor();
+    }
+
+    /**
+     * Replaces a local's declared type in an explicit full stack-map frame.
+     * Compressed frames are intentionally not inferred: profiles must target a frame whose
+     * complete local array is present, otherwise the operation fails its exact match count.
+     */
+    private static void replaceFrameLocalType(Rule rule, MethodNode method, Operation operation)
+            throws IOException {
+        List<FrameNode> matches = new ArrayList<>();
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (!(instruction instanceof FrameNode frame)
+                    || (frame.type != Opcodes.F_FULL && frame.type != Opcodes.F_NEW)
+                    || frame.local == null) {
+                continue;
+            }
+            int entryIndex = frameLocalEntryIndex(frame.local, operation.localIndex());
+            if (entryIndex >= 0 && Objects.equals(frame.local.get(entryIndex), operation.sourceType())) {
+                matches.add(frame);
+            }
+        }
+        requireExpectedMatches(rule, operation, matches.size());
+        for (FrameNode frame : matches) {
+            int entryIndex = frameLocalEntryIndex(frame.local, operation.localIndex());
+            frame.local.set(entryIndex, operation.replacementType());
+        }
+    }
+
+    private static int frameLocalEntryIndex(List<Object> locals, int requestedSlot) {
+        int slot = 0;
+        for (int index = 0; index < locals.size(); index++) {
+            if (slot == requestedSlot) return index;
+            Object value = locals.get(index);
+            boolean categoryTwo = value instanceof Integer tag
+                    && (tag == Opcodes.LONG || tag == Opcodes.DOUBLE);
+            slot += categoryTwo ? 2 : 1;
+            if (slot > requestedSlot) return -1;
+        }
+        return -1;
+    }
+
+    private static void replaceLocalVariable(Rule rule, MethodNode method, Operation operation)
+            throws IOException {
+        List<LocalVariableNode> matches = method.localVariables == null
+                ? List.of()
+                : method.localVariables.stream()
+                        .filter(local -> local.index == operation.localIndex()
+                                && local.name.equals(operation.name())
+                                && local.desc.equals(operation.descriptor()))
+                        .toList();
+        requireExpectedMatches(rule, operation, matches.size());
+        for (LocalVariableNode local : matches) {
+            local.name = operation.replacementName();
+            local.desc = operation.replacementDescriptor();
+        }
+    }
+
+    /**
+     * Replaces DistExecutor's static owner with one private helper that keeps the Supplier lazy
+     * and checks FMLEnvironment.dist before obtaining and running its Runnable.
+     */
+    private static void rewriteLazyDistGate(
+            ClassNode classNode,
+            Rule rule,
+            MethodNode method,
+            Operation operation,
+            Set<String> generatedLazyHelpers) throws IOException {
+        List<MethodInsnNode> matches = new ArrayList<>();
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof MethodInsnNode call
+                    && call.getOpcode() == Opcodes.INVOKESTATIC
+                    && call.owner.equals(operation.owner())
+                    && call.name.equals(operation.name())
+                    && call.desc.equals(operation.descriptor())) {
+                matches.add(call);
+            }
+        }
+        requireExpectedMatches(rule, operation, matches.size());
+
+        String helperKey = classNode.name + "#" + operation.replacementName() + operation.descriptor();
+        if (!generatedLazyHelpers.contains(helperKey)) {
+            boolean collision = classNode.methods.stream().anyMatch(existing ->
+                    existing.name.equals(operation.replacementName())
+                            && existing.desc.equals(operation.descriptor()));
+            if (collision) {
+                throw new IOException("Lazy dist-gate helper name already exists in " + classNode.name
+                        + ": " + operation.replacementName() + operation.descriptor());
+            }
+            classNode.methods.add(createLazyDistGateHelper(operation.replacementName(), operation.descriptor()));
+            generatedLazyHelpers.add(helperKey);
+        }
+
+        for (MethodInsnNode call : matches) {
+            call.owner = classNode.name;
+            call.name = operation.replacementName();
+            call.itf = false;
+        }
+    }
+
+    private static MethodNode createLazyDistGateHelper(String helperName, String descriptor) {
+        MethodNode helper = new MethodNode(
+                Opcodes.ASM9,
+                Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC,
+                helperName,
+                descriptor,
+                null,
+                null);
+        LabelNode skip = new LabelNode();
+        helper.instructions.add(new FieldInsnNode(
+                Opcodes.GETSTATIC,
+                FORGE_FML_ENVIRONMENT,
+                "dist",
+                FORGE_DIST_DESCRIPTOR));
+        helper.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        helper.instructions.add(new org.objectweb.asm.tree.JumpInsnNode(Opcodes.IF_ACMPNE, skip));
+        helper.instructions.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        helper.instructions.add(new MethodInsnNode(
+                Opcodes.INVOKEINTERFACE,
+                "java/util/function/Supplier",
+                "get",
+                "()Ljava/lang/Object;",
+                true));
+        helper.instructions.add(new TypeInsnNode(Opcodes.CHECKCAST, "java/lang/Runnable"));
+        helper.instructions.add(new MethodInsnNode(
+                Opcodes.INVOKEINTERFACE,
+                "java/lang/Runnable",
+                "run",
+                "()V",
+                true));
+        helper.instructions.add(skip);
+        helper.instructions.add(new FrameNode(Opcodes.F_SAME, 0, null, 0, null));
+        helper.instructions.add(new InsnNode(Opcodes.RETURN));
+        helper.maxStack = 2;
+        helper.maxLocals = 2;
+        return helper;
     }
 
     private static void replaceFieldDescriptor(Rule rule, MethodNode method, Operation operation)
@@ -422,12 +585,45 @@ public final class Forge1201CallSiteAdapter {
                     requiredString(json, "replacementDescriptor", location),
                     null, null,
                     requiredOpcode(json, "opcode", location, type.equals(OP_FIELD_DESCRIPTOR)),
-                    List.of(), List.of(), 0, 0, expected);
+                    List.of(), List.of(), 0, 0, expected, -1, null);
+            case OP_METHOD_DECLARATION_DESCRIPTOR -> new Operation(
+                    type, null, null,
+                    requiredString(json, "descriptor", location),
+                    requiredString(json, "replacementDescriptor", location),
+                    null, null, -1, List.of(), List.of(), 0, 0, expected, -1, null);
+            case OP_FRAME_LOCAL_TYPE -> {
+                int localIndex = requiredInt(json, "localIndex", location);
+                if (localIndex < 0) throw new IOException(location + ".localIndex must not be negative");
+                yield new Operation(
+                        type, null, null, null, null,
+                        requiredInternalName(json, "sourceType", location),
+                        requiredInternalName(json, "replacementType", location),
+                        -1, List.of(), List.of(), 0, 0, expected, localIndex, null);
+            }
+            case OP_LOCAL_VARIABLE -> {
+                int localIndex = requiredInt(json, "localIndex", location);
+                if (localIndex < 0) throw new IOException(location + ".localIndex must not be negative");
+                yield new Operation(
+                        type, null,
+                        requiredString(json, "name", location),
+                        requiredString(json, "descriptor", location),
+                        requiredString(json, "replacementDescriptor", location),
+                        null, null, -1, List.of(), List.of(), 0, 0, expected,
+                        localIndex, requiredString(json, "replacementName", location));
+            }
+            case OP_LAZY_DIST_GATE -> new Operation(
+                    type,
+                    requiredInternalName(json, "owner", location),
+                    requiredString(json, "name", location),
+                    requiredString(json, "descriptor", location),
+                    null, null, null, Opcodes.INVOKESTATIC,
+                    List.of(), List.of(), 0, 0, expected, -1,
+                    requiredString(json, "replacementName", location));
             case OP_CHECKCAST_TYPE -> new Operation(
                     type, null, null, null, null,
                     requiredInternalName(json, "sourceType", location),
                     requiredInternalName(json, "replacementType", location),
-                    -1, List.of(), List.of(), 0, 0, expected);
+                    -1, List.of(), List.of(), 0, 0, expected, -1, null);
             case OP_INSTRUCTION_SEQUENCE -> {
                 JsonArray match = requiredArray(json, "match", location);
                 JsonArray replacement = requiredArray(json, "replaceWith", location);
@@ -441,7 +637,7 @@ public final class Forge1201CallSiteAdapter {
                     throw new IOException(location + " minimum max values must not be negative");
                 }
                 yield new Operation(type, null, null, null, null, null, null, -1,
-                        matchSpecs, replacementSpecs, minimumMaxStack, minimumMaxLocals, expected);
+                        matchSpecs, replacementSpecs, minimumMaxStack, minimumMaxLocals, expected, -1, null);
             }
             default -> throw new IOException(location + " has unsupported operation type '" + type + "'");
         };
