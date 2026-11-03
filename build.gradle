@@ -147,6 +147,17 @@ neoForge {
 configurations {
     // The legacy-era libraries embedded as resources of the distributable jar (see the comment at their declaration).
     legacyLibs { transitive = false }
+
+    // The Forge 1.20.1 API verifier checks only Minecraft/NeoForge target types. Optional third-party
+    // mod APIs are not needed for that audit and must not make it depend on unrelated mod Maven servers.
+    forge1201VerifierTargetClasspath {
+        extendsFrom configurations.compileClasspath
+        exclude group: 'top.theillusivec4.curios'
+        exclude group: 'maven.modrinth'
+        exclude group: 'mezz.jei'
+        exclude group: 'com.simibubi.create'
+        exclude group: 'com.github.glitchfiend'
+    }
 }
 
 dependencies {
@@ -167,8 +178,7 @@ dependencies {
         version { strictly pehkui_version }
     }
 
-    // Libraries Minecraft 1.7.10 / 1.12.2 shipped and legacy mods use directly, absent from 1.21.1. NOT jar-in-jar: a jar-in-jar library
-    // always enters the game module layer, and a modern mod that bundles the same packages (ScalableCatsForce ships Scala 2.13) then stops
+    // Libraries Minecraft 1.7.10 / 1.12.2 shipped and legacy mods use directly, absent from 1.21.1. NOT jar-in-jar: a jar-in-jar library    // always enters the game module layer, and a modern mod that bundles the same packages (ScalableCatsForce ships Scala 2.13) then stops
     // the launch with "Modules X and Y export package scala.annotation". They are plain resources of the distributable jar
     // (META-INF/legacyconnector/libs); the loader's BundledLibraries hands each one to FML only when a legacy mod uses it and the
     // rest of the pack does not already provide it. In development they stay on the class path.
@@ -337,8 +347,7 @@ def syncLegacyLibs = tasks.register('syncLegacyLibs', Sync) {
         def names = destinationDir.listFiles().findAll { it.name.endsWith('.jar') }*.name.sort()
         new File(destinationDir, 'index.txt').text = names.join('\n') + '\n'
     }
-}
-tasks.matching { it.name.startsWith('run') || (it.name.startsWith('prepare') && it.name.endsWith('Run')) }.configureEach {
+}tasks.matching { it.name.startsWith('run') || (it.name.startsWith('prepare') && it.name.endsWith('Run')) }.configureEach {
     if (project.hasProperty('embeddedLibs')) dependsOn syncLegacyLibs
 }
 
@@ -428,7 +437,7 @@ tasks.register('verifyForge1201TranslatedJar', JavaExec) {
     classpath = (
             project(':loader').sourceSets.main.runtimeClasspath
                     + project(':loader').sourceSets.main.compileClasspath
-                    + sourceSets.main.compileClasspath
+                    + configurations.forge1201VerifierTargetClasspath
     )
     mainClass = 'org.kylepitcock.legacyconnector.loader.Forge1201TranslatedJarVerifier'
     systemProperty 'legacyconnector.targetNeoForgeVersion', project.neo_version
@@ -452,7 +461,7 @@ tasks.register('verifyForge1201TargetApi', JavaExec) {
     classpath = (
             project(':loader').sourceSets.main.runtimeClasspath
                     + project(':loader').sourceSets.main.compileClasspath
-                    + sourceSets.main.compileClasspath
+                    + configurations.forge1201VerifierTargetClasspath
     )
     mainClass = 'org.kylepitcock.legacyconnector.loader.Forge1201TargetApiVerifier'
     systemProperty 'legacyconnector.targetNeoForgeVersion', project.neo_version
