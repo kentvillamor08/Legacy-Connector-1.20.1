@@ -90,6 +90,18 @@ final class Forge1201MappingCatalogTest {
     }
 
     @Test
+    void recognizesReviewedVanillaMenuTargetTypes() {
+        org.junit.jupiter.api.Assertions.assertTrue(Forge1201MappingCatalog.isReviewedTargetApiType(
+                "net/minecraft/server/level/ServerPlayer"));
+        org.junit.jupiter.api.Assertions.assertTrue(Forge1201MappingCatalog.isReviewedTargetApiType(
+                "net/minecraft/world/MenuProvider"));
+        org.junit.jupiter.api.Assertions.assertTrue(Forge1201MappingCatalog.isReviewedTargetApiType(
+                "net/minecraft/network/FriendlyByteBuf"));
+        org.junit.jupiter.api.Assertions.assertTrue(Forge1201MappingCatalog.isReviewedTargetApiType(
+                "net/minecraft/network/RegistryFriendlyByteBuf"));
+    }
+
+    @Test
     void rejectsBlankClassNames() {
         assertThrows(IllegalArgumentException.class, () -> Forge1201MappingCatalog.classify(" "));
     }
