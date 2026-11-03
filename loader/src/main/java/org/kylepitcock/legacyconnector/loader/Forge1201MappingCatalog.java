@@ -67,7 +67,9 @@ public final class Forge1201MappingCatalog {
 
     /**
      * Explicit type substitutions reviewed against the Forge 47.x and NeoForge 21.1.x APIs.
-     * These are not namespace-wide moves: the config-spec family maps to ModConfigSpec, and RegistryObject maps to Supplier because the audited usage only calls get().
+     * These are not namespace-wide moves: the config-spec family maps to ModConfigSpec,
+     * RegistryObject maps to Supplier because the audited usage only calls get(), and
+     * IForgeMenuType maps to the target IMenuTypeExtension contract.
      */
     private static final Map<String, String> EXPLICIT_TYPE_REPLACEMENTS = Map.of(
             "net/minecraftforge/common/ForgeConfigSpec",
@@ -81,7 +83,9 @@ public final class Forge1201MappingCatalog {
             "net/minecraftforge/common/ForgeConfigSpec$DoubleValue",
             "net/neoforged/neoforge/common/ModConfigSpec$DoubleValue",
             "net/minecraftforge/registries/RegistryObject",
-            "java/util/function/Supplier"
+            "java/util/function/Supplier",
+            "net/minecraftforge/common/extensions/IForgeMenuType",
+            "net/neoforged/neoforge/common/extensions/IMenuTypeExtension"
     );
 
     /**
@@ -99,8 +103,6 @@ public final class Forge1201MappingCatalog {
                     "No direct replacement; rework physical-side separation and class loading."),
             Map.entry("net/minecraftforge/registries/ForgeRegistries",
                     "Choose the correct vanilla BuiltInRegistries or NeoForgeRegistries key per registry."),
-            Map.entry("net/minecraftforge/common/extensions/IForgeMenuType",
-                    "Migrate to IMenuTypeExtension and verify menu factory descriptors."),
             Map.entry("net/minecraftforge/client/event/RegisterGuiOverlaysEvent",
                     "Rewrite overlay registration to the layered GUI API."),
             Map.entry("net/minecraftforge/client/gui/overlay/IGuiOverlay",
@@ -204,7 +206,7 @@ public final class Forge1201MappingCatalog {
                     sourceInternalName,
                     Kind.EXPLICIT_TYPE_REPLACEMENT,
                     explicitReplacement,
-                    "Explicit Forge ConfigSpec -> NeoForge ModConfigSpec substitution; builder and value APIs were reviewed.");
+                    "Explicit Forge-to-NeoForge API type replacement reviewed for this compatibility slice.");
         }
 
         String manualReason = MANUAL_ADAPTERS.get(sourceInternalName);
