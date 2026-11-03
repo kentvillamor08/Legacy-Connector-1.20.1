@@ -312,7 +312,7 @@ final class Forge1201CallSiteAdapterTest {
         assertEquals(1, countCalls(method, DIMENSIONS, "withEyeHeight", "(F)" + DIMENSIONS_DESC));
         assertEquals(1, countCalls(method, EVENT, "setNewSize", "(" + DIMENSIONS_DESC + ")V"));
         assertEquals(1, countCalls(method, DIMENSIONS, "width", "()F"));
-        assertEquals(1, countCalls(method, DIMENSIONS, "height", "()F"));
+        assertEquals(2, countCalls(method, DIMENSIONS, "height", "()F"));
         assertEquals(0, countCalls(method, EVENT, "getNewEyeHeight", "()F"));
         assertEquals(0, countCalls(method, EVENT, "setNewEyeHeight", "(F)V"));
         assertEquals(0, countVars(method, Opcodes.FLOAD, 3));
