@@ -116,6 +116,61 @@ After the mapping catalog has been reviewed, verify the remaining namespace-relo
 ```
 
 This task runs in the root project's target compile classpath while the `:loader` module remains independent of Minecraft/NeoForge classes. It reads class-file structures with ASM and checks target class presence plus exact method/field descriptors, including inherited members where the visible hierarchy is complete. Missing classes, missing members, incomplete hierarchy lookups, and member descriptors that contain manual-adapter types are reported separately. No target class is loaded or initialized and no JAR bytes are changed. A structural match is not proof of behavioral compatibility; manual-adapter types and Minecraft 1.20.1-to-1.21.1 changes remain separate.
+
+## Scoped call-site adapters
+
+Some Forge-to-NeoForge changes cannot be represented by a package or descriptor remap alone. The bytecode transformer therefore accepts an optional external adapter profile. The public loader implements reusable, narrowly scoped operations; a profile supplies the exact original class/method selectors and expected instruction patterns for a particular mod.
+
+Adapter profiles are JSON files kept outside this repository when they contain mod-specific analysis or derived implementation details. They are applied **before** the package relocation pass and are never embedded in the output JAR.
+
+The supported profile schema is version 1. Each rule identifies one class by JVM internal name, then one method by its original name and full descriptor. Each operation declares an exact number of expected matches. Current operation types are:
+
+- `field-descriptor`: replace a field instruction descriptor when owner, name, original descriptor and opcode all match.
+- `method-descriptor`: replace a method invocation descriptor when owner, name, original descriptor and invocation opcode all match.
+- `checkcast-type`: replace a specific `CHECKCAST` target type.
+- `entity-dimensions-eye-height-scale`: rewrite a recognized event-size pattern that stores eye height separately, preserving its multiplier and clamp while moving the value into `EntityDimensions`.
+
+Example profile structure using synthetic names:
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "example-profile",
+  "rules": [
+    {
+      "className": "example/mod/ExampleHandler",
+      "methodName": "onEvent",
+      "methodDescriptor": "(Lexample/api/ExampleEvent;)V",
+      "operations": [
+        {
+          "type": "method-descriptor",
+          "owner": "example/api/ExampleEvent",
+          "name": "accept",
+          "descriptor": "(Lexample/api/OldValue;)V",
+          "replacementDescriptor": "(Lexample/api/NewValue;)V",
+          "opcode": "INVOKEVIRTUAL",
+          "expectedMatches": 1
+        }
+      ]
+    }
+  ]
+}
+```
+
+The loader rejects unknown schema versions, duplicate selectors, missing required methods, unexpected match counts, and unrecognized instruction patterns. A mismatch aborts the transform before the output archive is finalized; it does not silently skip an adapter or emit a partially adapted JAR. With no profile supplied, the existing package-relocation path is unchanged.
+
+For a local profile file, pass its path to the existing task:
+
+```powershell
+.\\gradlew.bat :loader:transformForge1201 `
+  -Pforge1201Jar="F:\\path\\to\\original-forge-1.20.1.jar" `
+  -Pforge1201Output="F:\\path\\to\\preliminary-neoforge-1.21.1.jar" `
+  -Pforge1201AdapterProfile="F:\\private-testbench\\profiles\\adapter-profile.json"
+```
+
+The transform console reports the profile ID, number of rules applied and number of operations applied. This is still a static rewrite, not proof of target method linkage, mod bootstrap or gameplay correctness. Run the loader tests and the translated-JAR verifier after every profile change.
+
+
 ## Current status
 
 - Added a separate metadata detector for jars whose `mods.toml` declares JavaFML 47.x, Minecraft 1.20.1 and Forge 47.x.
