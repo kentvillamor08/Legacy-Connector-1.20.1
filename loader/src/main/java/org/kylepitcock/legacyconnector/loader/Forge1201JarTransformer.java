@@ -126,17 +126,6 @@ public final class Forge1201JarTransformer {
         System.out.println("  IForgeRegistry lookup calls adapted to Registry: "
                 + registry.registryLookupCalls());
 
-        Forge1201RegistryAdapter.Stats registry = bytecode.registryAdapters();
-        System.out.println("  RegistryObject#get -> Supplier#get calls: " + registry.registryObjectGetCalls());
-        System.out.println("  DeferredRegister.create(IForgeRegistry, String) calls adapted: "
-                + registry.deferredRegisterCreateCalls());
-        System.out.println("  DeferredRegister.register(String, Supplier) return descriptors adapted: "
-                + registry.deferredRegisterRegisterCalls());
-        System.out.println("  ForgeRegistries item/block/sound fields adapted: "
-                + registry.builtInRegistryFieldReads());
-        System.out.println("  IForgeRegistry lookup calls adapted to Registry: "
-                + registry.registryLookupCalls());
-
         printTypes("Types requiring semantic adapters (left unchanged)", bytecode.manualAdapterTypes());
         printTypes("Unreviewed Forge API types (left unchanged)", bytecode.unmappedForgeApiTypes());
 
