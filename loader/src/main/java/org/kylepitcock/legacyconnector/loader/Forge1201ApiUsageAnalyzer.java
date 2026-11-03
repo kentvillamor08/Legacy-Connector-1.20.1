@@ -30,6 +30,7 @@ import org.objectweb.asm.commons.Remapper;
  */
 public final class Forge1201ApiUsageAnalyzer {
     private static final String FORGE_MOD_ANNOTATION = "Lnet/minecraftforge/fml/common/Mod;";
+    private static final String NEOFORGE_MOD_ANNOTATION = "Lnet/neoforged/fml/common/Mod;";
 
     private Forge1201ApiUsageAnalyzer() {}
 
@@ -148,6 +149,7 @@ public final class Forge1201ApiUsageAnalyzer {
 
         private static boolean isForgeOrOptionalApi(String name) {
             return name.startsWith("net/minecraftforge/")
+                    || name.startsWith("net/neoforged/")
                     || name.startsWith("top/theillusivec4/curios/")
                     || name.startsWith("com/illusivesoulworks/")
                     || name.startsWith("com/gelred/");
@@ -156,6 +158,7 @@ public final class Forge1201ApiUsageAnalyzer {
         private static boolean isGameApi(String name) {
             return name.startsWith("net/minecraft/")
                     || name.startsWith("net/minecraftforge/")
+                    || name.startsWith("net/neoforged/")
                     || name.startsWith("com/mojang/blaze3d/")
                     || name.startsWith("com/mojang/math/")
                     || name.startsWith("org/spongepowered/asm/mixin/");
@@ -218,7 +221,31 @@ public final class Forge1201ApiUsageAnalyzer {
         if (metadata == null) {
             throw new IllegalArgumentException("The file is not recognized as a Forge 1.20.1 mod jar: " + jarPath);
         }
+        return analyzeClasses(jarPath, metadata, FORGE_MOD_ANNOTATION);
+    }
 
+    /**
+     * Inventories the output of the preliminary Forge 1.20.1 -> NeoForge 1.21.1
+     * transformer. The returned Analysis has null source metadata because the input
+     * is expected to contain neoforge.mods.toml rather than mods.toml.
+     */
+    public static Analysis analyzeTranslated(Path jarPath) throws IOException {
+        if (jarPath == null || !java.nio.file.Files.isRegularFile(jarPath)) {
+            throw new IllegalArgumentException("Translated JAR does not exist: " + jarPath);
+        }
+        try (ZipFile zip = new ZipFile(jarPath.toFile())) {
+            if (zip.getEntry(Forge1201JarArchiveTransformer.TARGET_METADATA) == null
+                    || zip.getEntry(Forge1201JarArchiveTransformer.SOURCE_METADATA) != null) {
+                throw new IllegalArgumentException(
+                        "Input must be a metadata-translated JAR containing "
+                                + Forge1201JarArchiveTransformer.TARGET_METADATA);
+            }
+        }
+        return analyzeClasses(jarPath, null, NEOFORGE_MOD_ANNOTATION);
+    }
+
+    private static Analysis analyzeClasses(
+            Path jarPath, Forge1201JarInfo metadata, String modAnnotation) throws IOException {
         ApiReferenceCollector references = new ApiReferenceCollector();
         List<String> entrypoints = new ArrayList<>();
         List<String> mixinConfigs = new ArrayList<>();
@@ -278,7 +305,7 @@ public final class Forge1201ApiUsageAnalyzer {
 
                         @Override
                         public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
-                            if (!FORGE_MOD_ANNOTATION.equals(descriptor)) return null;
+                            if (!modAnnotation.equals(descriptor)) return null;
                             return new AnnotationVisitor(Opcodes.ASM9) {
                                 @Override
                                 public void visit(String name, Object value) {
@@ -394,16 +421,21 @@ public final class Forge1201ApiUsageAnalyzer {
 
     public static void print(Analysis analysis) {
         System.out.println("Forge 1.20.1 API inventory");
-        System.out.println("Jar: " + analysis.metadata().path().getFileName());
-        System.out.println("Mods: " + analysis.metadata().mods().stream()
-                .map(mod -> mod.modId() + " " + mod.version() + " (" + mod.displayName() + ")")
-                .reduce((a, b) -> a + ", " + b).orElse("none"));
-        System.out.println("Declared dependencies:");
-        for (Forge1201JarInfo.Mod mod : analysis.metadata().mods()) {
-            for (Forge1201JarInfo.Dependency dependency : mod.dependencies()) {
-                System.out.println("  " + (dependency.mandatory() ? "required " : "optional ")
-                        + dependency.modId() + " " + dependency.versionRange()
-                        + " [" + dependency.ordering() + ", " + dependency.side() + "]");
+        if (analysis.metadata() == null) {
+            System.out.println("Jar: translated NeoForge 1.21.1 artifact");
+            System.out.println("Metadata: " + Forge1201JarArchiveTransformer.TARGET_METADATA);
+        } else {
+            System.out.println("Jar: " + analysis.metadata().path().getFileName());
+            System.out.println("Mods: " + analysis.metadata().mods().stream()
+                    .map(mod -> mod.modId() + " " + mod.version() + " (" + mod.displayName() + ")")
+                    .reduce((a, b) -> a + ", " + b).orElse("none"));
+            System.out.println("Declared dependencies:");
+            for (Forge1201JarInfo.Mod mod : analysis.metadata().mods()) {
+                for (Forge1201JarInfo.Dependency dependency : mod.dependencies()) {
+                    System.out.println("  " + (dependency.mandatory() ? "required " : "optional ")
+                            + dependency.modId() + " " + dependency.versionRange()
+                            + " [" + dependency.ordering() + ", " + dependency.side() + "]");
+                }
             }
         }
         System.out.println("Classes scanned: " + analysis.classCount());
