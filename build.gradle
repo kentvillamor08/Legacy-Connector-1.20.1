@@ -167,8 +167,7 @@ dependencies {
     // Optional integrations: only used when the mod is installed (legacy library bridges).
     compileOnly "top.theillusivec4.curios:curios-neoforge:${curios_version}:api"
     compileOnly "maven.modrinth:jade:${jade_version}"
-    compileOnly "mezz.jei:jei-1.21.1-neoforge-api:${jei_version}"
-    compileOnly("com.simibubi.create:create-1.21.1:${create_version}") { transitive = false }
+    compileOnly "mezz.jei:jei-1.21.1-neoforge-api:${jei_version}"    compileOnly("com.simibubi.create:create-1.21.1:${create_version}") { transitive = false }
     compileOnly("com.github.glitchfiend:TerraBlender-neoforge:${terrablender_version}") { transitive = false }
 
     // Pehkui (MIT, Modrinth): entity size scaling (hitbox, eye height, model). Legacy Entity.setSize / eyeHeight and Fisk's Heroes' size
@@ -178,7 +177,8 @@ dependencies {
         version { strictly pehkui_version }
     }
 
-    // Libraries Minecraft 1.7.10 / 1.12.2 shipped and legacy mods use directly, absent from 1.21.1. NOT jar-in-jar: a jar-in-jar library    // always enters the game module layer, and a modern mod that bundles the same packages (ScalableCatsForce ships Scala 2.13) then stops
+    // Libraries Minecraft 1.7.10 / 1.12.2 shipped and legacy mods use directly, absent from 1.21.1. NOT jar-in-jar: a jar-in-jar library
+    // always enters the game module layer, and a modern mod that bundles the same packages (ScalableCatsForce ships Scala 2.13) then stops
     // the launch with "Modules X and Y export package scala.annotation". They are plain resources of the distributable jar
     // (META-INF/legacyconnector/libs); the loader's BundledLibraries hands each one to FML only when a legacy mod uses it and the
     // rest of the pack does not already provide it. In development they stay on the class path.
@@ -337,7 +337,6 @@ neoForge.ideSyncTask generateModMetadata
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
-
 // The bundled legacy-era libraries plus an index.txt listing them: embedded in the distributable jar under META-INF/legacyconnector/libs
 // and read from here with -PembeddedLibs (the loader's -Dlegacyconnector.libsDir).
 def syncLegacyLibs = tasks.register('syncLegacyLibs', Sync) {
@@ -347,7 +346,9 @@ def syncLegacyLibs = tasks.register('syncLegacyLibs', Sync) {
         def names = destinationDir.listFiles().findAll { it.name.endsWith('.jar') }*.name.sort()
         new File(destinationDir, 'index.txt').text = names.join('\n') + '\n'
     }
-}tasks.matching { it.name.startsWith('run') || (it.name.startsWith('prepare') && it.name.endsWith('Run')) }.configureEach {
+}
+
+tasks.matching { it.name.startsWith('run') || (it.name.startsWith('prepare') && it.name.endsWith('Run')) }.configureEach {
     if (project.hasProperty('embeddedLibs')) dependsOn syncLegacyLibs
 }
 
