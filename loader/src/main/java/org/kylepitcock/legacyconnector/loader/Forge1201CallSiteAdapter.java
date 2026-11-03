@@ -10,7 +10,6 @@ import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -556,14 +555,18 @@ public final class Forge1201CallSiteAdapter {
     }
 
     private static boolean isSimpleOpcode(int opcode) {
-        return opcode >= Opcodes.NOP && opcode <= Opcodes.DCONST_1
+        return opcode == Opcodes.NOP
+                || opcode >= Opcodes.ACONST_NULL && opcode <= Opcodes.DCONST_1
                 || opcode >= Opcodes.IALOAD && opcode <= Opcodes.SALOAD
+                || opcode >= Opcodes.IASTORE && opcode <= Opcodes.SASTORE
                 || opcode >= Opcodes.POP && opcode <= Opcodes.SWAP
-                || opcode >= Opcodes.IADD && opcode <= Opcodes.DCMPG
-                || opcode >= Opcodes.I2L && opcode <= Opcodes.D2F
-                || opcode >= Opcodes.LCMP && opcode <= Opcodes.RETURN
-                || opcode >= Opcodes.ARRAYLENGTH && opcode <= Opcodes.MONITOREXIT
-                || opcode == Opcodes.ATHROW;
+                || opcode >= Opcodes.IADD && opcode <= Opcodes.LXOR
+                || opcode >= Opcodes.I2L && opcode <= Opcodes.DCMPG
+                || opcode >= Opcodes.IRETURN && opcode <= Opcodes.RETURN
+                || opcode == Opcodes.ARRAYLENGTH
+                || opcode == Opcodes.ATHROW
+                || opcode == Opcodes.MONITORENTER
+                || opcode == Opcodes.MONITOREXIT;
     }
 
     private static String requiredInternalName(JsonObject json, String property, String location)
