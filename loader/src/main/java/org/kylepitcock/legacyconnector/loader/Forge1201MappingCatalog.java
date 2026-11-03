@@ -174,7 +174,11 @@ public final class Forge1201MappingCatalog {
     private static final Set<String> REVIEWED_TARGET_API_TYPES = Set.of(
             "net/minecraft/core/registries/BuiltInRegistries",
             "net/minecraft/core/Registry",
-            "net/minecraft/core/DefaultedRegistry"
+            "net/minecraft/core/DefaultedRegistry",
+            "net/minecraft/server/level/ServerPlayer",
+            "net/minecraft/world/MenuProvider",
+            "net/minecraft/network/FriendlyByteBuf",
+            "net/minecraft/network/RegistryFriendlyByteBuf"
     );
 
     private static final List<PackageMove> ORDERED_PACKAGE_MOVES = PACKAGE_MOVES.stream()
