@@ -48,20 +48,20 @@ public final class Forge1201TranslatedJarVerifier {
         System.out.println("  unmapped source SRG field references: " + normalization.unmappedFields().size());
         normalization.unmappedFields().forEach(value -> System.out.println("  UNMAPPED FIELD: " + value));
 
-        System.out.println("\nRelocated NeoForge API classes:");
+        System.out.println("\nTarget API classes (vanilla plus relocated NeoForge):");
         System.out.println("  distinct references: " + result.candidateClassCount());
         System.out.println("  target class files found: " + result.verifiedClassCount());
         System.out.println("  missing target classes: " + result.missingTargetClasses().size());
         result.missingTargetClasses().forEach(name ->
                 System.out.println("  MISSING CLASS: " + name.replace('/', '.')));
 
-        System.out.println("\nRelocated NeoForge API method references (source names normalized):");
+        System.out.println("\nTarget API method references (source names normalized):");
         System.out.println("  unique references: " + result.uniqueMethodReferences());
         System.out.println("  exact target/inherited matches: " + result.verifiedMethodReferences());
         System.out.println("  unresolved or changed: " + result.methodIssues().size());
         result.methodIssues().forEach(issue -> System.out.println("  " + issue.display()));
 
-        System.out.println("\nRelocated NeoForge API field references (source names normalized):");
+        System.out.println("\nTarget API field references (source names normalized):");
         System.out.println("  unique references: " + result.uniqueFieldReferences());
         System.out.println("  exact target/inherited matches: " + result.verifiedFieldReferences());
         System.out.println("  unresolved or changed: " + result.fieldIssues().size());
