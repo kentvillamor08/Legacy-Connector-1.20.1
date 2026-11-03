@@ -50,6 +50,8 @@ final class Forge1201RegistryAdapterTest {
                 "net/minecraftforge/registries/ForgeRegistries", "BLOCK_ENTITY_TYPES", FORGE_REGISTRY_DESC));
         method.instructions.add(new FieldInsnNode(Opcodes.GETSTATIC,
                 "net/minecraftforge/registries/ForgeRegistries", "ENTITY_TYPES", FORGE_REGISTRY_DESC));
+        method.instructions.add(new FieldInsnNode(Opcodes.GETSTATIC,
+                "net/minecraftforge/registries/ForgeRegistries", "MENU_TYPES", FORGE_REGISTRY_DESC));
 
         String createSource = "(" + FORGE_REGISTRY_DESC + STRING_DESC + ")L"
                 + FORGE_DEFERRED_REGISTER + ";";
@@ -86,19 +88,20 @@ final class Forge1201RegistryAdapterTest {
         assertEquals(3, stats.registryObjectGetCalls());
         assertEquals(1, stats.deferredRegisterCreateCalls());
         assertEquals(1, stats.deferredRegisterRegisterCalls());
-        assertEquals(5, stats.builtInRegistryFieldReads());
+        assertEquals(6, stats.builtInRegistryFieldReads());
         assertEquals(2, stats.registryLookupCalls());
         assertEquals(1, stats.registryResourceKeyLookupCalls());
 
         List<FieldInsnNode> fields = findFields(method);
-        assertEquals(List.of("ITEM", "BLOCK", "SOUND_EVENT", "BLOCK_ENTITY_TYPE", "ENTITY_TYPE"),
+        assertEquals(List.of("ITEM", "BLOCK", "SOUND_EVENT", "BLOCK_ENTITY_TYPE", "ENTITY_TYPE", "MENU"),
                 fields.stream().map(field -> field.name).toList());
         assertEquals(List.of(
                 "Lnet/minecraft/core/DefaultedRegistry;",
                 "Lnet/minecraft/core/DefaultedRegistry;",
                 "Lnet/minecraft/core/Registry;",
                 "Lnet/minecraft/core/Registry;",
-                "Lnet/minecraft/core/DefaultedRegistry;"),
+                "Lnet/minecraft/core/DefaultedRegistry;",
+                "Lnet/minecraft/core/Registry;"),
                 fields.stream().map(field -> field.desc).toList());
         fields.forEach(field -> assertEquals(
                 "net/minecraft/core/registries/BuiltInRegistries", field.owner));
@@ -145,6 +148,113 @@ final class Forge1201RegistryAdapterTest {
         assertEquals("get", getResourceKeyCall.name);
         assertEquals(Opcodes.INVOKEINTERFACE, getResourceKeyCall.getOpcode());
         assertTrue(getResourceKeyCall.itf);
+    }
+
+    @Test
+    void adaptsMenuRegistryAndMenuFactoryLambdaToNeoForge21() {
+        String oldContainerFactory = "net/minecraftforge/network/IContainerFactory";
+        String targetContainerFactory = "net/neoforged/neoforge/network/IContainerFactory";
+        String oldMenuTypeExtension = "net/minecraftforge/common/extensions/IForgeMenuType";
+        String targetMenuTypeExtension =
+                "net/neoforged/neoforge/common/extensions/IMenuTypeExtension";
+        String oldFriendlyBuffer = "Lnet/minecraft/network/FriendlyByteBuf;";
+        String targetFriendlyBuffer = "Lnet/minecraft/network/RegistryFriendlyByteBuf;";
+        String inventory = "Lnet/minecraft/world/entity/player/Inventory;";
+        String abstractMenu = "Lnet/minecraft/world/inventory/AbstractContainerMenu;";
+        String menuImplementation = "Lcom/scout/symbiote/menu/ArmSlotsMenu;";
+
+        String sourceSamDescriptor = "(I" + inventory + oldFriendlyBuffer + ")" + abstractMenu;
+        String targetSamDescriptor = "(I" + inventory + targetFriendlyBuffer + ")" + abstractMenu;
+        String sourceInstantiatedDescriptor =
+                "(I" + inventory + oldFriendlyBuffer + ")" + menuImplementation;
+        String targetInstantiatedDescriptor =
+                "(I" + inventory + targetFriendlyBuffer + ")" + menuImplementation;
+        String implementationDescriptor = "(I" + inventory + oldFriendlyBuffer + ")V";
+
+        ClassNode source = new ClassNode();
+        source.version = Opcodes.V17;
+        source.access = Opcodes.ACC_PUBLIC;
+        source.name = "sample/MenuRegistryFixture";
+        source.superName = "java/lang/Object";
+
+        MethodNode method = new MethodNode(Opcodes.ASM9,
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "registerMenu", "()V", null, null);
+        method.instructions.add(new FieldInsnNode(Opcodes.GETSTATIC,
+                "net/minecraftforge/registries/ForgeRegistries", "MENU_TYPES", FORGE_REGISTRY_DESC));
+        method.instructions.add(new org.objectweb.asm.tree.InvokeDynamicInsnNode(
+                "create",
+                "()L" + oldContainerFactory + ";",
+                new org.objectweb.asm.Handle(Opcodes.H_INVOKESTATIC,
+                        "java/lang/invoke/LambdaMetafactory", "metafactory",
+                        "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;"
+                                + "Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;"
+                                + "Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)"
+                                + "Ljava/lang/invoke/CallSite;",
+                        false),
+                org.objectweb.asm.Type.getMethodType(sourceSamDescriptor),
+                new org.objectweb.asm.Handle(Opcodes.H_NEWINVOKESPECIAL,
+                        "com/scout/symbiote/menu/ArmSlotsMenu", "<init>",
+                        implementationDescriptor, false),
+                org.objectweb.asm.Type.getMethodType(sourceInstantiatedDescriptor)));
+        method.instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC,
+                oldMenuTypeExtension, "create",
+                "(L" + oldContainerFactory + ";)Lnet/minecraft/world/inventory/MenuType;",
+                true));
+        method.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.POP));
+        method.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.RETURN));
+        method.maxStack = 1;
+        method.maxLocals = 0;
+        source.methods.add(method);
+
+        Forge1201RegistryAdapter.Stats stats = Forge1201RegistryAdapter.apply(source);
+        assertEquals(1, stats.builtInRegistryFieldReads());
+        assertEquals(1, stats.menuFactoryLambdaAdaptations());
+
+        org.objectweb.asm.ClassWriter writer = new org.objectweb.asm.ClassWriter(0);
+        source.accept(new ClassRemapper(writer, new Remapper() {
+            @Override
+            public String map(String internalName) {
+                var decision = Forge1201MappingCatalog.classify(internalName);
+                return decision.kind() == Forge1201MappingCatalog.Kind.EXPLICIT_TYPE_REPLACEMENT
+                        || decision.kind() == Forge1201MappingCatalog.Kind.PACKAGE_RELOCATION_CANDIDATE
+                        ? decision.targetInternalName() : internalName;
+            }
+        }));
+
+        ClassNode target = new ClassNode();
+        new ClassReader(writer.toByteArray()).accept(target, 0);
+        FieldInsnNode targetRegistry = findFields(target.methods.get(0)).get(0);
+        assertEquals("net/minecraft/core/registries/BuiltInRegistries", targetRegistry.owner);
+        assertEquals("MENU", targetRegistry.name);
+        assertEquals("Lnet/minecraft/core/Registry;", targetRegistry.desc);
+
+        List<MethodInsnNode> targetCalls = findCalls(target.methods.get(0));
+        MethodInsnNode targetFactoryCall = targetCalls.stream()
+                .filter(call -> call.name.equals("create"))
+                .findFirst().orElseThrow();
+        assertEquals(targetMenuTypeExtension, targetFactoryCall.owner);
+        assertEquals("(L" + targetContainerFactory + ";)Lnet/minecraft/world/inventory/MenuType;",
+                targetFactoryCall.desc);
+        assertEquals(Opcodes.INVOKESTATIC, targetFactoryCall.getOpcode());
+        assertTrue(targetFactoryCall.itf);
+
+        org.objectweb.asm.tree.InvokeDynamicInsnNode targetLambda = null;
+        for (var instruction : target.methods.get(0).instructions) {
+            if (instruction instanceof org.objectweb.asm.tree.InvokeDynamicInsnNode dynamic) {
+                targetLambda = dynamic;
+                break;
+            }
+        }
+        org.junit.jupiter.api.Assertions.assertNotNull(targetLambda);
+        assertEquals("()L" + targetContainerFactory + ";", targetLambda.desc);
+        assertEquals(targetSamDescriptor, ((org.objectweb.asm.Type) targetLambda.bsmArgs[0]).getDescriptor());
+        assertEquals(targetInstantiatedDescriptor,
+                ((org.objectweb.asm.Type) targetLambda.bsmArgs[2]).getDescriptor());
+        org.objectweb.asm.Handle preservedConstructor =
+                (org.objectweb.asm.Handle) targetLambda.bsmArgs[1];
+        assertEquals("com/scout/symbiote/menu/ArmSlotsMenu", preservedConstructor.getOwner());
+        assertEquals("<init>", preservedConstructor.getName());
+        assertEquals(implementationDescriptor, preservedConstructor.getDesc());
     }
 
     @Test
