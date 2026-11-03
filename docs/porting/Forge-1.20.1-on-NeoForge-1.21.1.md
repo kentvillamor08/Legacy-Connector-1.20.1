@@ -143,7 +143,7 @@ This task runs in the root project's target compile classpath while the `:loader
 - The 10 missing/changed method references are: `EntityRenderersEvent.AddLayers#getSkin(String)`; `RenderGuiEvent.Pre#getWindow()`; `RenderLevelStageEvent#getPartialTick()`; `VanillaGameEvent#getVanillaEvent()`; `EntityAttributeModificationEvent#add(EntityType, Attribute, double)`; `EntityAttributeModificationEvent#has(EntityType, Attribute)`; `EntityEvent.Size#getNewEyeHeight()`; `EntityEvent.Size#setNewEyeHeight(float)`; `PlayerInteractEvent#isCancelable()`; and `PlayerInteractEvent#setCanceled(boolean)`. Their exact target replacements and behavioral intent must be reviewed before any call-site rewrite.
 - The method report is consistent with known 1.21.1 API shifts that require source-level attention: player renderer lookup uses `PlayerSkin.Model`; render event timing/context types changed; the vanilla game event is represented by `Holder<GameEvent>`; entity-attribute modification APIs use `Holder<Attribute>`; and entity-size events no longer expose the old eye-height accessors. The two base `PlayerInteractEvent` cancellation methods require special care because cancelability is expressed through concrete cancellable subevents rather than assumed uniformly on the base type.
 - The static per-class inventory traces those 11 unresolved references to these Symbiote classes: `LivingArmorClientHook` (skin renderer lookup); `SculkEchoBlipRenderer` (GUI window and render partial tick); `BellCounterplayHandler` (vanilla game event holder); `WildHostAttributeFix` (attribute holder arguments); `LivingArmorSizing` (entity dimensions / eye height); and `SeizedInteractionListener` (interaction cancelability, cancellation and result). This proves class ownership but not the exact containing method or the behavior of its branch.
-- Extended `Forge1201ApiUsageAnalyzer` to print direct Forge/optional-API invocation call sites, including caller class, caller method and descriptor, target owner/name/descriptor, opcode, and reference count. Added a synthetic regression assertion to `Forge1201JarInspectorTest`. The call-site enhancement has been committed but still needs a local `:loader:clean :loader:test --no-daemon` run and an `:loader:inspectForge1201` run against the private Symbiote JAR before its report can be treated as user-verified.
+- Extended `Forge1201ApiUsageAnalyzer` to print direct Forge/optional-API invocation call sites, including caller class, caller method and descriptor, target owner/name/descriptor, opcode, and reference count. Added synthetic regression coverage. The user ran the analyzer tests and the private Symbiote inspection successfully.
 - The call-site scanner records direct `INVOKE*` instructions. It does not by itself identify branch intent, data values, reflective calls, or method handles; inspect those separately before writing behavior-sensitive adapters.
 - The user successfully ran the enhanced `:loader:inspectForge1201` task after the analyzer test fix. Exact callers for the unresolved call sites are: `LivingArmorClientHook#onAddLayers`, `SculkEchoBlipRenderer#onRenderGui` (two `getWindow()` calls), `SculkEchoBlipRenderer#onRenderLevelStage`, `BellCounterplayHandler#onVanillaGameEvent`, `WildHostAttributeFix#onAttributeModification` (both `add` and `has`), `LivingArmorSizing#applyLargeDimensions` (both eye-height calls), and `SeizedInteractionListener#deny` (cancelability, cancellation, and result).
 - The inspector also shows partial-tick calls in `HandMorphRenderer#onRenderHand`, `WildHostRenderLayer#onRenderLivingPost`, and `BloomHeadHandler#onRenderPre`; these references were not among the target verifier's unresolved signatures. Only `RenderLevelStageEvent#getPartialTick()` remains unresolved in this audit.
@@ -154,6 +154,34 @@ This task runs in the root project's target compile classpath while the `:loader
 - The uploaded `symbiote-seized-interaction-trace.txt` class-wide trace confirms that `onRightClickItem`, `onRightClickBlock`, `onEntityInteract`, and `onEntityInteractSpecific` call `deny` with reasons `use_item`, `use_block`, and `use_entity` (the two entity handlers share the same reason). It also confirms a separate `onUseItemStart` handler that cancels `LivingEntityUseItemEvent.Start` and logs `consume_item`.
 - The user successfully ran `:loader:clean :loader:test --no-daemon` with class-wildcard trace support enabled, generated `com.scout.symbiote.event.SeizedInteractionListener#*`, and uploaded the resulting `symbiote-seized-interaction-trace.txt`. The class-wide output has been reviewed; no repeat trace run is needed.
 - The private call-site audit now documents the class-wide event handlers and target mapping. In NeoForge 1.21.1 the four concrete `PlayerInteractEvent` subtypes implement `ICancellableEvent`; the abstract base does not. Preserve the `ServerPlayer` and `BodySeized` guards, the reason strings, and `setCanceled(true)`. The `RightClickBlock` override automatically sets both block/item controls to `TriState.FALSE`; the other interaction events retain default `InteractionResult.PASS` cancellation results. Do not map the old generic `Event.Result.DENY` write to a global `TriState.FALSE` or `InteractionResult.FAIL`.
-- This validates metadata/archive transformation only; classes remain unmapped and the derived JAR is not loadable as a supported mod.
+- The first dedicated Forge 1.20.1 ASM transformation stage is now committed, but its new tests and real-JAR run are pending user verification. It mechanically remaps reviewed Forge package relocations in class files and service-provider descriptors after metadata conversion. Manual-adapter and unreviewed Forge API types remain untouched and are listed in the report. This output is an intermediate artifact, not a load-ready mod.
 
 The existing 1.7.10/1.12.2 NeoForge 1.21.1 runtime remains the baseline. The 1.20.1 API bridge, bytecode adaptation and gameplay validation remain future milestones.
+
+
+## Preliminary Forge 1.20.1 ASM transformation stage
+
+A separate modern path has now been added without changing the pre-1.20 `LegacyJarTransformer`:
+
+- `Forge1201BytecodeTransformer` reads an already metadata-translated JAR and applies `Forge1201MappingCatalog` package moves through ASM `ClassRemapper`.
+- It remaps class headers, superclasses/interfaces, descriptors, signatures, annotations, method/field/type instructions, handles, class literals, and stack-map frame types through ASM's remapper visitor.
+- Class entry paths are moved to match rewritten internal class names. Multi-release class entry prefixes are retained.
+- `META-INF/services` filenames and provider class names are updated. Stale top-level JAR signature files are omitted.
+- Duplicate source entries, relocated path collisions, malformed classes, and attempts to overwrite the source JAR fail safely before publishing the destination.
+- Types marked `MANUAL_ADAPTER_REQUIRED` or `UNMAPPED_FORGE_API` are intentionally left unchanged and listed in the transformation report. This is not a global name rewrite and does not rename Minecraft methods or fields.
+- `Forge1201JarTransformer` orchestrates metadata conversion followed by the ASM pass. The new `:loader:transformForge1201` task exposes the pipeline.
+- Regression tests cover metadata conversion, annotation/method/field/class-literal descriptors, a moved class entry, service file remapping, manual/unmapped type reporting, signature removal, input preservation, and collision rejection.
+
+**Validation status:** the new transformer and tests are committed, but the user has not yet run the newly added test suite or task. No local build is claimed. Even when the preliminary transform succeeds, the output is not load-ready: semantic Forge adapters, Minecraft 1.20.1-to-1.21.1 API changes, bootstrap/registration, networking, and runtime/gameplay validation are still outstanding.
+
+Run from the project root after IntelliJ Ctrl+T:
+
+```powershell
+.\\gradlew.bat :loader:clean :loader:test --no-daemon
+
+.\\gradlew.bat :loader:transformForge1201 `
+  -Pforge1201Jar="C:\\Users\\Administrator\\legacy-connector-testbench\\symbiote-1.1.3.jar" `
+  -Pforge1201Output="C:\\Users\\Administrator\\legacy-connector-testbench\\symbiote-1.1.3-neoforge-1.21.1-preliminary.jar"
+```
+
+Keep the resulting derivative JAR private with the original input. Do not place it in the active mods folder.
