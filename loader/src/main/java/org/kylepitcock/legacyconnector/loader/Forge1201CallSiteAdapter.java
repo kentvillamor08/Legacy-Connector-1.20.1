@@ -313,7 +313,7 @@ public final class Forge1201CallSiteAdapter {
 
     /**
      * Replaces DistExecutor's static owner with one private helper that keeps the Supplier lazy
-     * and checks FMLEnvironment.getDist() before obtaining and running its Runnable.
+     * and checks FMLEnvironment.dist before obtaining and running its Runnable.
      */
     private static void rewriteLazyDistGate(
             ClassNode classNode,
@@ -362,12 +362,11 @@ public final class Forge1201CallSiteAdapter {
                 null,
                 null);
         LabelNode skip = new LabelNode();
-        helper.instructions.add(new MethodInsnNode(
-                Opcodes.INVOKESTATIC,
+        helper.instructions.add(new FieldInsnNode(
+                Opcodes.GETSTATIC,
                 NEOFORGE_FML_ENVIRONMENT,
-                "getDist",
-                "()" + NEOFORGE_DIST_DESCRIPTOR,
-                false));
+                "dist",
+                NEOFORGE_DIST_DESCRIPTOR));
         helper.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
         helper.instructions.add(new org.objectweb.asm.tree.JumpInsnNode(Opcodes.IF_ACMPNE, skip));
         helper.instructions.add(new VarInsnNode(Opcodes.ALOAD, 1));
