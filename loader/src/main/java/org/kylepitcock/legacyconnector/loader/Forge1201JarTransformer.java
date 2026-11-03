@@ -121,7 +121,7 @@ public final class Forge1201JarTransformer {
                 + registry.deferredRegisterCreateCalls());
         System.out.println("  DeferredRegister.register(String, Supplier) return descriptors adapted: "
                 + registry.deferredRegisterRegisterCalls());
-        System.out.println("  ForgeRegistries item/block/sound fields adapted: "
+        System.out.println("  ForgeRegistries built-in registry fields adapted: "
                 + registry.builtInRegistryFieldReads());
         System.out.println("  IForgeRegistry lookup calls adapted to Registry: "
                 + registry.registryLookupCalls());
