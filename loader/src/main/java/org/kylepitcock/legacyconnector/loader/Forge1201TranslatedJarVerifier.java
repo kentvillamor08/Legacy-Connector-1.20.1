@@ -7,31 +7,46 @@ import java.util.List;
 /**
  * Read-only verifier for the output of {@code :loader:transformForge1201}.
  *
- * <p>It checks references that were relocated into NeoForge package namespaces against
- * the target compile classpath. Forge API references that remain in the JAR are listed
- * separately; they are not silently treated as target types. Minecraft member changes
- * and semantic API adaptations remain outside this namespace-level check.</p>
+ * <p>Before member lookup, 1.20.1 SRG identifiers are normalized through the
+ * source-version MCPConfig mappings to readable Mojang names. The normalized
+ * signatures are then checked against the target 1.21.1 class hierarchy.</p>
  */
 public final class Forge1201TranslatedJarVerifier {
     private Forge1201TranslatedJarVerifier() {}
 
     public static void main(String[] args) throws IOException {
-        if (args.length != 1 || args[0].isBlank()) {
+        if (args.length != 3 || args[0].isBlank() || args[1].isBlank() || args[2].isBlank()) {
             throw new IllegalArgumentException(
-                    "Usage: Forge1201TranslatedJarVerifier <path-to-preliminary-translated-jar>");
+                    "Usage: Forge1201TranslatedJarVerifier <translated-jar> <1.20.1-methods.csv> <1.20.1-fields.csv>");
         }
 
         Path jar = Path.of(args[0]);
-        Forge1201ApiUsageAnalyzer.Analysis analysis =
+        Forge1201SrgNameMappings sourceMappings = Forge1201SrgNameMappings.load(
+                Path.of(args[1]), Path.of(args[2]));
+        Forge1201ApiUsageAnalyzer.Analysis rawAnalysis =
                 Forge1201ApiUsageAnalyzer.analyzeTranslated(jar);
-        Forge1201TargetApiVerifier.Result result =
-                Forge1201TargetApiVerifier.verifyTranslated(jar, ClassLoader.getSystemClassLoader());
+        Forge1201SrgNameMappings.Normalization normalization = sourceMappings.normalize(rawAnalysis);
+        Forge1201TargetApiVerifier.Result result = Forge1201TargetApiVerifier.verify(
+                normalization.analysis(),
+                internalName -> ClassLoader.getSystemClassLoader().getResourceAsStream(internalName + ".class"));
 
         String version = System.getProperty("legacyconnector.targetNeoForgeVersion", "unknown");
         System.out.println("Preliminary Forge 1.20.1 -> NeoForge " + version + " translated JAR audit");
         System.out.println("Mode: read-only ASM inspection; no mod or target classes were executed.");
         System.out.println("JAR: " + jar.toAbsolutePath().normalize());
-        System.out.println("Classes scanned: " + analysis.classCount());
+        System.out.println("Classes scanned: " + rawAnalysis.classCount());
+        System.out.println("Source member mapping set: Forge MCPConfig " + Forge1201SrgNameMappings.SOURCE_MAPPING_VERSION);
+        System.out.println("Source member namespace: SRG identifiers normalized to 1.20.1 Mojang names before target lookup.");
+
+        System.out.println("\nSource SRG member-name normalization:");
+        System.out.println("  method references normalized: " + normalization.methodMappings().size());
+        normalization.methodMappings().forEach(value -> System.out.println("  METHOD MAP: " + value));
+        System.out.println("  field references normalized: " + normalization.fieldMappings().size());
+        normalization.fieldMappings().forEach(value -> System.out.println("  FIELD MAP: " + value));
+        System.out.println("  unmapped source SRG method references: " + normalization.unmappedMethods().size());
+        normalization.unmappedMethods().forEach(value -> System.out.println("  UNMAPPED METHOD: " + value));
+        System.out.println("  unmapped source SRG field references: " + normalization.unmappedFields().size());
+        normalization.unmappedFields().forEach(value -> System.out.println("  UNMAPPED FIELD: " + value));
 
         System.out.println("\nRelocated NeoForge API classes:");
         System.out.println("  distinct references: " + result.candidateClassCount());
@@ -40,19 +55,19 @@ public final class Forge1201TranslatedJarVerifier {
         result.missingTargetClasses().forEach(name ->
                 System.out.println("  MISSING CLASS: " + name.replace('/', '.')));
 
-        System.out.println("\nRelocated NeoForge API method references:");
+        System.out.println("\nRelocated NeoForge API method references (source names normalized):");
         System.out.println("  unique references: " + result.uniqueMethodReferences());
         System.out.println("  exact target/inherited matches: " + result.verifiedMethodReferences());
         System.out.println("  unresolved or changed: " + result.methodIssues().size());
         result.methodIssues().forEach(issue -> System.out.println("  " + issue.display()));
 
-        System.out.println("\nRelocated NeoForge API field references:");
+        System.out.println("\nRelocated NeoForge API field references (source names normalized):");
         System.out.println("  unique references: " + result.uniqueFieldReferences());
         System.out.println("  exact target/inherited matches: " + result.verifiedFieldReferences());
         System.out.println("  unresolved or changed: " + result.fieldIssues().size());
         result.fieldIssues().forEach(issue -> System.out.println("  " + issue.display()));
 
-        List<String> remainingForgeTypes = analysis.referencedApiClasses().stream()
+        List<String> remainingForgeTypes = rawAnalysis.referencedApiClasses().stream()
                 .filter(name -> name.startsWith("net/minecraftforge/"))
                 .sorted()
                 .toList();
@@ -72,8 +87,8 @@ public final class Forge1201TranslatedJarVerifier {
         System.out.println("  unreviewed Forge API types: " + unreviewedTypes.size());
         unreviewedTypes.forEach(name -> System.out.println("  UNREVIEWED: " + name.replace('/', '.')));
 
-        System.out.println("\nMinecraft-version API changes are not verified by this namespace/member check.");
-        System.out.println("A matching target signature does not prove semantic compatibility.");
+        System.out.println("\nA matching target signature proves only structural compatibility.");
+        System.out.println("A remaining issue may be a changed descriptor, rename/replacement, or removed member; review it manually.");
         System.out.println("Do not load this preliminary artifact as a supported mod.");
     }
 }
