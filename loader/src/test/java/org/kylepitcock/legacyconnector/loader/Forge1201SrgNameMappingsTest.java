@@ -21,10 +21,10 @@ final class Forge1201SrgNameMappingsTest {
         Files.writeString(methodsCsv,
                 "searge,name,side,desc\n"
                         + "m_130070_,writeUtf,0,Writes UTF text\n"
-                        + "m_130277_,readUtf,0,Reads UTF text\n");
+                        + "m_234567_,readSomething,0,Reads UTF text\n");
         Files.writeString(fieldsCsv,
                 "searge,name,side,desc\n"
-                        + "f_178333_,MAX_STRING_LENGTH,0,Maximum encoded string length\n");
+                        + "f_345678_,FIELD_SAMPLE,0,Maximum encoded string length\n");
 
         Forge1201SrgNameMappings mappings =
                 Forge1201SrgNameMappings.load(methodsCsv, fieldsCsv);
@@ -46,7 +46,7 @@ final class Forge1201SrgNameMappingsTest {
                                 2),
                         new Forge1201ApiUsageAnalyzer.ApiMemberReference(
                                 "net/minecraft/network/FriendlyByteBuf",
-                                "m_130277_",
+                                "m_234567_",
                                 "()Ljava/lang/String;",
                                 1),
                         new Forge1201ApiUsageAnalyzer.ApiMemberReference(
@@ -56,16 +56,16 @@ final class Forge1201SrgNameMappingsTest {
                                 1)),
                 List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
                         "net/minecraft/network/FriendlyByteBuf",
-                        "f_178333_",
+                        "f_345678_",
                         "I",
                         1)));
 
         Forge1201SrgNameMappings.Normalization result = mappings.normalize(source);
 
         assertEquals("writeUtf", result.analysis().methodReferences().get(0).name());
-        assertEquals("readUtf", result.analysis().methodReferences().get(1).name());
+        assertEquals("readSomething", result.analysis().methodReferences().get(1).name());
         assertEquals("m_999999_", result.analysis().methodReferences().get(2).name());
-        assertEquals("MAX_STRING_LENGTH", result.analysis().fieldReferences().get(0).name());
+        assertEquals("FIELD_SAMPLE", result.analysis().fieldReferences().get(0).name());
 
         assertEquals(2, result.methodMappings().size());
         assertEquals(1, result.fieldMappings().size());
@@ -75,7 +75,7 @@ final class Forge1201SrgNameMappingsTest {
 
         assertTrue(result.methodMappings().stream().anyMatch(value -> value.contains("m_130070_")
                 && value.contains("writeUtf")));
-        assertTrue(result.fieldMappings().get(0).contains("f_178333_"));
+        assertTrue(result.fieldMappings().get(0).contains("f_345678_"));
     }
 
     @Test
@@ -107,6 +107,57 @@ final class Forge1201SrgNameMappingsTest {
         assertTrue(result.fieldMappings().isEmpty());
         assertTrue(result.unmappedMethods().isEmpty());
         assertTrue(result.unmappedFields().isEmpty());
+    }
+
+    @Test
+    void normalizesARealSourceNameAndChecksVanillaMinecraftOwner() throws Exception {
+        Path methodsCsv = temporaryDirectory.resolve("methods-real.csv");
+        Path fieldsCsv = temporaryDirectory.resolve("fields-real.csv");
+        Files.writeString(methodsCsv,
+                "searge,name,side,desc\n"
+                        + "m_130070_,writeUtf,0,Writes UTF text\n");
+        Files.writeString(fieldsCsv,
+                "searge,name,side,desc\n"
+                        + "f_345678_,FIELD_SAMPLE,0,Fixture field\n");
+
+        Forge1201SrgNameMappings mappings =
+                Forge1201SrgNameMappings.load(methodsCsv, fieldsCsv);
+        String owner = "net/minecraft/network/FriendlyByteBuf";
+        String descriptor = "(Ljava/lang/String;)Lnet/minecraft/network/FriendlyByteBuf;";
+        Forge1201ApiUsageAnalyzer.Analysis source = new Forge1201ApiUsageAnalyzer.Analysis(
+                null,
+                1,
+                List.of(),
+                List.of(),
+                null,
+                Map.of(),
+                List.of(owner),
+                List.of(),
+                List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                        owner, "m_130070_", descriptor, 1)),
+                List.of());
+
+        Forge1201SrgNameMappings.Normalization normalized = mappings.normalize(source);
+        org.objectweb.asm.ClassWriter writer = new org.objectweb.asm.ClassWriter(0);
+        writer.visit(org.objectweb.asm.Opcodes.V17, org.objectweb.asm.Opcodes.ACC_PUBLIC,
+                owner, null, "java/lang/Object", null);
+        writer.visitMethod(org.objectweb.asm.Opcodes.ACC_PUBLIC, "writeUtf", descriptor, null, null).visitEnd();
+        writer.visitEnd();
+        byte[] targetClass = writer.toByteArray();
+
+        Forge1201TargetApiVerifier.Result verified = Forge1201TargetApiVerifier.verify(
+                normalized.analysis(),
+                internalName -> owner.equals(internalName)
+                        ? new java.io.ByteArrayInputStream(targetClass)
+                        : null);
+
+        assertEquals(1, normalized.methodMappings().size());
+        assertEquals(0, normalized.unmappedMethods().size());
+        assertEquals(1, verified.candidateClassCount());
+        assertEquals(1, verified.verifiedClassCount());
+        assertEquals(1, verified.uniqueMethodReferences());
+        assertEquals(1, verified.verifiedMethodReferences());
+        assertTrue(verified.methodIssues().isEmpty());
     }
 
     @Test
