@@ -135,6 +135,10 @@ The supported profile schema is version 1. Each rule identifies one class by JVM
 
 - `field-descriptor`: replace a field instruction descriptor when owner, name, original descriptor and opcode all match.
 - `method-descriptor`: replace a method invocation descriptor when owner, name, original descriptor and invocation opcode all match.
+- `method-declaration-descriptor`: change the selected method's declaration descriptor, with an exact expected source descriptor.
+- `frame-local-type`: change the declared type at a specified JVM local-variable slot in an explicit `F_FULL`/`F_NEW` stack-map frame. Compressed frames are not guessed; a missing match fails the transform.
+- `local-variable`: change the name and descriptor of a LocalVariableTable entry selected by slot, old name and old descriptor.
+- `lazy-dist-gate`: replace exact static `DistExecutor.unsafeRunWhenOn(Dist, Supplier)` calls with a generated private synthetic helper that checks `FMLEnvironment.dist` before evaluating the supplier and running its `Runnable`.
 - `checkcast-type`: replace a specific `CHECKCAST` target type.
 - `instruction-sequence`: replace an exact sequence of typed ASM instructions with another sequence. Recipes support local-variable, field, method, type, constant, and no-operand instructions; optional minimum stack/local limits are applied after a rewrite. Patterns crossing labels, frames, or control-flow instructions are rejected.
 
