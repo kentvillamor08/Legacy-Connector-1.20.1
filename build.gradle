@@ -423,8 +423,8 @@ tasks.named('compileJava', JavaCompile) {
 // Verify the actual output of :loader:transformForge1201 against the target compile classpath.
 tasks.register('verifyForge1201TranslatedJar', JavaExec) {
     group = 'verification'
-    description = 'Checks relocated NeoForge API references in a preliminary translated JAR against the configured target compile classpath.'
-    dependsOn project(':loader').tasks.named('classes')
+    description = 'Checks relocated NeoForge API references after normalizing Forge 1.20.1 SRG member names against the configured target compile classpath.'
+    dependsOn project(':loader').tasks.named('classes'), project(':loader').tasks.named('extractForge1201SrgMappings')
     classpath = (
             project(':loader').sourceSets.main.runtimeClasspath
                     + project(':loader').sourceSets.main.compileClasspath
@@ -438,7 +438,13 @@ tasks.register('verifyForge1201TranslatedJar', JavaExec) {
         if (jarPath == null || jarPath.toString().isBlank()) {
             throw new GradleException('Supply -Pforge1201TranslatedJar=<path-to-preliminary-translated-jar>')
         }
-        setArgs([jarPath.toString()])
+        def mappingDir = project(':loader').layout.buildDirectory.dir('generated/forge1201/srg-mappings').get()
+        def methodsCsv = mappingDir.file('methods.csv').asFile
+        def fieldsCsv = mappingDir.file('fields.csv').asFile
+        if (!methodsCsv.isFile() || !fieldsCsv.isFile()) {
+            throw new GradleException('Forge 1.20.1 SRG mapping CSVs were not extracted')
+        }
+        setArgs([jarPath.toString(), methodsCsv.absolutePath, fieldsCsv.absolutePath])
     }
 }
 
