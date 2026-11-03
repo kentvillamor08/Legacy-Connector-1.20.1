@@ -162,10 +162,10 @@ The loader rejects unknown schema versions, duplicate selectors, missing require
 For a local profile file, pass its path to the existing task:
 
 ```powershell
-.\\gradlew.bat :loader:transformForge1201 `
-  -Pforge1201Jar="F:\\path\\to\\original-forge-1.20.1.jar" `
-  -Pforge1201Output="F:\\path\\to\\preliminary-neoforge-1.21.1.jar" `
-  -Pforge1201AdapterProfile="F:\\private-testbench\\profiles\\adapter-profile.json"
+.\gradlew.bat :loader:transformForge1201 `
+  -Pforge1201Jar="F:\path\to\original-forge-1.20.1.jar" `
+  -Pforge1201Output="F:\path\to\preliminary-neoforge-1.21.1.jar" `
+  -Pforge1201AdapterProfile="F:\private-testbench\profiles\adapter-profile.json"
 ```
 
 The transform console reports the profile ID, number of rules applied and number of operations applied. This is still a static rewrite, not proof of target method linkage, mod bootstrap or gameplay correctness. Run the loader tests and the translated-JAR verifier after every profile change.
