@@ -184,7 +184,7 @@ final class Forge1201CallSiteAdapterTest {
     }
 
     @Test
-    void failsAtFinishWhenARequiredMethodWasNotFound() throws Exception {
+    void failsImmediatelyWhenARequiredMethodWasNotFound() throws Exception {
         Path profileFile = writeProfile("""
                 {
                   "schemaVersion": 1,
@@ -208,9 +208,7 @@ final class Forge1201CallSiteAdapterTest {
         ClassNode node = new ClassNode();
         node.name = "sample/AdapterFixture";
         node.methods.add(new MethodNode(Opcodes.ASM9, Opcodes.ACC_PUBLIC, "different", "()V", null, null));
-        session.apply(node);
-
-        assertThrows(IOException.class, session::finish);
+        assertThrows(IOException.class, () -> session.apply(node));
     }
 
     @Test
