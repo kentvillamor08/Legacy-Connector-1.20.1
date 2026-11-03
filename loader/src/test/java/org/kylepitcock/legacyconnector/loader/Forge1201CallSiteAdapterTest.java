@@ -797,6 +797,96 @@ final class Forge1201CallSiteAdapterTest {
         assertThrows(IOException.class, () -> Forge1201CallSiteAdapter.load(profileFile));
     }
 
+    @Test
+    void rewritesResourceLocationConstructorToThe1Point21Factory() throws Exception {
+        String className = "com/scout/symbiote/registry/ModSounds";
+        String resourceLocation = "net/minecraft/resources/ResourceLocation";
+        String resourceLocationDescriptor = "L" + resourceLocation + ";";
+        String soundEvent = "net/minecraft/sounds/SoundEvent";
+        String methodDescriptor = "(Ljava/lang/String;)L" + soundEvent + ";";
+
+        Path profileFile = writeProfile("""
+                {
+                  "schemaVersion": 1,
+                  "id": "synthetic-resource-location-factory",
+                  "rules": [{
+                    "className": "com/scout/symbiote/registry/ModSounds",
+                    "methodName": "lambda$reg$0",
+                    "methodDescriptor": "(Ljava/lang/String;)Lnet/minecraft/sounds/SoundEvent;",
+                    "operations": [{
+                      "type": "instruction-sequence",
+                      "match": [
+                        { "kind": "type", "opcode": "NEW",
+                          "typeName": "net/minecraft/resources/ResourceLocation" },
+                        { "kind": "insn", "opcode": "DUP" },
+                        { "kind": "ldc", "valueType": "string", "value": "symbiote" },
+                        { "kind": "var", "opcode": "ALOAD", "var": 0 },
+                        { "kind": "method", "opcode": "INVOKESPECIAL",
+                          "owner": "net/minecraft/resources/ResourceLocation",
+                          "name": "<init>",
+                          "descriptor": "(Ljava/lang/String;Ljava/lang/String;)V" }
+                      ],
+                      "replaceWith": [
+                        { "kind": "ldc", "valueType": "string", "value": "symbiote" },
+                        { "kind": "var", "opcode": "ALOAD", "var": 0 },
+                        { "kind": "method", "opcode": "INVOKESTATIC",
+                          "owner": "net/minecraft/resources/ResourceLocation",
+                          "name": "fromNamespaceAndPath",
+                          "descriptor": "(Ljava/lang/String;Ljava/lang/String;)Lnet/minecraft/resources/ResourceLocation;" }
+                      ],
+                      "expectedMatches": 1
+                    }]
+                  }]
+                }
+                """);
+
+        ClassNode node = new ClassNode();
+        node.version = Opcodes.V17;
+        node.access = Opcodes.ACC_PUBLIC;
+        node.name = className;
+        node.superName = "java/lang/Object";
+
+        MethodNode lambda = new MethodNode(
+                Opcodes.ASM9, Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC,
+                "lambda$reg$0", methodDescriptor, null, null);
+        lambda.instructions.add(new TypeInsnNode(Opcodes.NEW, resourceLocation));
+        lambda.instructions.add(new InsnNode(Opcodes.DUP));
+        lambda.instructions.add(new LdcInsnNode("symbiote"));
+        lambda.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        lambda.instructions.add(new MethodInsnNode(
+                Opcodes.INVOKESPECIAL, resourceLocation, "<init>",
+                "(Ljava/lang/String;Ljava/lang/String;)V", false));
+        lambda.instructions.add(new MethodInsnNode(
+                Opcodes.INVOKESTATIC, soundEvent, "createVariableRangeEvent",
+                "(" + resourceLocationDescriptor + ")L" + soundEvent + ";", false));
+        lambda.instructions.add(new InsnNode(Opcodes.ARETURN));
+        lambda.maxStack = 4;
+        lambda.maxLocals = 1;
+        node.methods.add(lambda);
+
+        Forge1201CallSiteAdapter.Session session = new Forge1201CallSiteAdapter.Session(
+                Forge1201CallSiteAdapter.load(profileFile));
+        session.apply(node);
+        Forge1201CallSiteAdapter.Stats stats = session.finish();
+
+        assertEquals(1, stats.rulesApplied());
+        assertEquals(1, stats.operationsApplied());
+        assertFalse(containsCall(lambda, resourceLocation, "<init>"));
+        assertTrue(containsCall(lambda, resourceLocation, "fromNamespaceAndPath",
+                "(Ljava/lang/String;Ljava/lang/String;)" + resourceLocationDescriptor));
+
+        ClassWriter writer = new ClassWriter(0);
+        node.accept(writer);
+        ClassNode roundTripped = new ClassNode();
+        new ClassReader(writer.toByteArray()).accept(roundTripped, 0);
+        MethodNode writtenLambda = roundTripped.methods.stream()
+                .filter(method -> method.name.equals("lambda$reg$0"))
+                .findFirst()
+                .orElseThrow();
+        assertTrue(containsCall(writtenLambda, resourceLocation, "fromNamespaceAndPath",
+                "(Ljava/lang/String;Ljava/lang/String;)" + resourceLocationDescriptor));
+    }
+
     private Path writeProfile(String json) throws IOException {
         Path file = tempDir.resolve("adapter-profile.json");
         Files.writeString(file, json, StandardCharsets.UTF_8);
