@@ -78,6 +78,18 @@ final class Forge1201MappingCatalogTest {
     }
 
     @Test
+    void recognizesReviewedNeoForgeTargetNamespaces() {
+        org.junit.jupiter.api.Assertions.assertTrue(
+                Forge1201MappingCatalog.isNeoForgeRelocationTarget("net/neoforged/fml/ModList"));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                Forge1201MappingCatalog.isNeoForgeRelocationTarget("net/neoforged/neoforge/event/Event"));
+        org.junit.jupiter.api.Assertions.assertFalse(
+                Forge1201MappingCatalog.isNeoForgeRelocationTarget("net/minecraft/world/entity/Entity"));
+        org.junit.jupiter.api.Assertions.assertFalse(
+                Forge1201MappingCatalog.isNeoForgeRelocationTarget("net/neoforged/other/Unreviewed"));
+    }
+
+    @Test
     void rejectsBlankClassNames() {
         assertThrows(IllegalArgumentException.class, () -> Forge1201MappingCatalog.classify(" "));
     }
