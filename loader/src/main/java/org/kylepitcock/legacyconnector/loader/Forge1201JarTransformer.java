@@ -30,6 +30,16 @@ public final class Forge1201JarTransformer {
             String neoForgeLoaderRange,
             String neoForgeVersionRange,
             String minecraftVersionRange) throws IOException {
+        return transform(input, output, neoForgeLoaderRange, neoForgeVersionRange, minecraftVersionRange, null);
+    }
+
+    public static Result transform(
+            Path input,
+            Path output,
+            String neoForgeLoaderRange,
+            String neoForgeVersionRange,
+            String minecraftVersionRange,
+            Path adapterProfile) throws IOException {
         if (input == null || output == null) {
             throw new IllegalArgumentException("Input and output paths are required");
         }
@@ -59,7 +69,7 @@ public final class Forge1201JarTransformer {
                     neoForgeVersionRange,
                     minecraftVersionRange);
             Forge1201BytecodeTransformer.Result bytecodeResult =
-                    Forge1201BytecodeTransformer.transform(metadataStage, destination);
+                    Forge1201BytecodeTransformer.transform(metadataStage, destination, adapterProfile);
 
             return new Result(
                     source,
@@ -75,10 +85,10 @@ public final class Forge1201JarTransformer {
     }
 
     public static void main(String[] args) throws IOException {
-        if (args.length != 5) {
+        if (args.length != 5 && args.length != 6) {
             throw new IllegalArgumentException(
                     "Usage: transformForge1201 <input.jar> <output.jar> "
-                            + "<javafml-range> <neoforge-range> <minecraft-range>");
+                            + "<javafml-range> <neoforge-range> <minecraft-range> [adapter-profile.json]");
         }
 
         Result result = transform(
@@ -86,7 +96,8 @@ public final class Forge1201JarTransformer {
                 Path.of(args[1]),
                 args[2],
                 args[3],
-                args[4]);
+                args[4],
+                args.length == 6 ? Path.of(args[5]) : null);
         Forge1201BytecodeTransformer.Result bytecode = result.bytecode();
 
         System.out.println("Created preliminary Forge 1.20.1 -> NeoForge 1.21.1 artifact: " + result.output());
@@ -98,6 +109,11 @@ public final class Forge1201JarTransformer {
         System.out.println("  resources copied: " + bytecode.resourcesCopied());
         System.out.println("  signature entries removed: " + result.signaturesRemoved());
         System.out.println("  reviewed API types package-relocated: " + bytecode.relocatedTypes().size());
+        if (bytecode.adapterProfileId() != null) {
+            System.out.println("  call-site adapter profile: " + bytecode.adapterProfileId());
+            System.out.println("  adapter rules applied: " + bytecode.adapterRulesApplied());
+            System.out.println("  adapter operations applied: " + bytecode.adapterOperationsApplied());
+        }
 
         printTypes("Types requiring semantic adapters (left unchanged)", bytecode.manualAdapterTypes());
         printTypes("Unreviewed Forge API types (left unchanged)", bytecode.unmappedForgeApiTypes());
