@@ -127,6 +127,8 @@ public final class Forge1201JarTransformer {
                 + registry.registryLookupCalls());
         System.out.println("  Registry#get(ResourceKey) SRG names adapted: "
                 + registry.registryResourceKeyLookupCalls());
+        System.out.println("  Menu factory lambda buffer signatures adapted: "
+                + registry.menuFactoryLambdaAdaptations());
 
         printTypes("Types requiring semantic adapters (left unchanged)", bytecode.manualAdapterTypes());
         printTypes("Unreviewed Forge API types (left unchanged)", bytecode.unmappedForgeApiTypes());
