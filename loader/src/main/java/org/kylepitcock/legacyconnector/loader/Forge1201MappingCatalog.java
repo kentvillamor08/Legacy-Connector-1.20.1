@@ -210,6 +210,15 @@ public final class Forge1201MappingCatalog {
                 "Outside the Forge API namespace; inspect separately for Minecraft-version changes.");
     }
 
+    /**
+     * Returns whether an internal name is inside a target package introduced by one
+     * of the reviewed Forge -> NeoForge package relocations.
+     */
+    public static boolean isNeoForgeRelocationTarget(String targetInternalName) {
+        if (targetInternalName == null || targetInternalName.isBlank()) return false;
+        return PACKAGE_MOVES.stream().anyMatch(move -> targetInternalName.startsWith(move.targetPrefix()));
+    }
+
     public static String manualAdapterReason(String sourceInternalName) {
         return MANUAL_ADAPTERS.get(sourceInternalName);
     }
