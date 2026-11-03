@@ -172,7 +172,18 @@ A separate modern path has now been added without changing the pre-1.20 `LegacyJ
 - `Forge1201JarTransformer` orchestrates metadata conversion followed by the ASM pass. The new `:loader:transformForge1201` task exposes the pipeline.
 - Regression tests cover metadata conversion, annotation/method/field/class-literal descriptors, a moved class entry, service file remapping, manual/unmapped type reporting, signature removal, input preservation, and collision rejection.
 
-**Validation status:** the new transformer and tests are committed, but the user has not yet run the newly added test suite or task. No local build is claimed. Even when the preliminary transform succeeds, the output is not load-ready: semantic Forge adapters, Minecraft 1.20.1-to-1.21.1 API changes, bootstrap/registration, networking, and runtime/gameplay validation are still outstanding.
+**Validation status — user-confirmed local run on 2026-11-03:**
+- `.gradlew.bat :loader:clean :loader:test --no-daemon` completed with **BUILD SUCCESSFUL**.
+- `.gradlew.bat :loader:transformForge1201` completed with **BUILD SUCCESSFUL** and created the preliminary private output JAR.
+- Input SHA-256: `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c`.
+- Output SHA-256: `85ed9c007e5355f8a36834ba920a9744bba3feaba393ed1448bf1b155983a4db`.
+- 278 classes scanned; 58 class byte arrays changed; 0 class-entry paths relocated; 182 non-class resources copied; 0 signature entries removed.
+- 77 reviewed API types were package-relocated; 44 semantic-adapter types were deliberately left unchanged; 0 unreviewed Forge API types were found.
+- The zero class-entry path relocations are expected for this mod: its own declared classes live under `com/scout/symbiote`; the 77 relocations are referenced Forge API types/descriptors inside the mod's bytecode, not 77 Symbiote-owned class definitions.
+- Zero signatures removed means the source contained no matching top-level signature files; it is not a transformation failure.
+- The compiler emitted only the existing deprecation note ("Some input files use or override a deprecated API"); the test task still completed successfully.
+
+The preliminary output is not load-ready. Semantic Forge adapters, Minecraft 1.20.1-to-1.21.1 API changes, bootstrap/registration, networking, and runtime/gameplay validation remain outstanding.
 
 Run from the project root after IntelliJ Ctrl+T:
 
@@ -185,3 +196,25 @@ Run from the project root after IntelliJ Ctrl+T:
 ```
 
 Keep the resulting derivative JAR private with the original input. Do not place it in the active mods folder.
+
+
+## First user-confirmed preliminary transformation result
+
+The user ran both required commands successfully on 2026-11-03. The generated file was written locally to `C:\Users\Administrator\legacy-connector-testbench\symbiote-1.1.3-neoforge-1.21.1-preliminary.jar` and has not yet been uploaded to the private testbench for direct post-transform inspection.
+
+| Metric | Result |
+|---|---:|
+| Input SHA-256 | `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c` |
+| Output SHA-256 | `85ed9c007e5355f8a36834ba920a9744bba3feaba393ed1448bf1b155983a4db` |
+| Classes scanned | 278 |
+| Classes whose bytecode changed | 58 |
+| Class entry paths relocated | 0 |
+| Non-class resources copied | 182 |
+| Signature entries removed | 0 |
+| Reviewed API types relocated | 77 |
+| Manual-adapter types left unchanged | 44 |
+| Unreviewed Forge API types | 0 |
+
+The zero class-entry path relocations are expected: the mod's own class definitions are in `com/scout/symbiote`; package relocation occurred inside the mod's API references and descriptors. Zero signature removals simply means the source contained no matching top-level signature entries. The compiler printed a deprecation note, but the loader test task completed successfully.
+
+**Next validation step:** upload the output JAR to the private testbench (do not put it in the active mods folder). Then add a read-only post-transform verifier that scans the resulting class files and checks relocated NeoForge class/member references against the actual 21.1.258 target compile classpath. Keep manual adapters and remaining Minecraft 1.20.1 member changes as separate reports. The source and output digests must be retained so the exact tested artifact is unambiguous.
