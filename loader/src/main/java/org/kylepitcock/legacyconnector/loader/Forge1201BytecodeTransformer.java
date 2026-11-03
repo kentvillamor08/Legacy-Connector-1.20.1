@@ -54,6 +54,7 @@ public final class Forge1201BytecodeTransformer {
             List<String> relocatedTypes,
             List<String> manualAdapterTypes,
             List<String> unmappedForgeApiTypes,
+            Forge1201RegistryAdapter.Stats registryAdapters,
             String adapterProfileId,
             int adapterRulesApplied,
             int adapterOperationsApplied) {
@@ -118,6 +119,7 @@ public final class Forge1201BytecodeTransformer {
         int classEntriesRelocated = 0;
         int resourcesCopied = 0;
         int signaturesRemoved = 0;
+        Forge1201RegistryAdapter.Stats registryAdapters = Forge1201RegistryAdapter.Stats.empty();
         Set<String> sourceEntries = new HashSet<>();
         Set<String> outputEntries = new HashSet<>();
 
@@ -166,14 +168,11 @@ public final class Forge1201BytecodeTransformer {
                         byte[] originalClassBytes = contents;
                         ClassWriter writer = new ClassWriter(0);
                         try {
-                            if (adapterSession == null) {
-                                reader.accept(new ClassRemapper(writer, remapper), 0);
-                            } else {
-                                ClassNode classNode = new ClassNode();
-                                reader.accept(classNode, 0);
-                                adapterSession.apply(classNode);
-                                classNode.accept(new ClassRemapper(writer, remapper));
-                            }
+                            ClassNode classNode = new ClassNode();
+                            reader.accept(classNode, 0);
+                            if (adapterSession != null) adapterSession.apply(classNode);
+                            registryAdapters = registryAdapters.plus(Forge1201RegistryAdapter.apply(classNode));
+                            classNode.accept(new ClassRemapper(writer, remapper));
                         } catch (RuntimeException malformed) {
                             throw new IOException("Could not remap class entry " + sourceName, malformed);
                         }
@@ -220,6 +219,7 @@ public final class Forge1201BytecodeTransformer {
                     List.copyOf(remapper.relocatedTypes),
                     List.copyOf(remapper.manualAdapterTypes),
                     List.copyOf(remapper.unmappedForgeApiTypes),
+                    registryAdapters,
                     adapterStats.profileId(),
                     adapterStats.rulesApplied(),
                     adapterStats.operationsApplied());
