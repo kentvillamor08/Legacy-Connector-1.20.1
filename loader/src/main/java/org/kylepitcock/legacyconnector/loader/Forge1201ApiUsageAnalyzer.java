@@ -477,7 +477,9 @@ public final class Forge1201ApiUsageAnalyzer {
                         public MethodVisitor visitMethod(int access, String name, String descriptor,
                                                          String signature, String[] exceptions) {
                             String key = className + "#" + name;
-                            if (!selectedMethods.contains(key)) return null;
+                            if (!selectedMethods.contains(key) && !selectedMethods.contains(className + "#*")) {
+                                return null;
+                            }
                             found.add(key + descriptor);
                             return new MethodVisitor(Opcodes.ASM9) {
                                 private final List<String> instructions = new ArrayList<>();
@@ -599,7 +601,9 @@ public final class Forge1201ApiUsageAnalyzer {
         }
 
         for (String selected : selectedMethods) {
-            boolean matched = found.stream().anyMatch(value -> value.startsWith(selected + "("));
+            boolean wildcard = selected.endsWith("#*");
+            String prefix = wildcard ? selected.substring(0, selected.length() - 1) : selected + "(";
+            boolean matched = found.stream().anyMatch(value -> value.startsWith(prefix));
             if (!matched) System.out.println("  NOT FOUND: " + selected);
         }
     }
