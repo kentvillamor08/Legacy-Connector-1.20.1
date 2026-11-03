@@ -136,11 +136,11 @@ final class Forge1201TargetApiVerifierTest {
                 analysis(
                         List.of(
                                 "net/minecraftforge/network/IContainerFactory",
-                                "net/minecraftforge/registries/RegistryObject"),
+                                "net/minecraftforge/registries/IForgeRegistry"),
                         List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
                                 "net/minecraftforge/network/IContainerFactory",
                                 "create",
-                                "(Lnet/minecraftforge/registries/RegistryObject;)V",
+                                "(Lnet/minecraftforge/registries/IForgeRegistry;)V",
                                 1)),
                         List.of()),
                 classes);
