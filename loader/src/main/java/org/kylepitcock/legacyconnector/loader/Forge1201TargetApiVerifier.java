@@ -117,17 +117,18 @@ public final class Forge1201TargetApiVerifier {
     }
 
     private Result verify(Forge1201ApiUsageAnalyzer.Analysis analysis) throws IOException {
-        List<Forge1201MappingCatalog.Decision> candidates = analysis.referencedApiClasses().stream()
-                .map(Forge1201MappingCatalog::classify)
-                .filter(decision -> decision.kind()
-                        == Forge1201MappingCatalog.Kind.PACKAGE_RELOCATION_CANDIDATE)
+        List<String> candidates = analysis.referencedApiClasses().stream()
+                .filter(this::isCandidate)
+                .map(Forge1201TargetApiVerifier::mapType)
+                .distinct()
+                .sorted()
                 .toList();
 
         List<String> missingClasses = new ArrayList<>();
         int verifiedClasses = 0;
-        for (Forge1201MappingCatalog.Decision decision : candidates) {
-            if (readClass(decision.targetInternalName()) == null) {
-                missingClasses.add(decision.targetInternalName());
+        for (String targetName : candidates) {
+            if (readClass(targetName) == null) {
+                missingClasses.add(targetName);
             } else {
                 verifiedClasses++;
             }
