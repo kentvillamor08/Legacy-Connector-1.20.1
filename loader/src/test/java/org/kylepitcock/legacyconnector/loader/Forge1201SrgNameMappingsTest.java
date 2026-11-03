@@ -83,7 +83,7 @@ final class Forge1201SrgNameMappingsTest {
         Path methodsCsv = temporaryDirectory.resolve("methods.csv");
         Path fieldsCsv = temporaryDirectory.resolve("fields.csv");
         Files.writeString(methodsCsv, "searge,name,side,desc\nm_130070_,writeUtf,0,\n");
-        Files.writeString(fieldsCsv, "searge,name,side,desc\nf_178333_,MAX_STRING_LENGTH,0,\n");
+        Files.writeString(fieldsCsv, "searge,name,side,desc\nf_456789_,SAMPLE_FIELD,0,\n");
 
         Forge1201SrgNameMappings mappings =
                 Forge1201SrgNameMappings.load(methodsCsv, fieldsCsv);
@@ -96,7 +96,7 @@ final class Forge1201SrgNameMappingsTest {
                         new Forge1201ApiUsageAnalyzer.ApiMemberReference(
                                 "net/minecraftforge/eventbus/api/IEventBus", "m_130070_", "()V", 1)),
                 List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
-                        "net/minecraftforge/eventbus/api/IEventBus", "f_178333_", "I", 1)));
+                        "net/minecraftforge/eventbus/api/IEventBus", "f_456789_", "I", 1)));
 
         Forge1201SrgNameMappings.Normalization result = mappings.normalize(source);
 
