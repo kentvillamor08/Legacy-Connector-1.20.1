@@ -75,8 +75,9 @@ final class Forge1201JarTransformerTest {
         assertEquals(1, bytecode.classEntriesRelocated());
         assertTrue(bytecode.relocatedTypes().stream()
                 .anyMatch(value -> value.startsWith("net/minecraftforge/fml/ModList -> ")));
-        assertTrue(bytecode.manualAdapterTypes().contains("net/minecraftforge/registries/ForgeRegistries"));
-        assertTrue(bytecode.manualAdapterTypes().contains("net/minecraftforge/registries/IForgeRegistry"));
+        assertFalse(bytecode.manualAdapterTypes().contains("net/minecraftforge/registries/ForgeRegistries"));
+        assertFalse(bytecode.manualAdapterTypes().contains("net/minecraftforge/registries/IForgeRegistry"));
+        assertEquals(1, bytecode.registryAdapters().builtInRegistryFieldReads());
         assertTrue(bytecode.unmappedForgeApiTypes().contains("net/minecraftforge/unknown/MissingApi"));
 
         try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(output.toFile())) {
@@ -106,8 +107,8 @@ final class Forge1201JarTransformerTest {
             assertEquals("()Lnet/neoforged/fml/ModList;", methodCall.desc);
 
             FieldInsnNode field = firstInstruction(invoke, FieldInsnNode.class);
-            assertEquals("net/minecraftforge/registries/ForgeRegistries", field.owner);
-            assertEquals("Lnet/minecraftforge/registries/IForgeRegistry;", field.desc);
+            assertEquals("net/minecraft/core/registries/BuiltInRegistries", field.owner);
+            assertEquals("Lnet/minecraft/core/DefaultedRegistry;", field.desc);
 
             LdcInsnNode classLiteral = firstInstruction(invoke, LdcInsnNode.class);
             assertEquals("Lnet/neoforged/fml/ModList;", ((Type) classLiteral.cst).getDescriptor());
