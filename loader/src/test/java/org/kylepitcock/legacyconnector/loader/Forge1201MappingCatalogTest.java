@@ -95,7 +95,7 @@ final class Forge1201MappingCatalogTest {
     }
 
     @Test
-    void configSpecFamilyUsesOnlyExplicitlyReviewedTypeReplacements() {
+    void configSpecAndRegistryObjectUseOnlyExplicitlyReviewedTypeReplacements() {
         var replacements = java.util.Map.of(
                 "net/minecraftforge/common/ForgeConfigSpec",
                 "net/neoforged/neoforge/common/ModConfigSpec",
@@ -106,7 +106,9 @@ final class Forge1201MappingCatalogTest {
                 "net/minecraftforge/common/ForgeConfigSpec$IntValue",
                 "net/neoforged/neoforge/common/ModConfigSpec$IntValue",
                 "net/minecraftforge/common/ForgeConfigSpec$DoubleValue",
-                "net/neoforged/neoforge/common/ModConfigSpec$DoubleValue");
+                "net/neoforged/neoforge/common/ModConfigSpec$DoubleValue",
+                "net/minecraftforge/registries/RegistryObject",
+                "java/util/function/Supplier");
 
         assertEquals(replacements, Forge1201MappingCatalog.explicitTypeReplacements());
         replacements.forEach((source, target) -> {
@@ -118,7 +120,7 @@ final class Forge1201MappingCatalogTest {
             assertNull(Forge1201MappingCatalog.manualAdapterReason(source), source);
         });
 
-        assertEquals(5, replacements.size());
+        assertEquals(6, replacements.size());
     }
 
     @Test
@@ -151,14 +153,30 @@ final class Forge1201MappingCatalogTest {
     }
 
     @Test
-    void eventResultAndDeferredRegisterRequireSemanticReview() {
+    void eventResultRemainsSemanticButDeferredRegisterUsesReviewedPackageMove() {
         var result = Forge1201MappingCatalog.classify(
                 "net/minecraftforge/eventbus/api/Event$Result");
         var deferred = Forge1201MappingCatalog.classify(
                 "net/minecraftforge/registries/DeferredRegister");
 
         assertEquals(Forge1201MappingCatalog.Kind.MANUAL_ADAPTER_REQUIRED, result.kind());
-        assertEquals(Forge1201MappingCatalog.Kind.MANUAL_ADAPTER_REQUIRED, deferred.kind());
+        assertEquals(Forge1201MappingCatalog.Kind.PACKAGE_RELOCATION_CANDIDATE, deferred.kind());
+        assertEquals("net/neoforged/neoforge/registries/DeferredRegister",
+                deferred.targetInternalName());
+        assertNull(Forge1201MappingCatalog.manualAdapterReason(
+                "net/minecraftforge/registries/DeferredRegister"));
+    }
+
+    @Test
+    void recognizesReviewedVanillaRegistryTargetTypes() {
+        org.junit.jupiter.api.Assertions.assertTrue(Forge1201MappingCatalog.isReviewedTargetApiType(
+                "net/minecraft/core/registries/BuiltInRegistries"));
+        org.junit.jupiter.api.Assertions.assertTrue(Forge1201MappingCatalog.isReviewedTargetApiType(
+                "net/minecraft/core/Registry"));
+        org.junit.jupiter.api.Assertions.assertTrue(Forge1201MappingCatalog.isReviewedTargetApiType(
+                "net/minecraft/core/DefaultedRegistry"));
+        org.junit.jupiter.api.Assertions.assertFalse(Forge1201MappingCatalog.isReviewedTargetApiType(
+                "net/minecraft/world/entity/Entity"));
     }
 
 }
