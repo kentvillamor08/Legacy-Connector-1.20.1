@@ -104,7 +104,7 @@ The report is printed to the Gradle console. The exact jar and dependency versio
 Run the read-only mapping decision audit against the same original input JAR:
 
 ```powershell
-.\\gradlew.bat :loader:auditForge1201Mappings -Pforge1201Jar="F:\\path\\to\\symbiote-1.1.3.jar"
+.\gradlew.bat :loader:auditForge1201Mappings -Pforge1201Jar="F:\\path\\to\\symbiote-1.1.3.jar"
 ```
 
 This command classifies reviewed namespace moves, known semantic adapters and unreviewed Forge API types. It does not rewrite the JAR. A package relocation is only a candidate until the exact class and member signatures are verified against the pinned NeoForge 21.1.x artifact.
@@ -112,7 +112,7 @@ This command classifies reviewed namespace moves, known semantic adapters and un
 After the mapping catalog has been reviewed, verify the remaining namespace-relocation candidates against the **actual target game's compile classpath** configured by the root NeoForge ModDev project. The candidate count is expected to change as additional APIs are reclassified for manual migration:
 
 ```powershell
-.\\gradlew.bat :verifyForge1201TargetApi -Pforge1201Jar="C:\\path\\to\\symbiote-1.1.3.jar"
+.\gradlew.bat :verifyForge1201TargetApi -Pforge1201Jar="C:\\path\\to\\symbiote-1.1.3.jar"
 ```
 
 This task runs in the root project's target compile classpath while the `:loader` module remains independent of Minecraft/NeoForge classes. It reads class-file structures with ASM and checks target class presence plus exact method/field descriptors, including inherited members where the visible hierarchy is complete. Missing classes, missing members, incomplete hierarchy lookups, and member descriptors that contain manual-adapter types are reported separately. No target class is loaded or initialized and no JAR bytes are changed. A structural match is not proof of behavioral compatibility; manual-adapter types and Minecraft 1.20.1-to-1.21.1 changes remain separate.
@@ -177,11 +177,11 @@ A separate modern path has now been added without changing the pre-1.20 `LegacyJ
 Run from the project root after IntelliJ Ctrl+T:
 
 ```powershell
-.\\gradlew.bat :loader:clean :loader:test --no-daemon
+.\gradlew.bat :loader:clean :loader:test --no-daemon
 
-.\\gradlew.bat :loader:transformForge1201 `
-  -Pforge1201Jar="C:\\Users\\Administrator\\legacy-connector-testbench\\symbiote-1.1.3.jar" `
-  -Pforge1201Output="C:\\Users\\Administrator\\legacy-connector-testbench\\symbiote-1.1.3-neoforge-1.21.1-preliminary.jar"
+.\gradlew.bat :loader:transformForge1201 `
+  -Pforge1201Jar="C:\Users\\Administrator\\legacy-connector-testbench\\symbiote-1.1.3.jar" `
+  -Pforge1201Output="C:\Users\\Administrator\\legacy-connector-testbench\\symbiote-1.1.3-neoforge-1.21.1-preliminary.jar"
 ```
 
 Keep the resulting derivative JAR private with the original input. Do not place it in the active mods folder.
