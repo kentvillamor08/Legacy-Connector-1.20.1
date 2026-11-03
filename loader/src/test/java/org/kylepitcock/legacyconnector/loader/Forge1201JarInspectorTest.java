@@ -104,15 +104,36 @@ final class Forge1201JarInspectorTest {
         org.junit.jupiter.api.Assertions.assertTrue(analysis.methodReferences().stream()
                 .anyMatch(reference -> reference.owner().equals("net/minecraftforge/fml/ModList")
                         && reference.name().equals("get")));
-        assertEquals(1, analysis.methodCallSites().size());
-        var callSite = analysis.methodCallSites().get(0);
-        assertEquals("sample/AlienEvoMod", callSite.callerClass());
-        assertEquals("sample", callSite.callerMethod());
-        assertEquals("()V", callSite.callerDescriptor());
-        assertEquals("net/minecraftforge/fml/ModList", callSite.targetOwner());
-        assertEquals("get", callSite.targetName());
-        assertEquals("()Lnet/minecraftforge/fml/ModList;", callSite.targetDescriptor());
-        assertEquals(Opcodes.INVOKESTATIC, callSite.opcode());
+        assertEquals(2, analysis.methodCallSites().size());
+        var forgeCallSite = analysis.methodCallSites().stream()
+                .filter(call -> call.targetOwner().equals("net/minecraftforge/fml/ModList"))
+                .findFirst().orElseThrow();
+        assertEquals("sample/AlienEvoMod", forgeCallSite.callerClass());
+        assertEquals("sample", forgeCallSite.callerMethod());
+        assertEquals("()V", forgeCallSite.callerDescriptor());
+        assertEquals("get", forgeCallSite.targetName());
+        assertEquals("()Lnet/minecraftforge/fml/ModList;", forgeCallSite.targetDescriptor());
+        assertEquals(Opcodes.INVOKESTATIC, forgeCallSite.opcode());
+
+        var vanillaCallSite = analysis.methodCallSites().stream()
+                .filter(call -> call.targetOwner().equals("net/minecraft/world/effect/MobEffectInstance"))
+                .findFirst().orElseThrow();
+        assertEquals("sample/AlienEvoMod", vanillaCallSite.callerClass());
+        assertEquals("sample", vanillaCallSite.callerMethod());
+        assertEquals("getDuration", vanillaCallSite.targetName());
+        assertEquals("()I", vanillaCallSite.targetDescriptor());
+        assertEquals(Opcodes.INVOKEVIRTUAL, vanillaCallSite.opcode());
+
+        assertEquals(2, analysis.fieldCallSites().size());
+        var vanillaFieldCallSite = analysis.fieldCallSites().stream()
+                .filter(call -> call.targetOwner().equals("net/minecraft/world/effect/MobEffects"))
+                .findFirst().orElseThrow();
+        assertEquals("sample/AlienEvoMod", vanillaFieldCallSite.callerClass());
+        assertEquals("sample", vanillaFieldCallSite.callerMethod());
+        assertEquals("MOVEMENT_SPEED", vanillaFieldCallSite.targetName());
+        assertEquals("Lnet/minecraft/world/effect/MobEffect;", vanillaFieldCallSite.targetDescriptor());
+        assertEquals(Opcodes.GETSTATIC, vanillaFieldCallSite.opcode());
+
         org.junit.jupiter.api.Assertions.assertTrue(analysis.fieldReferences().stream()
                 .anyMatch(reference -> reference.owner().equals("net/minecraftforge/registries/ForgeRegistries")
                         && reference.name().equals("ITEMS")));
@@ -277,6 +298,13 @@ final class Forge1201JarInspectorTest {
         method.visitCode();
         method.visitMethodInsn(Opcodes.INVOKESTATIC, "net/minecraftforge/fml/ModList",
                 "get", "()Lnet/minecraftforge/fml/ModList;", false);
+        method.visitInsn(Opcodes.POP);
+        method.visitInsn(Opcodes.ACONST_NULL);
+        method.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "net/minecraft/world/effect/MobEffectInstance",
+                "getDuration", "()I", false);
+        method.visitInsn(Opcodes.POP);
+        method.visitFieldInsn(Opcodes.GETSTATIC, "net/minecraft/world/effect/MobEffects",
+                "MOVEMENT_SPEED", "Lnet/minecraft/world/effect/MobEffect;");
         method.visitInsn(Opcodes.POP);
         method.visitFieldInsn(Opcodes.GETSTATIC, "net/minecraftforge/registries/ForgeRegistries",
                 "ITEMS", "Lnet/minecraftforge/registries/IForgeRegistry;");
