@@ -16,12 +16,19 @@ final class Forge1211TargetFieldAliases {
 
     private static final String RESOURCE_KEY_DESCRIPTOR =
             "Lnet/minecraft/resources/ResourceKey;";
+    private static final String HOLDER_DESCRIPTOR =
+            "Lnet/minecraft/core/Holder;";
     private static final Map<FieldKey, String> FIELD_ALIASES = Map.of(
             new FieldKey(
                     "net/minecraft/world/item/enchantment/Enchantments",
                     "f_316758_",
                     RESOURCE_KEY_DESCRIPTOR),
-            "EFFICIENCY");
+            "EFFICIENCY",
+            new FieldKey(
+                    "net/minecraft/world/entity/ai/attributes/Attributes",
+                    "f_316806_",
+                    HOLDER_DESCRIPTOR),
+            "STEP_HEIGHT");
 
     private Forge1211TargetFieldAliases() {}
 
