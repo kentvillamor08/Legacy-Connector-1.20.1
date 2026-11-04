@@ -9,8 +9,9 @@ import java.util.List;
  *
  * <p>Source 1.20.1 SRG member names are normalized to their Mojang-readable
  * names before reviewed vanilla and relocated NeoForge members are compared
- * against the target 1.21.1 class hierarchy. This is structural verification,
- * not proof of semantic compatibility.</p>
+ * against the target 1.21.1 class hierarchy. A separate, exact-match allowlist
+ * normalizes known 1.21.1 target-side field aliases before source normalization.
+ * This is structural verification, not proof of semantic compatibility.</p>
  */
 public final class Forge1201TranslatedJarVerifier {
     private Forge1201TranslatedJarVerifier() {}
@@ -26,7 +27,10 @@ public final class Forge1201TranslatedJarVerifier {
                 Path.of(args[1]), Path.of(args[2]));
         Forge1201ApiUsageAnalyzer.Analysis rawAnalysis =
                 Forge1201ApiUsageAnalyzer.analyzeTranslated(jar);
-        Forge1201SrgNameMappings.Normalization normalization = sourceMappings.normalize(rawAnalysis);
+        Forge1211TargetFieldAliases.Normalization targetFieldAliases =
+                Forge1211TargetFieldAliases.normalize(rawAnalysis);
+        Forge1201SrgNameMappings.Normalization normalization =
+                sourceMappings.normalize(targetFieldAliases.analysis());
         Forge1201TargetApiVerifier.Result result = Forge1201TargetApiVerifier.verify(
                 normalization.analysis(),
                 internalName -> ClassLoader.getSystemClassLoader().getResourceAsStream(internalName + ".class"));
@@ -39,6 +43,11 @@ public final class Forge1201TranslatedJarVerifier {
         System.out.println("Source member mapping set: Forge MCPConfig "
                 + Forge1201SrgNameMappings.SOURCE_MAPPING_VERSION);
         System.out.println("Source namespace: SRG method/field identifiers normalized to 1.20.1 Mojang names.");
+
+        System.out.println("\nTarget-side field aliases (exact " 
+                + Forge1211TargetFieldAliases.TARGET_MINECRAFT_VERSION + " owner/name/descriptor matches):");
+        System.out.println("  applied aliases: " + targetFieldAliases.fieldAliases().size());
+        targetFieldAliases.fieldAliases().forEach(value -> System.out.println("  TARGET FIELD ALIAS: " + value));
 
         System.out.println("\nSource SRG member-name normalization:");
         System.out.println("  method references normalized: " + normalization.methodMappings().size());
