@@ -16,7 +16,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
@@ -24,6 +26,7 @@ import org.objectweb.asm.tree.FrameNode;
 import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.InvokeDynamicInsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.LabelNode;
 import org.objectweb.asm.tree.LocalVariableNode;
@@ -80,6 +83,15 @@ public final class Forge1201CallSiteAdapter {
         }
     }
 
+    /** Bootstrap argument recipe for method-type and method-handle constants. */
+    public record BootstrapArgumentSpec(
+            String kind,
+            String descriptor,
+            int tag,
+            String owner,
+            String name,
+            boolean isInterface) {}
+
     /** An instruction recipe. Unused operands are null or -1 according to the instruction kind. */
     public record InstructionSpec(
             String kind,
@@ -90,7 +102,20 @@ public final class Forge1201CallSiteAdapter {
             String descriptor,
             String typeName,
             String valueType,
-            String value) {}
+            String value,
+            List<BootstrapArgumentSpec> bootstrapArguments,
+            boolean interfaceOwner) {
+        public InstructionSpec {
+            bootstrapArguments = List.copyOf(bootstrapArguments);
+        }
+
+        public InstructionSpec(
+                String kind, int opcode, int variable, String owner, String name,
+                String descriptor, String typeName, String valueType, String value) {
+            this(kind, opcode, variable, owner, name, descriptor, typeName, valueType,
+                    value, List.of(), false);
+        }
+    }
 
     public record Operation(
             String type,
@@ -530,6 +555,10 @@ public final class Forge1201CallSiteAdapter {
                     && field.desc.equals(spec.descriptor());
             case "type" -> instruction instanceof TypeInsnNode typeInsn
                     && typeInsn.desc.equals(spec.typeName());
+            case "class-literal" -> instruction instanceof LdcInsnNode ldc
+                    && ldc.cst instanceof Type type && type.getSort() == Type.OBJECT
+                    && type.getInternalName().equals(spec.typeName());
+            case "invokedynamic" -> matchesInvokeDynamic(instruction, spec);
             case "ldc" -> instruction instanceof LdcInsnNode ldc
                     && Objects.equals(ldc.cst, constantValue(spec));
             case "insn" -> instruction instanceof InsnNode;
@@ -544,10 +573,64 @@ public final class Forge1201CallSiteAdapter {
                     spec.descriptor(), spec.opcode() == Opcodes.INVOKEINTERFACE);
             case "field" -> new FieldInsnNode(spec.opcode(), spec.owner(), spec.name(), spec.descriptor());
             case "type" -> new TypeInsnNode(spec.opcode(), spec.typeName());
+            case "class-literal" -> new LdcInsnNode(Type.getObjectType(spec.typeName()));
+            case "invokedynamic" -> createInvokeDynamic(spec);
             case "ldc" -> new LdcInsnNode(constantValue(spec));
             case "insn" -> new InsnNode(spec.opcode());
             default -> throw new IOException("Unsupported instruction recipe kind: " + spec.kind());
         };
+    }
+
+    private static boolean matchesInvokeDynamic(AbstractInsnNode instruction, InstructionSpec spec)
+            throws IOException {
+        if (!(instruction instanceof InvokeDynamicInsnNode dynamic)
+                || !dynamic.name.equals(spec.name())
+                || !dynamic.desc.equals(spec.descriptor())
+                || !dynamic.bsm.getOwner().equals(spec.owner())
+                || !dynamic.bsm.getName().equals(spec.typeName())
+                || !dynamic.bsm.getDesc().equals(spec.valueType())
+                || dynamic.bsm.getTag() != handleTagValue(spec.value(), "invokedynamic bootstrap tag")
+                || dynamic.bsm.isInterface() != spec.interfaceOwner()
+                || dynamic.bsmArgs.length != spec.bootstrapArguments().size()) {
+            return false;
+        }
+        for (int index = 0; index < dynamic.bsmArgs.length; index++) {
+            Object actual = dynamic.bsmArgs[index];
+            BootstrapArgumentSpec expected = spec.bootstrapArguments().get(index);
+            if (expected.kind().equals("method-type")) {
+                if (!(actual instanceof Type type)
+                        || type.getSort() != Type.METHOD
+                        || !type.getDescriptor().equals(expected.descriptor())) return false;
+            } else if (expected.kind().equals("handle")) {
+                if (!(actual instanceof Handle handle)
+                        || handle.getTag() != expected.tag()
+                        || !handle.getOwner().equals(expected.owner())
+                        || !handle.getName().equals(expected.name())
+                        || !handle.getDesc().equals(expected.descriptor())
+                        || handle.isInterface() != expected.isInterface()) return false;
+            } else {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static InvokeDynamicInsnNode createInvokeDynamic(InstructionSpec spec) throws IOException {
+        Object[] arguments = new Object[spec.bootstrapArguments().size()];
+        for (int index = 0; index < arguments.length; index++) {
+            BootstrapArgumentSpec argument = spec.bootstrapArguments().get(index);
+            if (argument.kind().equals("method-type")) {
+                arguments[index] = Type.getMethodType(argument.descriptor());
+            } else if (argument.kind().equals("handle")) {
+                arguments[index] = new Handle(argument.tag(), argument.owner(), argument.name(),
+                        argument.descriptor(), argument.isInterface());
+            } else {
+                throw new IOException("Unsupported bootstrap argument kind: " + argument.kind());
+            }
+        }
+        Handle bootstrap = new Handle(handleTagValue(spec.value(), "invokedynamic bootstrap tag"),
+                spec.owner(), spec.typeName(), spec.valueType(), spec.interfaceOwner());
+        return new InvokeDynamicInsnNode(spec.name(), spec.descriptor(), bootstrap, arguments);
     }
 
     private static Object constantValue(InstructionSpec spec) throws IOException {
@@ -722,6 +805,35 @@ public final class Forge1201CallSiteAdapter {
                 yield new InstructionSpec(kind, opcode, -1, null, null, null,
                         requiredInternalName(json, "typeName", location), null, null);
             }
+            case "class-literal" -> new InstructionSpec(
+                    kind, Opcodes.LDC, -1, null, null, null,
+                    requiredInternalName(json, "typeName", location), null, null);
+            case "invokedynamic" -> {
+                String dynamicName = requiredString(json, "name", location);
+                String dynamicDescriptor = requiredString(json, "descriptor", location);
+                try {
+                    Type.getMethodType(dynamicDescriptor);
+                } catch (IllegalArgumentException invalid) {
+                    throw new IOException(location + ".descriptor must be a valid method descriptor", invalid);
+                }
+                JsonObject bootstrap = requiredObject(json, "bootstrap", location);
+                String bootstrapTag = requiredString(bootstrap, "tag", location + ".bootstrap");
+                handleTagValue(bootstrapTag, location + ".bootstrap.tag");
+                String bootstrapOwner = requiredInternalName(bootstrap, "owner", location + ".bootstrap");
+                String bootstrapName = requiredString(bootstrap, "name", location + ".bootstrap");
+                String bootstrapDescriptor = requiredString(bootstrap, "descriptor", location + ".bootstrap");
+                try {
+                    Type.getMethodType(bootstrapDescriptor);
+                } catch (IllegalArgumentException invalid) {
+                    throw new IOException(location + ".bootstrap.descriptor must be a valid method descriptor", invalid);
+                }
+                boolean bootstrapInterface = optionalBoolean(bootstrap, "isInterface", false, location + ".bootstrap");
+                List<BootstrapArgumentSpec> arguments = parseBootstrapArguments(
+                        requiredArray(json, "bootstrapArguments", location), location + ".bootstrapArguments");
+                yield new InstructionSpec(kind, Opcodes.INVOKEDYNAMIC, -1,
+                        bootstrapOwner, dynamicName, dynamicDescriptor,
+                        bootstrapName, bootstrapDescriptor, bootstrapTag, arguments, bootstrapInterface);
+            }
             case "ldc" -> {
                 String valueType = requiredString(json, "valueType", location);
                 JsonElement value = json.get("value");
@@ -748,6 +860,74 @@ public final class Forge1201CallSiteAdapter {
             }
             default -> throw new IOException(location + " has unsupported instruction kind '" + kind + "'");
         };
+    }
+
+    private static List<BootstrapArgumentSpec> parseBootstrapArguments(JsonArray array, String location)
+            throws IOException {
+        List<BootstrapArgumentSpec> arguments = new ArrayList<>();
+        for (int index = 0; index < array.size(); index++) {
+            JsonElement element = array.get(index);
+            String itemLocation = location + "[" + index + "]";
+            if (!element.isJsonObject()) throw new IOException(itemLocation + " must be an object");
+            JsonObject argument = element.getAsJsonObject();
+            String kind = requiredString(argument, "kind", itemLocation);
+            switch (kind) {
+                case "method-type" -> {
+                    String descriptor = requiredString(argument, "descriptor", itemLocation);
+                    try {
+                        Type methodType = Type.getMethodType(descriptor);
+                        if (methodType.getSort() != Type.METHOD) {
+                            throw new IllegalArgumentException("not a method type");
+                        }
+                    } catch (IllegalArgumentException invalid) {
+                        throw new IOException(itemLocation + ".descriptor must be a valid method descriptor", invalid);
+                    }
+                    arguments.add(new BootstrapArgumentSpec(kind, descriptor, -1, null, null, false));
+                }
+                case "handle" -> {
+                    int tag = handleTagValue(requiredString(argument, "tag", itemLocation), itemLocation + ".tag");
+                    String owner = requiredInternalName(argument, "owner", itemLocation);
+                    String name = requiredString(argument, "name", itemLocation);
+                    String descriptor = requiredString(argument, "descriptor", itemLocation);
+                    boolean isInterface = optionalBoolean(argument, "isInterface", false, itemLocation);
+                    arguments.add(new BootstrapArgumentSpec(kind, descriptor, tag, owner, name, isInterface));
+                }
+                default -> throw new IOException(itemLocation + " has unsupported bootstrap argument kind '" + kind
+                        + "' (supported: method-type, handle)");
+            }
+        }
+        return List.copyOf(arguments);
+    }
+
+    private static int handleTagValue(String name, String location) throws IOException {
+        try {
+            Field field = Opcodes.class.getField(name);
+            int tag = field.getInt(null);
+            if (tag < Opcodes.H_GETFIELD || tag > Opcodes.H_INVOKEINTERFACE) {
+                throw new IOException(location + " is not a JVM method-handle tag: " + name);
+            }
+            return tag;
+        } catch (NoSuchFieldException | IllegalAccessException invalid) {
+            throw new IOException(location + " is unknown: " + name, invalid);
+        }
+    }
+
+    private static boolean optionalBoolean(JsonObject json, String property, boolean defaultValue, String location)
+            throws IOException {
+        JsonElement element = json.get(property);
+        if (element == null) return defaultValue;
+        if (!element.isJsonPrimitive() || !element.getAsJsonPrimitive().isBoolean()) {
+            throw new IOException(location + "." + property + " must be a boolean");
+        }
+        return element.getAsBoolean();
+    }
+
+    private static JsonObject requiredObject(JsonObject json, String property, String location) throws IOException {
+        JsonElement element = json.get(property);
+        if (element == null || !element.isJsonObject()) {
+            throw new IOException(location + "." + property + " must be an object");
+        }
+        return element.getAsJsonObject();
     }
 
     private static int requiredOpcode(JsonObject json, String property, String location, boolean field)
