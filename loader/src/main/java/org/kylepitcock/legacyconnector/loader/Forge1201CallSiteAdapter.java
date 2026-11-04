@@ -473,7 +473,12 @@ public final class Forge1201CallSiteAdapter {
     private static void rewriteInstructionSequence(Rule rule, MethodNode method, Operation operation)
             throws IOException {
         List<List<AbstractInsnNode>> matches = findSequenceMatches(method, operation.match());
-        requireExpectedMatches(rule, operation, matches.size());
+        if (matches.size() != operation.expectedMatches()) {
+            String detail = describeSequenceMismatch(method, operation.match());
+            throw new IOException("Adapter operation '" + operation.type() + "' in " + rule.key()
+                    + " expected " + operation.expectedMatches() + " matches, found " + matches.size()
+                    + "; " + detail);
+        }
         Set<AbstractInsnNode> claimedInstructions = new HashSet<>();
         for (List<AbstractInsnNode> match : matches) {
             for (AbstractInsnNode instruction : match) {
@@ -539,6 +544,57 @@ public final class Forge1201CallSiteAdapter {
             if (matched) matches.add(List.copyOf(nodes));
         }
         return matches;
+    }
+
+    /**
+     * Explains the first failed element for a candidate sequence. This diagnostic does not
+     * relax or alter the exact matching rules.
+     */
+    private static String describeSequenceMismatch(
+            MethodNode method, List<InstructionSpec> pattern) throws IOException {
+        for (AbstractInsnNode start : method.instructions) {
+            if (start.getOpcode() < 0 || !matches(start, pattern.get(0))) continue;
+
+            AbstractInsnNode cursor = start;
+            for (int index = 0; index < pattern.size(); index++) {
+                while (cursor != null && cursor.getOpcode() < 0) cursor = cursor.getNext();
+                InstructionSpec expected = pattern.get(index);
+                if (cursor == null) {
+                    return "candidate beginning " + describeInstruction(start)
+                            + " ended before pattern[" + index + "] expected " + expected;
+                }
+                if (!matches(cursor, expected)) {
+                    return "candidate beginning " + describeInstruction(start)
+                            + " failed at pattern[" + index + "]; expected " + expected
+                            + ", actual " + describeInstruction(cursor);
+                }
+                cursor = cursor.getNext();
+            }
+        }
+        return "no instruction matched the first pattern element " + pattern.get(0);
+    }
+
+    private static String describeInstruction(AbstractInsnNode instruction) {
+        if (instruction instanceof InvokeDynamicInsnNode dynamic) {
+            return "invokedynamic[name=" + dynamic.name + ", desc=" + dynamic.desc
+                    + ", bootstrap=" + dynamic.bsm + ", arguments="
+                    + java.util.Arrays.deepToString(dynamic.bsmArgs) + "]";
+        }
+        if (instruction instanceof TypeInsnNode type) {
+            return "type[opcode=" + type.getOpcode() + ", desc=" + type.desc + "]";
+        }
+        if (instruction instanceof MethodInsnNode method) {
+            return "method[opcode=" + method.getOpcode() + ", owner=" + method.owner
+                    + ", name=" + method.name + ", desc=" + method.desc + ", itf=" + method.itf + "]";
+        }
+        if (instruction instanceof FieldInsnNode field) {
+            return "field[opcode=" + field.getOpcode() + ", owner=" + field.owner
+                    + ", name=" + field.name + ", desc=" + field.desc + "]";
+        }
+        if (instruction instanceof LdcInsnNode ldc) {
+            return "ldc[value=" + ldc.cst + "]";
+        }
+        return instruction.getClass().getSimpleName() + "[opcode=" + instruction.getOpcode() + "]";
     }
 
     private static boolean matches(AbstractInsnNode instruction, InstructionSpec spec) throws IOException {
