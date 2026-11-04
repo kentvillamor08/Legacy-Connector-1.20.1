@@ -1038,9 +1038,9 @@ final class Forge1201CallSiteAdapterTest {
         String containerType = "sample/Container";
         String screenType = "sample/Screen";
         String screenDescriptor = "(L" + screenType + ";)L" + screenType + ";";
-        String oldImplementationDescriptor = "(L" + oldScreenType + ";L" + screenType + ")L"
+        String oldImplementationDescriptor = "(L" + oldScreenType + ";L" + screenType + ";)L"
                 + screenType + ";";
-        String newImplementationDescriptor = "(L" + containerType + ";L" + screenType + ")L"
+        String newImplementationDescriptor = "(L" + containerType + ";L" + screenType + ";)L"
                 + screenType + ";";
         String bootstrapDescriptor = "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;"
                 + "Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;"
