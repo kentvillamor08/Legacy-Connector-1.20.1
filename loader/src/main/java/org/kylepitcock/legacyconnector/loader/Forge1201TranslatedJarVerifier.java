@@ -44,7 +44,7 @@ public final class Forge1201TranslatedJarVerifier {
                 + Forge1201SrgNameMappings.SOURCE_MAPPING_VERSION);
         System.out.println("Source namespace: SRG method/field identifiers normalized to 1.20.1 Mojang names.");
 
-        System.out.println("\nTarget-side field aliases (exact " 
+        System.out.println("\nTarget-side field aliases (exact "
                 + Forge1211TargetFieldAliases.TARGET_MINECRAFT_VERSION + " owner/name/descriptor matches):");
         System.out.println("  applied aliases: " + targetFieldAliases.fieldAliases().size());
         targetFieldAliases.fieldAliases().forEach(value -> System.out.println("  TARGET FIELD ALIAS: " + value));
