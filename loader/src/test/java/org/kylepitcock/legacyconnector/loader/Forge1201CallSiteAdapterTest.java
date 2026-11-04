@@ -22,6 +22,7 @@ import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FrameNode;
 import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.LineNumberNode;
 import org.objectweb.asm.tree.LocalVariableNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.InsnNode;
@@ -911,7 +912,6 @@ final class Forge1201CallSiteAdapterTest {
                       {
                         "type": "instruction-sequence",
                         "match": [
-                          { "kind": "var", "opcode": "ALOAD", "var": 0 },
                           {
                             "kind": "method",
                             "opcode": "INVOKEVIRTUAL",
@@ -928,7 +928,6 @@ final class Forge1201CallSiteAdapterTest {
                           }
                         ],
                         "replaceWith": [
-                          { "kind": "var", "opcode": "ALOAD", "var": 0 },
                           {
                             "kind": "method",
                             "opcode": "INVOKEVIRTUAL",
@@ -979,6 +978,9 @@ final class Forge1201CallSiteAdapterTest {
         method.instructions.add(new TypeInsnNode(Opcodes.INSTANCEOF, waterAnimal));
         method.instructions.add(waterAnimalShortcut);
         method.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        LabelNode sourceLine = new LabelNode();
+        method.instructions.add(sourceLine);
+        method.instructions.add(new LineNumberNode(105, sourceLine));
         method.instructions.add(new MethodInsnNode(
                 Opcodes.INVOKEVIRTUAL, mob, "m_6336_", "()L" + mobType + ";", false));
         method.instructions.add(new FieldInsnNode(
