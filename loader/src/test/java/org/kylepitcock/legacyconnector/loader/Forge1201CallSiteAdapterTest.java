@@ -904,7 +904,7 @@ final class Forge1201CallSiteAdapterTest {
                   "schemaVersion": 1,
                   "id": "wild-host-aquatic-entity-tag",
                   "rules": [{
-                    "className": "com/scout/symbiote/event/WildHostSpawnListener",
+                    "className": "sample/AquaticClassificationFixture",
                     "methodName": "isAquatic",
                     "methodDescriptor": "(Lnet/minecraft/world/entity/Mob;)Z",
                     "operations": [
@@ -965,7 +965,7 @@ final class Forge1201CallSiteAdapterTest {
                 """);
 
         ClassNode node = new ClassNode();
-        node.name = "com/scout/symbiote/event/WildHostSpawnListener";
+        node.name = "sample/AquaticClassificationFixture";
         MethodNode method = new MethodNode(
                 Opcodes.ASM9, Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
                 "isAquatic", "(L" + mob + ";)Z", null, null);
