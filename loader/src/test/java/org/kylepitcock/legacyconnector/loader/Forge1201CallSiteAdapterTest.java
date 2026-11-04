@@ -2,6 +2,7 @@ package org.kylepitcock.legacyconnector.loader;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -886,6 +887,140 @@ final class Forge1201CallSiteAdapterTest {
                 .orElseThrow();
         assertTrue(containsCall(writtenLambda, resourceLocation, "fromNamespaceAndPath",
                 "(Ljava/lang/String;Ljava/lang/String;)" + resourceLocationDescriptor));
+    }
+
+    @Test
+    void rewritesAquaticEntityTagCheckAndKeepsTheConditionalBranchTarget() throws Exception {
+        String mob = "net/minecraft/world/entity/Mob";
+        String mobType = "net/minecraft/world/entity/MobType";
+        String waterAnimal = "net/minecraft/world/entity/animal/WaterAnimal";
+        String entity = "net/minecraft/world/entity/Entity";
+        String entityType = "net/minecraft/world/entity/EntityType";
+        String entityTypeTags = "net/minecraft/tags/EntityTypeTags";
+        String tagKey = "net/minecraft/tags/TagKey";
+
+        Path profileFile = writeProfile("""
+                {
+                  "schemaVersion": 1,
+                  "id": "wild-host-aquatic-entity-tag",
+                  "rules": [{
+                    "className": "com/scout/symbiote/event/WildHostSpawnListener",
+                    "methodName": "isAquatic",
+                    "methodDescriptor": "(Lnet/minecraft/world/entity/Mob;)Z",
+                    "operations": [
+                      {
+                        "type": "instruction-sequence",
+                        "match": [
+                          { "kind": "var", "opcode": "ALOAD", "var": 0 },
+                          {
+                            "kind": "method",
+                            "opcode": "INVOKEVIRTUAL",
+                            "owner": "net/minecraft/world/entity/Mob",
+                            "name": "m_6336_",
+                            "descriptor": "()Lnet/minecraft/world/entity/MobType;"
+                          },
+                          {
+                            "kind": "field",
+                            "opcode": "GETSTATIC",
+                            "owner": "net/minecraft/world/entity/MobType",
+                            "name": "f_21644_",
+                            "descriptor": "Lnet/minecraft/world/entity/MobType;"
+                          }
+                        ],
+                        "replaceWith": [
+                          { "kind": "var", "opcode": "ALOAD", "var": 0 },
+                          {
+                            "kind": "method",
+                            "opcode": "INVOKEVIRTUAL",
+                            "owner": "net/minecraft/world/entity/Entity",
+                            "name": "getType",
+                            "descriptor": "()Lnet/minecraft/world/entity/EntityType;"
+                          },
+                          {
+                            "kind": "field",
+                            "opcode": "GETSTATIC",
+                            "owner": "net/minecraft/tags/EntityTypeTags",
+                            "name": "AQUATIC",
+                            "descriptor": "Lnet/minecraft/tags/TagKey;"
+                          },
+                          {
+                            "kind": "method",
+                            "opcode": "INVOKEVIRTUAL",
+                            "owner": "net/minecraft/world/entity/EntityType",
+                            "name": "is",
+                            "descriptor": "(Lnet/minecraft/tags/TagKey;)Z"
+                          }
+                        ],
+                        "expectedMatches": 1
+                      },
+                      {
+                        "type": "conditional-branch-opcode",
+                        "opcode": "IF_ACMPNE",
+                        "replacementOpcode": "IFEQ",
+                        "expectedMatches": 1
+                      }
+                    ]
+                  }]
+                }
+                """);
+
+        ClassNode node = new ClassNode();
+        node.name = "com/scout/symbiote/event/WildHostSpawnListener";
+        MethodNode method = new MethodNode(
+                Opcodes.ASM9, Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "isAquatic", "(L" + mob + ";)Z", null, null);
+        LabelNode aquatic = new LabelNode();
+        LabelNode notAquatic = new LabelNode();
+        LabelNode end = new LabelNode();
+        JumpInsnNode waterAnimalShortcut = new JumpInsnNode(Opcodes.IFNE, aquatic);
+        JumpInsnNode mobTypeComparison = new JumpInsnNode(Opcodes.IF_ACMPNE, notAquatic);
+
+        method.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        method.instructions.add(new TypeInsnNode(Opcodes.INSTANCEOF, waterAnimal));
+        method.instructions.add(waterAnimalShortcut);
+        method.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        method.instructions.add(new MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL, mob, "m_6336_", "()L" + mobType + ";", false));
+        method.instructions.add(new FieldInsnNode(
+                Opcodes.GETSTATIC, mobType, "f_21644_", "L" + mobType + ";"));
+        method.instructions.add(mobTypeComparison);
+        method.instructions.add(aquatic);
+        method.instructions.add(new InsnNode(Opcodes.ICONST_1));
+        method.instructions.add(new JumpInsnNode(Opcodes.GOTO, end));
+        method.instructions.add(notAquatic);
+        method.instructions.add(new InsnNode(Opcodes.ICONST_0));
+        method.instructions.add(end);
+        method.instructions.add(new InsnNode(Opcodes.IRETURN));
+        method.maxStack = 2;
+        method.maxLocals = 1;
+        node.methods.add(method);
+
+        Forge1201CallSiteAdapter.Session session = new Forge1201CallSiteAdapter.Session(
+                Forge1201CallSiteAdapter.load(profileFile));
+        session.apply(node);
+        Forge1201CallSiteAdapter.Stats stats = session.finish();
+
+        assertEquals(1, stats.rulesApplied());
+        assertEquals(2, stats.operationsApplied());
+        assertFalse(containsCall(method, mob, "m_6336_", "()L" + mobType + ";"));
+        assertFalse(containsField(method, mobType, "f_21644_", "L" + mobType + ";"));
+        assertTrue(containsCall(method, entity, "getType", "()L" + entityType + ";"));
+        assertTrue(containsField(method, entityTypeTags, "AQUATIC", "L" + tagKey + ";"));
+        assertTrue(containsCall(method, entityType, "is", "(L" + tagKey + ";)Z"));
+        assertEquals(Opcodes.IFNE, waterAnimalShortcut.getOpcode());
+        assertSame(aquatic, waterAnimalShortcut.label);
+
+        JumpInsnNode rewrittenComparison = null;
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof JumpInsnNode jump && jump.label == notAquatic) {
+                rewrittenComparison = jump;
+                break;
+            }
+        }
+        assertTrue(rewrittenComparison != null, "The original false-path branch must remain present");
+        assertEquals(Opcodes.IFEQ, rewrittenComparison.getOpcode());
+        assertSame(notAquatic, rewrittenComparison.label);
+        assertEquals(2, method.maxStack);
     }
 
     private Path writeProfile(String json) throws IOException {
