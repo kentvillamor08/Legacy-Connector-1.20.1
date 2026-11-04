@@ -16,7 +16,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FrameNode;
@@ -26,6 +28,7 @@ import org.objectweb.asm.tree.LineNumberNode;
 import org.objectweb.asm.tree.LocalVariableNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.InvokeDynamicInsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
@@ -1023,6 +1026,184 @@ final class Forge1201CallSiteAdapterTest {
         assertEquals(Opcodes.IFEQ, rewrittenComparison.getOpcode());
         assertSame(notAquatic, rewrittenComparison.label);
         assertEquals(2, method.maxStack);
+    }
+
+
+    @Test
+    void rewritesLambdaMetafactoryBootstrapAndClassLiteralExactly() throws Exception {
+        String className = "sample/ClientModEvents";
+        String oldFactory = "sample/OldFactory";
+        String newFactory = "sample/ConfigFactory";
+        String oldScreenType = "sample/Minecraft";
+        String containerType = "sample/Container";
+        String screenType = "sample/Screen";
+        String screenDescriptor = "(L" + screenType + ";)L" + screenType + ";";
+        String oldImplementationDescriptor = "(L" + oldScreenType + ";L" + screenType + ")L"
+                + screenType + ";";
+        String newImplementationDescriptor = "(L" + containerType + ";L" + screenType + ")L"
+                + screenType + ";";
+        String bootstrapDescriptor = "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;"
+                + "Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;"
+                + "Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)"
+                + "Ljava/lang/invoke/CallSite;";
+        String oldSamDescriptor = "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;";
+        String newCallSiteDescriptor = "()L" + newFactory + ";";
+
+        String profile = """
+                {
+                  "schemaVersion": 1,
+                  "id": "synthetic-lambda-metafactory-profile",
+                  "rules": [
+                    {
+                      "className": "sample/ClientModEvents",
+                      "methodName": "makeFactory",
+                      "methodDescriptor": "()Lsample/OldFactory;",
+                      "operations": [
+                        {
+                          "type": "instruction-sequence",
+                          "expectedMatches": 1,
+                          "match": [
+                            {"kind":"type","opcode":"NEW","typeName":"sample/OldFactory"},
+                            {"kind":"insn","opcode":"DUP"},
+                            {
+                              "kind":"invokedynamic",
+                              "name":"apply",
+                              "descriptor":"()Ljava/util/function/BiFunction;",
+                              "bootstrap":{
+                                "tag":"H_INVOKESTATIC",
+                                "owner":"java/lang/invoke/LambdaMetafactory",
+                                "name":"metafactory",
+                                "descriptor":"(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;"
+                              },
+                              "bootstrapArguments":[
+                                {"kind":"method-type","descriptor":"(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"},
+                                {"kind":"handle","tag":"H_INVOKESTATIC","owner":"sample/ClientModEvents","name":"screenFactory","descriptor":"(Lsample/Minecraft;Lsample/Screen;)Lsample/Screen;"},
+                                {"kind":"method-type","descriptor":"(Lsample/Minecraft;Lsample/Screen;)Lsample/Screen;"}
+                              ]
+                            },
+                            {
+                              "kind":"method",
+                              "opcode":"INVOKESPECIAL",
+                              "owner":"sample/OldFactory",
+                              "name":"<init>",
+                              "descriptor":"(Ljava/util/function/BiFunction;)V"
+                            }
+                          ],
+                          "replaceWith": [
+                            {
+                              "kind":"invokedynamic",
+                              "name":"createScreen",
+                              "descriptor":"()Lsample/ConfigFactory;",
+                              "bootstrap":{
+                                "tag":"H_INVOKESTATIC",
+                                "owner":"java/lang/invoke/LambdaMetafactory",
+                                "name":"metafactory",
+                                "descriptor":"(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;"
+                              },
+                              "bootstrapArguments":[
+                                {"kind":"method-type","descriptor":"(Lsample/Container;Lsample/Screen;)Lsample/Screen;"},
+                                {"kind":"handle","tag":"H_INVOKESTATIC","owner":"sample/ClientModEvents","name":"screenFactory","descriptor":"(Lsample/Container;Lsample/Screen;)Lsample/Screen;"},
+                                {"kind":"method-type","descriptor":"(Lsample/Container;Lsample/Screen;)Lsample/Screen;"}
+                              ]
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "className": "sample/ClientModEvents",
+                      "methodName": "screenFactory",
+                      "methodDescriptor": "(Lsample/Minecraft;Lsample/Screen;)Lsample/Screen;",
+                      "operations": [
+                        {
+                          "type":"method-declaration-descriptor",
+                          "descriptor":"(Lsample/Minecraft;Lsample/Screen;)Lsample/Screen;",
+                          "replacementDescriptor":"(Lsample/Container;Lsample/Screen;)Lsample/Screen;",
+                          "expectedMatches":1
+                        }
+                      ]
+                    },
+                    {
+                      "className": "sample/ClientModEvents",
+                      "methodName": "register",
+                      "methodDescriptor": "()V",
+                      "operations": [
+                        {
+                          "type":"instruction-sequence",
+                          "expectedMatches":1,
+                          "match":[{"kind":"class-literal","typeName":"sample/OldFactory"}],
+                          "replaceWith":[{"kind":"class-literal","typeName":"sample/ConfigFactory"}]
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """;
+
+        ClassNode node = new ClassNode();
+        node.version = Opcodes.V17;
+        node.access = Opcodes.ACC_PUBLIC;
+        node.name = className;
+        node.superName = "java/lang/Object";
+
+        MethodNode factory = new MethodNode(Opcodes.ASM9, Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC,
+                "makeFactory", "()L" + oldFactory + ";", null, null);
+        factory.instructions.add(new TypeInsnNode(Opcodes.NEW, oldFactory));
+        factory.instructions.add(new InsnNode(Opcodes.DUP));
+        factory.instructions.add(new InvokeDynamicInsnNode(
+                "apply",
+                "()Ljava/util/function/BiFunction;",
+                new Handle(Opcodes.H_INVOKESTATIC, "java/lang/invoke/LambdaMetafactory",
+                        "metafactory", bootstrapDescriptor, false),
+                Type.getMethodType(oldSamDescriptor),
+                new Handle(Opcodes.H_INVOKESTATIC, className, "screenFactory",
+                        oldImplementationDescriptor, false),
+                Type.getMethodType(oldImplementationDescriptor)));
+        factory.instructions.add(new MethodInsnNode(
+                Opcodes.INVOKESPECIAL, oldFactory, "<init>",
+                "(Ljava/util/function/BiFunction;)V", false));
+        factory.instructions.add(new InsnNode(Opcodes.ARETURN));
+        factory.maxStack = 3;
+        node.methods.add(factory);
+
+        MethodNode screenFactory = new MethodNode(Opcodes.ASM9, Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC,
+                "screenFactory", oldImplementationDescriptor, null, null);
+        screenFactory.instructions.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        screenFactory.instructions.add(new InsnNode(Opcodes.ARETURN));
+        screenFactory.maxStack = 1;
+        screenFactory.maxLocals = 2;
+        node.methods.add(screenFactory);
+
+        MethodNode register = new MethodNode(Opcodes.ASM9, Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC,
+                "register", "()V", null, null);
+        register.instructions.add(new LdcInsnNode(Type.getObjectType(oldFactory)));
+        register.instructions.add(new InsnNode(Opcodes.POP));
+        register.instructions.add(new InsnNode(Opcodes.RETURN));
+        register.maxStack = 1;
+        node.methods.add(register);
+
+        Forge1201CallSiteAdapter.Session session = new Forge1201CallSiteAdapter.Session(
+                Forge1201CallSiteAdapter.load(writeProfile(profile)));
+        session.apply(node);
+        Forge1201CallSiteAdapter.Stats stats = session.finish();
+
+        assertEquals("synthetic-lambda-metafactory-profile", stats.profileId());
+        assertEquals(3, stats.rulesApplied());
+        assertEquals(3, stats.operationsApplied());
+        assertEquals(newImplementationDescriptor, screenFactory.desc);
+
+        InvokeDynamicInsnNode rewritten = (InvokeDynamicInsnNode) factory.instructions.getFirst();
+        assertEquals("createScreen", rewritten.name);
+        assertEquals(newCallSiteDescriptor, rewritten.desc);
+        assertEquals(3, rewritten.bsmArgs.length);
+        assertEquals(Type.getMethodType(newImplementationDescriptor), rewritten.bsmArgs[0]);
+        Handle implementation = (Handle) rewritten.bsmArgs[1];
+        assertEquals(className, implementation.getOwner());
+        assertEquals("screenFactory", implementation.getName());
+        assertEquals(newImplementationDescriptor, implementation.getDesc());
+        assertEquals(Type.getMethodType(newImplementationDescriptor), rewritten.bsmArgs[2]);
+        assertEquals("sample/ConfigFactory",
+                ((Type) ((LdcInsnNode) register.instructions.getFirst()).cst).getInternalName());
     }
 
     private Path writeProfile(String json) throws IOException {
