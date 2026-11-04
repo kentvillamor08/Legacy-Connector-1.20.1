@@ -2,7 +2,9 @@ package org.kylepitcock.legacyconnector.loader;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Read-only verifier for the output of {@code :loader:transformForge1201}.
@@ -15,6 +17,30 @@ import java.util.List;
  */
 public final class Forge1201TranslatedJarVerifier {
     private Forge1201TranslatedJarVerifier() {}
+
+    static List<Forge1201ApiUsageAnalyzer.ApiMethodCallSite> findCallSitesForUnmappedMethods(
+            Forge1201SrgNameMappings.Normalization normalization) {
+        if (normalization == null) {
+            throw new IllegalArgumentException("Source mapping normalization is required");
+        }
+
+        Set<String> unmappedKeys = new HashSet<>();
+        for (Forge1201ApiUsageAnalyzer.ApiMemberReference reference
+                : normalization.analysis().methodReferences()) {
+            if (normalization.unmappedMethods().contains(reference.display())) {
+                unmappedKeys.add(methodKey(reference.owner(), reference.name(), reference.descriptor()));
+            }
+        }
+
+        return normalization.analysis().methodCallSites().stream()
+                .filter(callSite -> unmappedKeys.contains(methodKey(
+                        callSite.targetOwner(), callSite.targetName(), callSite.targetDescriptor())))
+                .toList();
+    }
+
+    private static String methodKey(String owner, String name, String descriptor) {
+        return owner + "#" + name + descriptor;
+    }
 
     public static void main(String[] args) throws IOException {
         if (args.length != 3 || args[0].isBlank() || args[1].isBlank() || args[2].isBlank()) {
@@ -56,6 +82,11 @@ public final class Forge1201TranslatedJarVerifier {
         normalization.fieldMappings().forEach(value -> System.out.println("  FIELD MAP: " + value));
         System.out.println("  unmapped source SRG method references: " + normalization.unmappedMethods().size());
         normalization.unmappedMethods().forEach(value -> System.out.println("  UNMAPPED METHOD: " + value));
+        List<Forge1201ApiUsageAnalyzer.ApiMethodCallSite> unmappedMethodCallSites =
+                findCallSitesForUnmappedMethods(normalization);
+        System.out.println("  direct callsites for unmapped methods: " + unmappedMethodCallSites.size());
+        unmappedMethodCallSites.forEach(value ->
+                System.out.println("  UNMAPPED METHOD CALLSITE: " + value.display()));
         System.out.println("  unmapped source SRG field references: " + normalization.unmappedFields().size());
         normalization.unmappedFields().forEach(value -> System.out.println("  UNMAPPED FIELD: " + value));
 
