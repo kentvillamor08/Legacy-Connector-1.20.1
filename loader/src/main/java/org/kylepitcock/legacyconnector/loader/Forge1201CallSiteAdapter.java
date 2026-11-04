@@ -22,6 +22,7 @@ import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.FrameNode;
 import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.LabelNode;
@@ -52,6 +53,7 @@ public final class Forge1201CallSiteAdapter {
     private static final String OP_LAZY_DIST_GATE = "lazy-dist-gate";
     private static final String OP_CHECKCAST_TYPE = "checkcast-type";
     private static final String OP_INSTRUCTION_SEQUENCE = "instruction-sequence";
+    private static final String OP_CONDITIONAL_BRANCH_OPCODE = "conditional-branch-opcode";
 
     private static final String NEOFORGE_DIST_DESCRIPTOR = "Lnet/neoforged/api/distmarker/Dist;";
     private static final String NEOFORGE_FML_ENVIRONMENT = "net/neoforged/fml/loading/FMLEnvironment";
@@ -105,7 +107,8 @@ public final class Forge1201CallSiteAdapter {
             int minimumMaxLocals,
             int expectedMatches,
             int localIndex,
-            String replacementName) {
+            String replacementName,
+            int replacementOpcode) {
         public Operation {
             match = List.copyOf(match);
             replacement = List.copyOf(replacement);
@@ -244,6 +247,7 @@ public final class Forge1201CallSiteAdapter {
             case OP_LAZY_DIST_GATE -> rewriteLazyDistGate(classNode, rule, method, operation, generatedLazyHelpers);
             case OP_CHECKCAST_TYPE -> replaceCheckcastType(rule, method, operation);
             case OP_INSTRUCTION_SEQUENCE -> rewriteInstructionSequence(rule, method, operation);
+            case OP_CONDITIONAL_BRANCH_OPCODE -> rewriteConditionalBranchOpcode(rule, method, operation);
             default -> throw new IOException("Unsupported adapter operation '" + operation.type()
                     + "' in " + rule.key());
         }
@@ -470,6 +474,25 @@ public final class Forge1201CallSiteAdapter {
         method.maxLocals = Math.max(method.maxLocals, operation.minimumMaxLocals());
     }
 
+    /**
+     * Replaces a conditional branch opcode while retaining the exact existing target label.
+     * The profile selector and expected count keep the stack-shape change caller-specific.
+     */
+    private static void rewriteConditionalBranchOpcode(
+            Rule rule, MethodNode method, Operation operation) throws IOException {
+        List<JumpInsnNode> matches = new ArrayList<>();
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof JumpInsnNode jump
+                    && jump.getOpcode() == operation.opcode()) {
+                matches.add(jump);
+            }
+        }
+        requireExpectedMatches(rule, operation, matches.size());
+        for (JumpInsnNode jump : matches) {
+            method.instructions.set(jump, new JumpInsnNode(operation.replacementOpcode(), jump.label));
+        }
+    }
+
     private static List<List<AbstractInsnNode>> findSequenceMatches(
             MethodNode method, List<InstructionSpec> pattern) throws IOException {
         List<List<AbstractInsnNode>> matches = new ArrayList<>();
@@ -584,12 +607,12 @@ public final class Forge1201CallSiteAdapter {
                     requiredString(json, "replacementDescriptor", location),
                     null, null,
                     requiredOpcode(json, "opcode", location, type.equals(OP_FIELD_DESCRIPTOR)),
-                    List.of(), List.of(), 0, 0, expected, -1, null);
+                    List.of(), List.of(), 0, 0, expected, -1, null, -1);
             case OP_METHOD_DECLARATION_DESCRIPTOR -> new Operation(
                     type, null, null,
                     requiredString(json, "descriptor", location),
                     requiredString(json, "replacementDescriptor", location),
-                    null, null, -1, List.of(), List.of(), 0, 0, expected, -1, null);
+                    null, null, -1, List.of(), List.of(), 0, 0, expected, -1, null, -1);
             case OP_FRAME_LOCAL_TYPE -> {
                 int localIndex = requiredInt(json, "localIndex", location);
                 if (localIndex < 0) throw new IOException(location + ".localIndex must not be negative");
@@ -597,7 +620,7 @@ public final class Forge1201CallSiteAdapter {
                         type, null, null, null, null,
                         requiredInternalName(json, "sourceType", location),
                         requiredInternalName(json, "replacementType", location),
-                        -1, List.of(), List.of(), 0, 0, expected, localIndex, null);
+                        -1, List.of(), List.of(), 0, 0, expected, localIndex, null, -1);
             }
             case OP_LOCAL_VARIABLE -> {
                 int localIndex = requiredInt(json, "localIndex", location);
@@ -608,7 +631,7 @@ public final class Forge1201CallSiteAdapter {
                         requiredString(json, "descriptor", location),
                         requiredString(json, "replacementDescriptor", location),
                         null, null, -1, List.of(), List.of(), 0, 0, expected,
-                        localIndex, requiredString(json, "replacementName", location));
+                        localIndex, requiredString(json, "replacementName", location), -1);
             }
             case OP_LAZY_DIST_GATE -> new Operation(
                     type,
@@ -617,12 +640,12 @@ public final class Forge1201CallSiteAdapter {
                     requiredString(json, "descriptor", location),
                     null, null, null, Opcodes.INVOKESTATIC,
                     List.of(), List.of(), 0, 0, expected, -1,
-                    requiredString(json, "replacementName", location));
+                    requiredString(json, "replacementName", location), -1);
             case OP_CHECKCAST_TYPE -> new Operation(
                     type, null, null, null, null,
                     requiredInternalName(json, "sourceType", location),
                     requiredInternalName(json, "replacementType", location),
-                    -1, List.of(), List.of(), 0, 0, expected, -1, null);
+                    -1, List.of(), List.of(), 0, 0, expected, -1, null, -1);
             case OP_INSTRUCTION_SEQUENCE -> {
                 JsonArray match = requiredArray(json, "match", location);
                 JsonArray replacement = requiredArray(json, "replaceWith", location);
@@ -636,12 +659,21 @@ public final class Forge1201CallSiteAdapter {
                     throw new IOException(location + " minimum max values must not be negative");
                 }
                 yield new Operation(type, null, null, null, null, null, null, -1,
-                        matchSpecs, replacementSpecs, minimumMaxStack, minimumMaxLocals, expected, -1, null);
+                        matchSpecs, replacementSpecs, minimumMaxStack, minimumMaxLocals, expected, -1, null, -1);
+            }
+            case OP_CONDITIONAL_BRANCH_OPCODE -> {
+                int sourceOpcode = requiredAnyOpcode(json, location);
+                int replacementOpcode = opcodeValue(requiredString(json, "replacementOpcode", location), location);
+                if (!isConditionalBranchOpcode(sourceOpcode)
+                        || !isConditionalBranchOpcode(replacementOpcode)) {
+                    throw new IOException(location + " must use conditional branch opcodes");
+                }
+                yield new Operation(type, null, null, null, null, null, null, sourceOpcode,
+                        List.of(), List.of(), 0, 0, expected, -1, null, replacementOpcode);
             }
             default -> throw new IOException(location + " has unsupported operation type '" + type + "'");
         };
     }
-
     private static List<InstructionSpec> parseInstructionArray(JsonArray array, String location)
             throws IOException {
         List<InstructionSpec> result = new ArrayList<>();
@@ -757,6 +789,12 @@ public final class Forge1201CallSiteAdapter {
     private static boolean isFieldOpcode(int opcode) {
         return opcode == Opcodes.GETSTATIC || opcode == Opcodes.PUTSTATIC
                 || opcode == Opcodes.GETFIELD || opcode == Opcodes.PUTFIELD;
+    }
+
+    private static boolean isConditionalBranchOpcode(int opcode) {
+        return opcode >= Opcodes.IFEQ && opcode <= Opcodes.IF_ACMPNE
+                || opcode == Opcodes.IFNULL
+                || opcode == Opcodes.IFNONNULL;
     }
 
     private static boolean isSimpleOpcode(int opcode) {
