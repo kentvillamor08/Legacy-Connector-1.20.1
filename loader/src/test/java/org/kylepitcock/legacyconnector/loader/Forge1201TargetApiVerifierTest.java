@@ -184,20 +184,20 @@ final class Forge1201TargetApiVerifierTest {
                                 "net/minecraftforge/fml/common/Mod", "BUS", "I", 1)),
                         List.of(new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
                                 "fixture/Caller", "invoke", "()V",
-                                TARGET_MOD, "register", "()V", Opcodes.INVOKEVIRTUAL, 2)),
+                                "net/minecraftforge/fml/common/Mod", "register", "()V", Opcodes.INVOKEVIRTUAL, 2)),
                         List.of(new Forge1201ApiUsageAnalyzer.ApiFieldCallSite(
                                 "fixture/Caller", "read", "()V",
-                                TARGET_MOD, "BUS", "I", Opcodes.GETSTATIC, 1))),
+                                "net/minecraftforge/fml/common/Mod", "BUS", "I", Opcodes.GETSTATIC, 1))),
                 classes);
 
         assertEquals(1, result.methodIssues().size());
         assertEquals(List.of(
-                "net.neoforged.fml.common.Mod#register()V <= fixture.Caller#invoke()V [INVOKEVIRTUAL] (x2)"),
+                "net.minecraftforge.fml.common.Mod#register()V <= fixture.Caller#invoke()V [INVOKEVIRTUAL] (x2)"),
                 result.methodIssues().get(0).callSites());
 
         assertEquals(1, result.fieldIssues().size());
         assertEquals(List.of(
-                "net.neoforged.fml.common.Mod#BUS:I <= fixture.Caller#read()V [GETSTATIC]"),
+                "net.minecraftforge.fml.common.Mod#BUS:I <= fixture.Caller#read()V [GETSTATIC]"),
                 result.fieldIssues().get(0).callSites());
     }
 
