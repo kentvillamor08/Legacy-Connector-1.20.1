@@ -87,7 +87,7 @@ public final class Forge1201CallSiteAdapter {
         }
     }
 
-    /** Bootstrap argument recipe for method-type and method-handle constants. */
+    /** Bootstrap argument recipe for method-type, method-handle, and string constants. */
     public record BootstrapArgumentSpec(
             String kind,
             String descriptor,
