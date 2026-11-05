@@ -94,7 +94,8 @@ public final class Forge1201CallSiteAdapter {
             int tag,
             String owner,
             String name,
-            boolean isInterface) {}
+            boolean isInterface,
+            String stringValue) {}
 
     /** An instruction recipe. Unused operands are null or -1 according to the instruction kind. */
     public record InstructionSpec(
@@ -710,6 +711,8 @@ public final class Forge1201CallSiteAdapter {
                         || !handle.getName().equals(expected.name())
                         || !handle.getDesc().equals(expected.descriptor())
                         || handle.isInterface() != expected.isInterface()) return false;
+            } else if (expected.kind().equals("string")) {
+                if (!(actual instanceof String string) || !string.equals(expected.stringValue())) return false;
             } else {
                 return false;
             }
@@ -726,6 +729,8 @@ public final class Forge1201CallSiteAdapter {
             } else if (argument.kind().equals("handle")) {
                 arguments[index] = new Handle(argument.tag(), argument.owner(), argument.name(),
                         argument.descriptor(), argument.isInterface());
+            } else if (argument.kind().equals("string")) {
+                arguments[index] = argument.stringValue();
             } else {
                 throw new IOException("Unsupported bootstrap argument kind: " + argument.kind());
             }
@@ -996,7 +1001,7 @@ public final class Forge1201CallSiteAdapter {
                     } catch (IllegalArgumentException invalid) {
                         throw new IOException(itemLocation + ".descriptor must be a valid method descriptor", invalid);
                     }
-                    arguments.add(new BootstrapArgumentSpec(kind, descriptor, -1, null, null, false));
+                    arguments.add(new BootstrapArgumentSpec(kind, descriptor, -1, null, null, false, null));
                 }
                 case "handle" -> {
                     int tag = handleTagValue(requiredString(argument, "tag", itemLocation), itemLocation + ".tag");
@@ -1004,10 +1009,18 @@ public final class Forge1201CallSiteAdapter {
                     String name = requiredString(argument, "name", itemLocation);
                     String descriptor = requiredString(argument, "descriptor", itemLocation);
                     boolean isInterface = optionalBoolean(argument, "isInterface", false, itemLocation);
-                    arguments.add(new BootstrapArgumentSpec(kind, descriptor, tag, owner, name, isInterface));
+                    arguments.add(new BootstrapArgumentSpec(kind, descriptor, tag, owner, name, isInterface, null));
+                }
+                case "string" -> {
+                    JsonElement value = argument.get("value");
+                    if (value == null || !value.isJsonPrimitive()
+                            || !value.getAsJsonPrimitive().isString()) {
+                        throw new IOException(itemLocation + ".value must be a string for bootstrap argument kind string");
+                    }
+                    arguments.add(new BootstrapArgumentSpec(kind, null, -1, null, null, false, value.getAsString()));
                 }
                 default -> throw new IOException(itemLocation + " has unsupported bootstrap argument kind '" + kind
-                        + "' (supported: method-type, handle)");
+                        + "' (supported: method-type, handle, string)");
             }
         }
         return List.copyOf(arguments);
