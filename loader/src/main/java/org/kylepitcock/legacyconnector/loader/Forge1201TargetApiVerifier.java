@@ -44,7 +44,12 @@ public final class Forge1201TargetApiVerifier {
             String sourceDescriptor,
             String targetOwner,
             String targetDescriptor,
-            MemberStatus status) {
+            MemberStatus status,
+            List<String> callSites) {
+        public MemberIssue {
+            callSites = List.copyOf(callSites);
+        }
+
         public String display() {
             return sourceOwner.replace('/', '.') + "#" + name + sourceDescriptor
                     + " -> " + targetOwner.replace('/', '.') + "#" + name + targetDescriptor
@@ -152,7 +157,8 @@ public final class Forge1201TargetApiVerifier {
             if (descriptorNeedsManualAdapter(reference.descriptor(), true)) {
                 methodIssues.add(new MemberIssue(
                         reference.owner(), reference.name(), reference.descriptor(),
-                        targetOwner, targetDescriptor, MemberStatus.REQUIRES_MANUAL_DESCRIPTOR_ADAPTER));
+                        targetOwner, targetDescriptor, MemberStatus.REQUIRES_MANUAL_DESCRIPTOR_ADAPTER,
+                        methodCallSites(analysis, reference)));
                 continue;
             }
             Lookup lookup = findMethod(targetOwner, new MemberKey(reference.name(), targetDescriptor), new HashSet<>());
@@ -162,7 +168,8 @@ public final class Forge1201TargetApiVerifier {
                 methodIssues.add(new MemberIssue(
                         reference.owner(), reference.name(), reference.descriptor(),
                         targetOwner, targetDescriptor,
-                        lookup.complete() ? MemberStatus.MISSING : MemberStatus.INCOMPLETE_HIERARCHY));
+                        lookup.complete() ? MemberStatus.MISSING : MemberStatus.INCOMPLETE_HIERARCHY,
+                        methodCallSites(analysis, reference)));
             }
         }
 
@@ -174,7 +181,8 @@ public final class Forge1201TargetApiVerifier {
             if (descriptorNeedsManualAdapter(reference.descriptor(), false)) {
                 fieldIssues.add(new MemberIssue(
                         reference.owner(), reference.name(), reference.descriptor(),
-                        targetOwner, targetDescriptor, MemberStatus.REQUIRES_MANUAL_DESCRIPTOR_ADAPTER));
+                        targetOwner, targetDescriptor, MemberStatus.REQUIRES_MANUAL_DESCRIPTOR_ADAPTER,
+                        fieldCallSites(analysis, reference)));
                 continue;
             }
             Lookup lookup = findField(targetOwner, new MemberKey(reference.name(), targetDescriptor), new HashSet<>());
@@ -184,7 +192,8 @@ public final class Forge1201TargetApiVerifier {
                 fieldIssues.add(new MemberIssue(
                         reference.owner(), reference.name(), reference.descriptor(),
                         targetOwner, targetDescriptor,
-                        lookup.complete() ? MemberStatus.MISSING : MemberStatus.INCOMPLETE_HIERARCHY));
+                        lookup.complete() ? MemberStatus.MISSING : MemberStatus.INCOMPLETE_HIERARCHY,
+                        fieldCallSites(analysis, reference)));
             }
         }
 
@@ -356,6 +365,37 @@ public final class Forge1201TargetApiVerifier {
         return new Lookup(false, complete);
     }
 
+    private static List<String> methodCallSites(
+            Forge1201ApiUsageAnalyzer.Analysis analysis,
+            Forge1201ApiUsageAnalyzer.ApiMemberReference reference) {
+        return analysis.methodCallSites().stream()
+                .filter(callSite -> callSite.targetOwner().equals(reference.owner())
+                        && callSite.targetName().equals(reference.name())
+                        && callSite.targetDescriptor().equals(reference.descriptor()))
+                .map(Forge1201ApiUsageAnalyzer.ApiMethodCallSite::display)
+                .toList();
+    }
+
+    private static List<String> fieldCallSites(
+            Forge1201ApiUsageAnalyzer.Analysis analysis,
+            Forge1201ApiUsageAnalyzer.ApiMemberReference reference) {
+        return analysis.fieldCallSites().stream()
+                .filter(callSite -> callSite.targetOwner().equals(reference.owner())
+                        && callSite.targetName().equals(reference.name())
+                        && callSite.targetDescriptor().equals(reference.descriptor()))
+                .map(Forge1201ApiUsageAnalyzer.ApiFieldCallSite::display)
+                .toList();
+    }
+
+    private static void printIssue(MemberIssue issue) {
+        System.out.println("  " + issue.display());
+        if (issue.callSites().isEmpty()) {
+            System.out.println("    CALLSITE: none captured (the reference may come from a handle or metadata)");
+            return;
+        }
+        issue.callSites().forEach(callSite -> System.out.println("    CALLSITE: " + callSite));
+    }
+
     public static void print(Result result, String targetVersion) {
         System.out.println("Forge 1.20.1 -> NeoForge " + targetVersion + " target API verification");
         System.out.println("Mode: read-only ASM class-file inspection; no target classes were loaded or executed.");
@@ -369,13 +409,13 @@ public final class Forge1201TargetApiVerifier {
         System.out.println("  unique references: " + result.uniqueMethodReferences());
         System.out.println("  exact target/inherited matches: " + result.verifiedMethodReferences());
         System.out.println("  unresolved or changed: " + result.methodIssues().size());
-        result.methodIssues().forEach(issue -> System.out.println("  " + issue.display()));
+        result.methodIssues().forEach(Forge1201TargetApiVerifier::printIssue);
 
         System.out.println("\nCandidate field signatures:");
         System.out.println("  unique references: " + result.uniqueFieldReferences());
         System.out.println("  exact target/inherited matches: " + result.verifiedFieldReferences());
         System.out.println("  unresolved or changed: " + result.fieldIssues().size());
-        result.fieldIssues().forEach(issue -> System.out.println("  " + issue.display()));
+        result.fieldIssues().forEach(Forge1201TargetApiVerifier::printIssue);
 
         System.out.println("\nA matching class/member signature is only structural evidence, not semantic compatibility.");
         System.out.println("Manual-adapter types and Minecraft 1.20.1 -> 1.21.1 member changes require separate work.");
