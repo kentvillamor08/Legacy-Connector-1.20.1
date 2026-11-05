@@ -29,6 +29,7 @@ import org.objectweb.asm.tree.LineNumberNode;
 import org.objectweb.asm.tree.LocalVariableNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.InnerClassNode;
 import org.objectweb.asm.tree.InvokeDynamicInsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
@@ -1275,6 +1276,13 @@ final class Forge1201CallSiteAdapterTest {
                         "descriptor": "Lnet/minecraftforge/fml/common/Mod$EventBusSubscriber;",
                         "replacementDescriptor": "Lnet/neoforged/fml/common/EventBusSubscriber;",
                         "expectedMatches": 1
+                      },
+                      {
+                        "type": "class-inner-class-remove",
+                        "innerClassName": "net/minecraftforge/fml/common/Mod$EventBusSubscriber",
+                        "outerClassName": "net/minecraftforge/fml/common/Mod",
+                        "innerName": "EventBusSubscriber",
+                        "expectedMatches": 1
                       }
                     ]
                   }]
@@ -1286,6 +1294,11 @@ final class Forge1201CallSiteAdapterTest {
         node.access = Opcodes.ACC_PUBLIC;
         node.name = className;
         node.superName = "java/lang/Object";
+        node.innerClasses = new ArrayList<>(List.of(new InnerClassNode(
+                "net/minecraftforge/fml/common/Mod$EventBusSubscriber",
+                "net/minecraftforge/fml/common/Mod",
+                "EventBusSubscriber",
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC)));
 
         AnnotationNode subscriber = new AnnotationNode(oldAnnotation);
         subscriber.values = new ArrayList<>();
@@ -1338,8 +1351,9 @@ final class Forge1201CallSiteAdapterTest {
 
         assertEquals("synthetic-sculk-glow-clienttick-post-profile", stats.profileId());
         assertEquals(1, stats.rulesApplied());
-        assertEquals(4, stats.operationsApplied());
+        assertEquals(5, stats.operationsApplied());
         assertEquals(newAnnotation, subscriber.desc);
+        assertTrue(node.innerClasses.isEmpty());
         assertEquals(newMethodDescriptor, method.desc);
         assertEquals(newEventDescriptor, method.localVariables.get(0).desc);
 
