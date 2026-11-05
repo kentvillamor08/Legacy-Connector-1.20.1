@@ -1292,7 +1292,9 @@ final class Forge1201CallSiteAdapterTest {
         subscriber.values.add("modid");
         subscriber.values.add("symbiote");
         subscriber.values.add("value");
-        subscriber.values.add(new String[] {"Lnet/minecraftforge/api/distmarker/Dist;", "CLIENT"});
+        List<String[]> distValues = new ArrayList<>();
+        distValues.add(new String[] {"Lnet/minecraftforge/api/distmarker/Dist;", "CLIENT"});
+        subscriber.values.add(distValues);
         node.visibleAnnotations = new ArrayList<>(List.of(subscriber));
 
         MethodNode method = new MethodNode(
