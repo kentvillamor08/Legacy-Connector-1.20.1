@@ -63,6 +63,11 @@ final class Forge1211TargetMethodAliases {
         return new Normalization(normalized, appliedAliases);
     }
 
+    static boolean isTargetApiOwner(String owner) {
+        return owner != null && METHOD_ALIASES.keySet().stream()
+                .anyMatch(key -> key.owner().equals(owner));
+    }
+
     private static String aliasFor(String owner, String name, String descriptor) {
         return METHOD_ALIASES.get(new MethodKey(owner, name, descriptor));
     }
