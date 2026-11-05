@@ -169,10 +169,51 @@ final class Forge1201TargetApiVerifierTest {
         assertTrue(result.missingTargetClasses().isEmpty());
     }
 
+    @Test
+    void attachesDirectCallerLocationsToUnresolvedMethodAndFieldReferences() throws Exception {
+        Map<String, byte[]> classes = Map.of(
+                TARGET_MOD, targetModClass("java/lang/Object", false, false),
+                "java/lang/Object", targetEmptyClass("java/lang/Object", null));
+
+        Forge1201TargetApiVerifier.Result result = verify(
+                analysis(
+                        List.of("net/minecraftforge/fml/common/Mod"),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                "net/minecraftforge/fml/common/Mod", "register", "()V", 2)),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                "net/minecraftforge/fml/common/Mod", "BUS", "I", 1)),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                                "fixture/Caller", "invoke", "()V",
+                                TARGET_MOD, "register", "()V", Opcodes.INVOKEVIRTUAL, 2)),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiFieldCallSite(
+                                "fixture/Caller", "read", "()V",
+                                TARGET_MOD, "BUS", "I", Opcodes.GETSTATIC, 1))),
+                classes);
+
+        assertEquals(1, result.methodIssues().size());
+        assertEquals(List.of(
+                "net.neoforged.fml.common.Mod#register()V <= fixture.Caller#invoke()V [INVOKEVIRTUAL] (x2)"),
+                result.methodIssues().get(0).callSites());
+
+        assertEquals(1, result.fieldIssues().size());
+        assertEquals(List.of(
+                "net.neoforged.fml.common.Mod#BUS:I <= fixture.Caller#read()V [GETSTATIC]"),
+                result.fieldIssues().get(0).callSites());
+    }
+
     private static Forge1201ApiUsageAnalyzer.Analysis analysis(
             List<String> classes,
             List<Forge1201ApiUsageAnalyzer.ApiMemberReference> methods,
             List<Forge1201ApiUsageAnalyzer.ApiMemberReference> fields) {
+        return analysis(classes, methods, fields, List.of(), List.of());
+    }
+
+    private static Forge1201ApiUsageAnalyzer.Analysis analysis(
+            List<String> classes,
+            List<Forge1201ApiUsageAnalyzer.ApiMemberReference> methods,
+            List<Forge1201ApiUsageAnalyzer.ApiMemberReference> fields,
+            List<Forge1201ApiUsageAnalyzer.ApiMethodCallSite> methodCallSites,
+            List<Forge1201ApiUsageAnalyzer.ApiFieldCallSite> fieldCallSites) {
         Forge1201JarInfo metadata = new Forge1201JarInfo(
                 Path.of("synthetic.jar"),
                 "javafml",
@@ -181,7 +222,8 @@ final class Forge1201TargetApiVerifierTest {
                 "[47,)",
                 List.of(new Forge1201JarInfo.Mod("fixture", "1.0", "Fixture", List.of())));
         return new Forge1201ApiUsageAnalyzer.Analysis(
-                metadata, 1, List.of(), List.of(), null, Map.of(), classes, List.of(), List.of(), methods, fields);
+                metadata, 1, List.of(), List.of(), null, Map.of(), classes,
+                methodCallSites, fieldCallSites, methods, fields);
     }
 
     private static byte[] targetModClass(String superName, boolean registerMethod, boolean busField) {
