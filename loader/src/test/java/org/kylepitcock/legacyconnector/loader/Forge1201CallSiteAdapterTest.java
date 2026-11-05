@@ -20,6 +20,7 @@ import org.objectweb.asm.Handle;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FrameNode;
 import org.objectweb.asm.tree.JumpInsnNode;
@@ -1204,6 +1205,160 @@ final class Forge1201CallSiteAdapterTest {
         assertEquals(Type.getMethodType(newImplementationDescriptor), rewritten.bsmArgs[2]);
         assertEquals("sample/ConfigFactory",
                 ((Type) ((LdcInsnNode) register.instructions.getFirst()).cst).getInternalName());
+    }
+
+    @Test
+    void adaptsClientTickPostAndClassSubscriberAnnotationExactly() throws Exception {
+        String className = "sample/SculkGlowClient";
+        String oldEvent = "net/minecraftforge/event/TickEvent$ClientTickEvent";
+        String oldPhase = "net/minecraftforge/event/TickEvent$Phase";
+        String newEvent = "net/neoforged/neoforge/client/event/ClientTickEvent$Post";
+        String oldAnnotation = "Lnet/minecraftforge/fml/common/Mod$EventBusSubscriber;";
+        String newAnnotation = "Lnet/neoforged/fml/common/EventBusSubscriber;";
+        String oldEventDescriptor = "L" + oldEvent + ";";
+        String newEventDescriptor = "L" + newEvent + ";";
+        String oldMethodDescriptor = "(" + oldEventDescriptor + ")V";
+        String newMethodDescriptor = "(" + newEventDescriptor + ")V";
+        String phaseDescriptor = "L" + oldPhase + ";";
+
+        String profile = """
+                {
+                  "schemaVersion": 1,
+                  "id": "synthetic-sculk-glow-clienttick-post-profile",
+                  "rules": [{
+                    "className": "sample/SculkGlowClient",
+                    "methodName": "onClientTick",
+                    "methodDescriptor": "(Lnet/minecraftforge/event/TickEvent$ClientTickEvent;)V",
+                    "operations": [
+                      {
+                        "type": "method-declaration-descriptor",
+                        "descriptor": "(Lnet/minecraftforge/event/TickEvent$ClientTickEvent;)V",
+                        "replacementDescriptor": "(Lnet/neoforged/neoforge/client/event/ClientTickEvent$Post;)V",
+                        "expectedMatches": 1
+                      },
+                      {
+                        "type": "local-variable",
+                        "localIndex": 0,
+                        "name": "event",
+                        "descriptor": "Lnet/minecraftforge/event/TickEvent$ClientTickEvent;",
+                        "replacementDescriptor": "Lnet/neoforged/neoforge/client/event/ClientTickEvent$Post;",
+                        "replacementName": "event",
+                        "expectedMatches": 1
+                      },
+                      {
+                        "type": "instruction-sequence",
+                        "expectedMatches": 1,
+                        "match": [
+                          {"kind":"var","opcode":"ALOAD","var":0},
+                          {
+                            "kind":"field",
+                            "opcode":"GETFIELD",
+                            "owner":"net/minecraftforge/event/TickEvent$ClientTickEvent",
+                            "name":"phase",
+                            "descriptor":"Lnet/minecraftforge/event/TickEvent$Phase;"
+                          },
+                          {
+                            "kind":"field",
+                            "opcode":"GETSTATIC",
+                            "owner":"net/minecraftforge/event/TickEvent$Phase",
+                            "name":"END",
+                            "descriptor":"Lnet/minecraftforge/event/TickEvent$Phase;"
+                          }
+                        ],
+                        "replaceWith": [
+                          {"kind":"insn","opcode":"ACONST_NULL"},
+                          {"kind":"insn","opcode":"ACONST_NULL"}
+                        ]
+                      },
+                      {
+                        "type": "class-annotation-descriptor",
+                        "descriptor": "Lnet/minecraftforge/fml/common/Mod$EventBusSubscriber;",
+                        "replacementDescriptor": "Lnet/neoforged/fml/common/EventBusSubscriber;",
+                        "expectedMatches": 1
+                      }
+                    ]
+                  }]
+                }
+                """;
+
+        ClassNode node = new ClassNode();
+        node.version = Opcodes.V17;
+        node.access = Opcodes.ACC_PUBLIC;
+        node.name = className;
+        node.superName = "java/lang/Object";
+
+        AnnotationNode subscriber = new AnnotationNode(oldAnnotation);
+        subscriber.values = new ArrayList<>();
+        subscriber.values.add("modid");
+        subscriber.values.add("symbiote");
+        subscriber.values.add("value");
+        subscriber.values.add(new String[] {"Lnet/minecraftforge/api/distmarker/Dist;", "CLIENT"});
+        node.visibleAnnotations = new ArrayList<>(List.of(subscriber));
+
+        MethodNode method = new MethodNode(
+                Opcodes.ASM9,
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "onClientTick",
+                oldMethodDescriptor,
+                null,
+                null);
+        LabelNode start = new LabelNode();
+        LabelNode skip = new LabelNode();
+        LabelNode continuation = new LabelNode();
+        LabelNode end = new LabelNode();
+        method.instructions.add(start);
+        method.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        method.instructions.add(new FieldInsnNode(
+                Opcodes.GETFIELD, oldEvent, "phase", phaseDescriptor));
+        method.instructions.add(new FieldInsnNode(
+                Opcodes.GETSTATIC, oldPhase, "END", phaseDescriptor));
+        method.instructions.add(new JumpInsnNode(Opcodes.IF_ACMPNE, skip));
+        method.instructions.add(new FieldInsnNode(
+                Opcodes.GETSTATIC, className, "LIT", "Ljava/util/Map;"));
+        method.instructions.add(new MethodInsnNode(
+                Opcodes.INVOKEINTERFACE, "java/util/Map", "isEmpty", "()Z", true));
+        method.instructions.add(new JumpInsnNode(Opcodes.IFEQ, continuation));
+        method.instructions.add(skip);
+        method.instructions.add(new InsnNode(Opcodes.RETURN));
+        method.instructions.add(continuation);
+        method.instructions.add(new InsnNode(Opcodes.RETURN));
+        method.instructions.add(end);
+        method.localVariables = new ArrayList<>(List.of(
+                new LocalVariableNode("event", oldEventDescriptor, null, start, end, 0)));
+        method.maxStack = 2;
+        method.maxLocals = 1;
+        node.methods.add(method);
+
+        Forge1201CallSiteAdapter.Session session = new Forge1201CallSiteAdapter.Session(
+                Forge1201CallSiteAdapter.load(writeProfile(profile)));
+        session.apply(node);
+        Forge1201CallSiteAdapter.Stats stats = session.finish();
+
+        assertEquals("synthetic-sculk-glow-clienttick-post-profile", stats.profileId());
+        assertEquals(1, stats.rulesApplied());
+        assertEquals(4, stats.operationsApplied());
+        assertEquals(newAnnotation, subscriber.desc);
+        assertEquals(newMethodDescriptor, method.desc);
+        assertEquals(newEventDescriptor, method.localVariables.get(0).desc);
+
+        AbstractInsnNode first = start.getNext();
+        assertEquals(Opcodes.ACONST_NULL, first.getOpcode());
+        AbstractInsnNode second = first.getNext();
+        assertEquals(Opcodes.ACONST_NULL, second.getOpcode());
+        AbstractInsnNode branch = second.getNext();
+        assertTrue(branch instanceof JumpInsnNode);
+        assertEquals(Opcodes.IF_ACMPNE, branch.getOpcode());
+        assertSame(skip, ((JumpInsnNode) branch).label);
+
+        int stalePhaseReferences = 0;
+        for (AbstractInsnNode instruction : method.instructions) {
+            if (instruction instanceof FieldInsnNode field
+                    && ((field.owner.equals(oldEvent) && field.name.equals("phase"))
+                    || (field.owner.equals(oldPhase) && field.name.equals("END")))) {
+                stalePhaseReferences++;
+            }
+        }
+        assertEquals(0, stalePhaseReferences);
     }
 
     private Path writeProfile(String json) throws IOException {
