@@ -53,8 +53,10 @@ public final class Forge1201TranslatedJarVerifier {
                 Path.of(args[1]), Path.of(args[2]));
         Forge1201ApiUsageAnalyzer.Analysis rawAnalysis =
                 Forge1201ApiUsageAnalyzer.analyzeTranslated(jar);
+        Forge1211TargetMethodAliases.Normalization targetMethodAliases =
+                Forge1211TargetMethodAliases.normalize(rawAnalysis);
         Forge1211TargetFieldAliases.Normalization targetFieldAliases =
-                Forge1211TargetFieldAliases.normalize(rawAnalysis);
+                Forge1211TargetFieldAliases.normalize(targetMethodAliases.analysis());
         Forge1201SrgNameMappings.Normalization normalization =
                 sourceMappings.normalize(targetFieldAliases.analysis());
         Forge1201TargetApiVerifier.Result result = Forge1201TargetApiVerifier.verify(
@@ -74,6 +76,13 @@ public final class Forge1201TranslatedJarVerifier {
                 + Forge1211TargetFieldAliases.TARGET_MINECRAFT_VERSION + " owner/name/descriptor matches):");
         System.out.println("  applied aliases: " + targetFieldAliases.fieldAliases().size());
         targetFieldAliases.fieldAliases().forEach(value -> System.out.println("  TARGET FIELD ALIAS: " + value));
+
+        System.out.println("\nTarget-side method aliases (exact "
+                + Forge1211TargetMethodAliases.TARGET_MINECRAFT_VERSION
+                + " owner/name/descriptor matches):");
+        System.out.println("  applied aliases: " + targetMethodAliases.methodAliases().size());
+        targetMethodAliases.methodAliases().forEach(value ->
+                System.out.println("  TARGET METHOD ALIAS: " + value));
 
         System.out.println("\nSource SRG member-name normalization:");
         System.out.println("  method references normalized: " + normalization.methodMappings().size());

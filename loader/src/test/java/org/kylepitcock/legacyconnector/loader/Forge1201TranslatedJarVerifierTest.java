@@ -42,13 +42,13 @@ final class Forge1201TranslatedJarVerifierTest {
                 Map.of(),
                 List.of(RESOURCE_LOCATION),
                 List.of(
-                        methodCallSite("sample/FirstCaller", "first", "m_339182_"),
-                        methodCallSite("sample/SecondCaller", "second", "m_339182_"),
+                        methodCallSite("sample/FirstCaller", "first", "m_999999_"),
+                        methodCallSite("sample/SecondCaller", "second", "m_999999_"),
                         methodCallSite("sample/MappedCaller", "mapped", "m_12345_")),
                 List.of(),
                 List.of(
                         new Forge1201ApiUsageAnalyzer.ApiMemberReference(
-                                RESOURCE_LOCATION, "m_339182_", RESOURCE_LOCATION_FACTORY, 2),
+                                RESOURCE_LOCATION, "m_999999_", RESOURCE_LOCATION_FACTORY, 2),
                         new Forge1201ApiUsageAnalyzer.ApiMemberReference(
                                 RESOURCE_LOCATION, "m_12345_", RESOURCE_LOCATION_FACTORY, 1)),
                 List.of());
