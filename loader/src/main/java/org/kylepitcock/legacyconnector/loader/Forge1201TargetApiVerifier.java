@@ -387,7 +387,7 @@ public final class Forge1201TargetApiVerifier {
                 .toList();
     }
 
-    private static void printIssue(MemberIssue issue) {
+    static void printIssue(MemberIssue issue) {
         System.out.println("  " + issue.display());
         if (issue.callSites().isEmpty()) {
             System.out.println("    CALLSITE: none captured (the reference may come from a handle or metadata)");
