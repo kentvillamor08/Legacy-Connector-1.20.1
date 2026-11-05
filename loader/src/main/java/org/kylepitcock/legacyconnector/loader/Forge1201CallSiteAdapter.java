@@ -25,6 +25,7 @@ import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.FrameNode;
 import org.objectweb.asm.tree.InsnList;
+import org.objectweb.asm.tree.InnerClassNode;
 import org.objectweb.asm.tree.JumpInsnNode;
 import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.InvokeDynamicInsnNode;
@@ -53,6 +54,7 @@ public final class Forge1201CallSiteAdapter {
     private static final String OP_METHOD_DESCRIPTOR = "method-descriptor";
     private static final String OP_METHOD_DECLARATION_DESCRIPTOR = "method-declaration-descriptor";
     private static final String OP_CLASS_ANNOTATION_DESCRIPTOR = "class-annotation-descriptor";
+    private static final String OP_CLASS_INNER_CLASS_REMOVE = "class-inner-class-remove";
     private static final String OP_FRAME_LOCAL_TYPE = "frame-local-type";
     private static final String OP_LOCAL_VARIABLE = "local-variable";
     private static final String OP_LAZY_DIST_GATE = "lazy-dist-gate";
@@ -270,6 +272,7 @@ public final class Forge1201CallSiteAdapter {
             case OP_METHOD_DESCRIPTOR -> replaceMethodDescriptor(rule, method, operation);
             case OP_METHOD_DECLARATION_DESCRIPTOR -> replaceMethodDeclarationDescriptor(rule, method, operation);
             case OP_CLASS_ANNOTATION_DESCRIPTOR -> replaceClassAnnotationDescriptor(classNode, rule, operation);
+            case OP_CLASS_INNER_CLASS_REMOVE -> removeClassInnerClassMetadata(classNode, rule, operation);
             case OP_FRAME_LOCAL_TYPE -> replaceFrameLocalType(rule, method, operation);
             case OP_LOCAL_VARIABLE -> replaceLocalVariable(rule, method, operation);
             case OP_LAZY_DIST_GATE -> rewriteLazyDistGate(classNode, rule, method, operation, generatedLazyHelpers);
@@ -290,6 +293,21 @@ public final class Forge1201CallSiteAdapter {
         int matches = 0;
         matches += replaceAnnotationDescriptor(classNode.visibleAnnotations, operation);
         matches += replaceAnnotationDescriptor(classNode.invisibleAnnotations, operation);
+        requireExpectedMatches(rule, operation, matches);
+    }
+
+    /** Removes one exact obsolete InnerClasses entry after a nested class is replaced by a top-level type. */
+    private static void removeClassInnerClassMetadata(
+            ClassNode classNode, Rule rule, Operation operation) throws IOException {
+        int matches = 0;
+        if (classNode.innerClasses != null) {
+            int before = classNode.innerClasses.size();
+            classNode.innerClasses.removeIf(innerClass ->
+                    Objects.equals(innerClass.name, operation.sourceType())
+                            && Objects.equals(innerClass.outerName, operation.owner())
+                            && Objects.equals(innerClass.innerName, operation.name()));
+            matches = before - classNode.innerClasses.size();
+        }
         requireExpectedMatches(rule, operation, matches);
     }
 
@@ -785,6 +803,13 @@ public final class Forge1201CallSiteAdapter {
                     requiredString(json, "descriptor", location),
                     requiredString(json, "replacementDescriptor", location),
                     null, null, -1, List.of(), List.of(), 0, 0, expected, -1, null, -1);
+            case OP_CLASS_INNER_CLASS_REMOVE -> new Operation(
+                    type,
+                    requiredInternalName(json, "outerClassName", location),
+                    requiredString(json, "innerName", location),
+                    null, null,
+                    requiredInternalName(json, "innerClassName", location),
+                    null, -1, List.of(), List.of(), 0, 0, expected, -1, null, -1);
             case OP_FRAME_LOCAL_TYPE -> {
                 int localIndex = requiredInt(json, "localIndex", location);
                 if (localIndex < 0) throw new IOException(location + ".localIndex must not be negative");
