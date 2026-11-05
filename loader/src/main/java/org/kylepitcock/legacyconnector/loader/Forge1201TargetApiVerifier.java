@@ -206,7 +206,8 @@ public final class Forge1201TargetApiVerifier {
     private boolean isCandidate(String sourceInternalName) {
         return Forge1201MappingCatalog.classify(sourceInternalName).kind()
                 == Forge1201MappingCatalog.Kind.PACKAGE_RELOCATION_CANDIDATE
-                || Forge1201MappingCatalog.isReviewedTargetApiType(sourceInternalName);
+                || Forge1201MappingCatalog.isReviewedTargetApiType(sourceInternalName)
+                || Forge1211TargetMethodAliases.isTargetApiOwner(sourceInternalName);
     }
 
     private static String mapType(String sourceInternalName) {
