@@ -20,6 +20,7 @@ import org.objectweb.asm.Handle;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
+import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.FrameNode;
@@ -51,6 +52,7 @@ public final class Forge1201CallSiteAdapter {
     private static final String OP_FIELD_DESCRIPTOR = "field-descriptor";
     private static final String OP_METHOD_DESCRIPTOR = "method-descriptor";
     private static final String OP_METHOD_DECLARATION_DESCRIPTOR = "method-declaration-descriptor";
+    private static final String OP_CLASS_ANNOTATION_DESCRIPTOR = "class-annotation-descriptor";
     private static final String OP_FRAME_LOCAL_TYPE = "frame-local-type";
     private static final String OP_LOCAL_VARIABLE = "local-variable";
     private static final String OP_LAZY_DIST_GATE = "lazy-dist-gate";
@@ -267,6 +269,7 @@ public final class Forge1201CallSiteAdapter {
             case OP_FIELD_DESCRIPTOR -> replaceFieldDescriptor(rule, method, operation);
             case OP_METHOD_DESCRIPTOR -> replaceMethodDescriptor(rule, method, operation);
             case OP_METHOD_DECLARATION_DESCRIPTOR -> replaceMethodDeclarationDescriptor(rule, method, operation);
+            case OP_CLASS_ANNOTATION_DESCRIPTOR -> replaceClassAnnotationDescriptor(classNode, rule, operation);
             case OP_FRAME_LOCAL_TYPE -> replaceFrameLocalType(rule, method, operation);
             case OP_LOCAL_VARIABLE -> replaceLocalVariable(rule, method, operation);
             case OP_LAZY_DIST_GATE -> rewriteLazyDistGate(classNode, rule, method, operation, generatedLazyHelpers);
@@ -276,6 +279,31 @@ public final class Forge1201CallSiteAdapter {
             default -> throw new IOException("Unsupported adapter operation '" + operation.type()
                     + "' in " + rule.key());
         }
+    }
+
+    /**
+     * Rewrites one exact class-level annotation descriptor. Annotation values are preserved and
+     * are subsequently passed through the normal type remapper.
+     */
+    private static void replaceClassAnnotationDescriptor(
+            ClassNode classNode, Rule rule, Operation operation) throws IOException {
+        int matches = 0;
+        matches += replaceAnnotationDescriptor(classNode.visibleAnnotations, operation);
+        matches += replaceAnnotationDescriptor(classNode.invisibleAnnotations, operation);
+        requireExpectedMatches(rule, operation, matches);
+    }
+
+    private static int replaceAnnotationDescriptor(
+            List<AnnotationNode> annotations, Operation operation) {
+        if (annotations == null) return 0;
+        int matches = 0;
+        for (AnnotationNode annotation : annotations) {
+            if (annotation.desc.equals(operation.descriptor())) {
+                annotation.desc = operation.replacementDescriptor();
+                matches++;
+            }
+        }
+        return matches;
     }
 
     private static void replaceMethodDeclarationDescriptor(Rule rule, MethodNode method, Operation operation)
@@ -748,6 +776,11 @@ public final class Forge1201CallSiteAdapter {
                     requiredOpcode(json, "opcode", location, type.equals(OP_FIELD_DESCRIPTOR)),
                     List.of(), List.of(), 0, 0, expected, -1, null, -1);
             case OP_METHOD_DECLARATION_DESCRIPTOR -> new Operation(
+                    type, null, null,
+                    requiredString(json, "descriptor", location),
+                    requiredString(json, "replacementDescriptor", location),
+                    null, null, -1, List.of(), List.of(), 0, 0, expected, -1, null, -1);
+            case OP_CLASS_ANNOTATION_DESCRIPTOR -> new Operation(
                     type, null, null,
                     requiredString(json, "descriptor", location),
                     requiredString(json, "replacementDescriptor", location),
