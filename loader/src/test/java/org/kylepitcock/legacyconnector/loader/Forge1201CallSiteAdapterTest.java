@@ -1032,6 +1032,135 @@ final class Forge1201CallSiteAdapterTest {
 
 
     @Test
+    void rewritesStringConcatFactoryBootstrapStringArgumentExactly() throws Exception {
+        String className = "sample/DormantSampleRenderer";
+        String resourceLocation = "net/minecraft/resources/ResourceLocation";
+        String oldConstructor = "(Ljava/lang/String;Ljava/lang/String;)V";
+        String newFactory = "(Ljava/lang/String;Ljava/lang/String;)Lnet/minecraft/resources/ResourceLocation;";
+        String bootstrapDescriptor = "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;"
+                + "Ljava/lang/invoke/MethodType;Ljava/lang/String;[Ljava/lang/Object;)"
+                + "Ljava/lang/invoke/CallSite;";
+        String concatConstant = "block/dormant_sample_" + (char) 1;
+        String escapedConcatConstant = "block/dormant_sample_" + (char) 92 + "u0001";
+
+        String profile = """
+                {
+                  "schemaVersion": 1,
+                  "id": "synthetic-string-concat-bootstrap-profile",
+                  "rules": [{
+                    "className": "sample/DormantSampleRenderer",
+                    "methodName": "makeLocation",
+                    "methodDescriptor": "(Ljava/lang/String;)Lnet/minecraft/resources/ResourceLocation;",
+                    "operations": [{
+                      "type": "instruction-sequence",
+                      "expectedMatches": 1,
+                      "minimumMaxStack": 2,
+                      "match": [
+                        {"kind":"type","opcode":"NEW","typeName":"net/minecraft/resources/ResourceLocation"},
+                        {"kind":"insn","opcode":"DUP"},
+                        {"kind":"ldc","valueType":"string","value":"symbiote"},
+                        {"kind":"var","opcode":"ALOAD","var":0},
+                        {
+                          "kind":"invokedynamic",
+                          "name":"makeConcatWithConstants",
+                          "descriptor":"(Ljava/lang/String;)Ljava/lang/String;",
+                          "bootstrap":{
+                            "tag":"H_INVOKESTATIC",
+                            "owner":"java/lang/invoke/StringConcatFactory",
+                            "name":"makeConcatWithConstants",
+                            "descriptor":"(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;"
+                          },
+                          "bootstrapArguments":[
+                            {"kind":"string","value":"CONCAT_CONSTANT"}
+                          ]
+                        },
+                        {
+                          "kind":"method",
+                          "opcode":"INVOKESPECIAL",
+                          "owner":"net/minecraft/resources/ResourceLocation",
+                          "name":"<init>",
+                          "descriptor":"(Ljava/lang/String;Ljava/lang/String;)V"
+                        }
+                      ],
+                      "replaceWith": [
+                        {"kind":"ldc","valueType":"string","value":"symbiote"},
+                        {"kind":"var","opcode":"ALOAD","var":0},
+                        {
+                          "kind":"invokedynamic",
+                          "name":"makeConcatWithConstants",
+                          "descriptor":"(Ljava/lang/String;)Ljava/lang/String;",
+                          "bootstrap":{
+                            "tag":"H_INVOKESTATIC",
+                            "owner":"java/lang/invoke/StringConcatFactory",
+                            "name":"makeConcatWithConstants",
+                            "descriptor":"(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/invoke/CallSite;"
+                          },
+                          "bootstrapArguments":[
+                            {"kind":"string","value":"CONCAT_CONSTANT"}
+                          ]
+                        },
+                        {
+                          "kind":"method",
+                          "opcode":"INVOKESTATIC",
+                          "owner":"net/minecraft/resources/ResourceLocation",
+                          "name":"m_339182_",
+                          "descriptor":"(Ljava/lang/String;Ljava/lang/String;)Lnet/minecraft/resources/ResourceLocation;"
+                        }
+                      ]
+                    }]
+                  }]
+                }
+                """.replace("CONCAT_CONSTANT", escapedConcatConstant);
+
+        ClassNode node = new ClassNode();
+        node.version = Opcodes.V17;
+        node.access = Opcodes.ACC_PUBLIC;
+        node.name = className;
+        node.superName = "java/lang/Object";
+
+        MethodNode method = new MethodNode(Opcodes.ASM9, Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC,
+                "makeLocation", "(Ljava/lang/String;)Lnet/minecraft/resources/ResourceLocation;", null, null);
+        method.instructions.add(new TypeInsnNode(Opcodes.NEW, resourceLocation));
+        method.instructions.add(new InsnNode(Opcodes.DUP));
+        method.instructions.add(new LdcInsnNode("symbiote"));
+        method.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        method.instructions.add(new InvokeDynamicInsnNode(
+                "makeConcatWithConstants",
+                "(Ljava/lang/String;)Ljava/lang/String;",
+                new Handle(Opcodes.H_INVOKESTATIC, "java/lang/invoke/StringConcatFactory",
+                        "makeConcatWithConstants", bootstrapDescriptor, false),
+                concatConstant));
+        method.instructions.add(new MethodInsnNode(Opcodes.INVOKESPECIAL,
+                resourceLocation, "<init>", oldConstructor, false));
+        method.instructions.add(new InsnNode(Opcodes.ARETURN));
+        method.maxStack = 3;
+        method.maxLocals = 1;
+        node.methods.add(method);
+
+        Forge1201CallSiteAdapter.Session session = new Forge1201CallSiteAdapter.Session(
+                Forge1201CallSiteAdapter.load(writeProfile(profile)));
+        session.apply(node);
+        Forge1201CallSiteAdapter.Stats stats = session.finish();
+
+        assertEquals("synthetic-string-concat-bootstrap-profile", stats.profileId());
+        assertEquals(1, stats.rulesApplied());
+        assertEquals(1, stats.operationsApplied());
+        assertEquals(Opcodes.LDC, method.instructions.getFirst().getOpcode());
+        assertEquals("symbiote", ((LdcInsnNode) method.instructions.getFirst()).cst);
+        assertEquals(Opcodes.ALOAD, method.instructions.getFirst().getNext().getOpcode());
+        InvokeDynamicInsnNode rewritten = (InvokeDynamicInsnNode) method.instructions.getFirst().getNext().getNext();
+        assertEquals("makeConcatWithConstants", rewritten.name);
+        assertEquals("(Ljava/lang/String;)Ljava/lang/String;", rewritten.desc);
+        assertEquals(1, rewritten.bsmArgs.length);
+        assertEquals(concatConstant, rewritten.bsmArgs[0]);
+        MethodInsnNode factoryCall = (MethodInsnNode) rewritten.getNext();
+        assertEquals(Opcodes.INVOKESTATIC, factoryCall.getOpcode());
+        assertEquals(resourceLocation, factoryCall.owner);
+        assertEquals("m_339182_", factoryCall.name);
+        assertEquals(newFactory, factoryCall.desc);
+    }
+
+    @Test
     void rewritesLambdaMetafactoryBootstrapAndClassLiteralExactly() throws Exception {
         String className = "sample/ClientModEvents";
         String oldFactory = "sample/OldFactory";
