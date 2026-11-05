@@ -110,13 +110,13 @@ public final class Forge1201TranslatedJarVerifier {
         System.out.println("  unique references: " + result.uniqueMethodReferences());
         System.out.println("  exact target/inherited matches: " + result.verifiedMethodReferences());
         System.out.println("  unresolved or changed: " + result.methodIssues().size());
-        result.methodIssues().forEach(issue -> System.out.println("  " + issue.display()));
+        result.methodIssues().forEach(Forge1201TargetApiVerifier::printIssue);
 
         System.out.println("\nReviewed target API field references (source names normalized):");
         System.out.println("  unique references: " + result.uniqueFieldReferences());
         System.out.println("  exact target/inherited matches: " + result.verifiedFieldReferences());
         System.out.println("  unresolved or changed: " + result.fieldIssues().size());
-        result.fieldIssues().forEach(issue -> System.out.println("  " + issue.display()));
+        result.fieldIssues().forEach(Forge1201TargetApiVerifier::printIssue);
 
         List<String> remainingForgeTypes = rawAnalysis.referencedApiClasses().stream()
                 .filter(name -> name.startsWith("net/minecraftforge/"))
