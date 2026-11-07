@@ -1506,6 +1506,138 @@ final class Forge1201CallSiteAdapterTest {
         assertEquals(0, stalePhaseReferences);
     }
 
+    @Test
+    void rewritesSymbioteArmSlotItemStackCallsToRegistryAwareCodec() throws Exception {
+        String packet = "com/scout/symbiote/network/ClientboundSymbioteSyncPacket";
+        String friendlyBuffer = "net/minecraft/network/FriendlyByteBuf";
+        String itemStack = "net/minecraft/world/item/ItemStack";
+        String codec = "org/kylepitcock/legacyconnector/v1_20_1/bridge/ItemStackCodec1201";
+        String legacyWrite = "(L" + itemStack + ";)L" + friendlyBuffer + ";";
+        String codecWrite = "(L" + friendlyBuffer + ";L" + itemStack + ";)L" + friendlyBuffer + ";";
+        String legacyRead = "()L" + itemStack + ";";
+        String codecRead = "(L" + friendlyBuffer + ";)L" + itemStack + ";";
+
+        Path profileFile = writeProfile("""
+                {
+                  "schemaVersion": 1,
+                  "id": "symbiote-itemstack-registry-codec",
+                  "rules": [
+                    {
+                      "className": "com/scout/symbiote/network/ClientboundSymbioteSyncPacket",
+                      "methodName": "encode",
+                      "methodDescriptor": "(Lcom/scout/symbiote/network/ClientboundSymbioteSyncPacket;Lnet/minecraft/network/FriendlyByteBuf;)V",
+                      "operations": [{
+                        "type": "instruction-sequence",
+                        "match": [{
+                          "kind": "method",
+                          "opcode": "INVOKEVIRTUAL",
+                          "owner": "net/minecraft/network/FriendlyByteBuf",
+                          "name": "m_130055_",
+                          "descriptor": "(Lnet/minecraft/world/item/ItemStack;)Lnet/minecraft/network/FriendlyByteBuf;"
+                        }],
+                        "replaceWith": [{
+                          "kind": "method",
+                          "opcode": "INVOKESTATIC",
+                          "owner": "org/kylepitcock/legacyconnector/v1_20_1/bridge/ItemStackCodec1201",
+                          "name": "writeOptional",
+                          "descriptor": "(Lnet/minecraft/network/FriendlyByteBuf;Lnet/minecraft/world/item/ItemStack;)Lnet/minecraft/network/FriendlyByteBuf;"
+                        }],
+                        "expectedMatches": 1
+                      }]
+                    },
+                    {
+                      "className": "com/scout/symbiote/network/ClientboundSymbioteSyncPacket",
+                      "methodName": "decode",
+                      "methodDescriptor": "(Lnet/minecraft/network/FriendlyByteBuf;)Lcom/scout/symbiote/network/ClientboundSymbioteSyncPacket;",
+                      "operations": [{
+                        "type": "instruction-sequence",
+                        "match": [{
+                          "kind": "method",
+                          "opcode": "INVOKEVIRTUAL",
+                          "owner": "net/minecraft/network/FriendlyByteBuf",
+                          "name": "m_130267_",
+                          "descriptor": "()Lnet/minecraft/world/item/ItemStack;"
+                        }],
+                        "replaceWith": [{
+                          "kind": "method",
+                          "opcode": "INVOKESTATIC",
+                          "owner": "org/kylepitcock/legacyconnector/v1_20_1/bridge/ItemStackCodec1201",
+                          "name": "readOptional",
+                          "descriptor": "(Lnet/minecraft/network/FriendlyByteBuf;)Lnet/minecraft/world/item/ItemStack;"
+                        }],
+                        "expectedMatches": 1
+                      }]
+                    }
+                  ]
+                }
+                """);
+
+        ClassNode node = new ClassNode();
+        node.version = Opcodes.V17;
+        node.access = Opcodes.ACC_PUBLIC;
+        node.name = packet;
+        node.superName = "java/lang/Object";
+
+        MethodNode encode = new MethodNode(
+                Opcodes.ASM9, Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "encode",
+                "(Lcom/scout/symbiote/network/ClientboundSymbioteSyncPacket;Lnet/minecraft/network/FriendlyByteBuf;)V",
+                null, null);
+        encode.instructions.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        encode.instructions.add(new VarInsnNode(Opcodes.ALOAD, 2));
+        encode.instructions.add(new MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL, friendlyBuffer, "m_130055_", legacyWrite, false));
+        encode.instructions.add(new InsnNode(Opcodes.POP));
+        encode.instructions.add(new InsnNode(Opcodes.RETURN));
+        encode.maxStack = 2;
+        encode.maxLocals = 3;
+        node.methods.add(encode);
+
+        MethodNode decode = new MethodNode(
+                Opcodes.ASM9, Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "decode",
+                "(Lnet/minecraft/network/FriendlyByteBuf;)Lcom/scout/symbiote/network/ClientboundSymbioteSyncPacket;",
+                null, null);
+        decode.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        decode.instructions.add(new MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL, friendlyBuffer, "m_130267_", legacyRead, false));
+        decode.instructions.add(new InsnNode(Opcodes.ARETURN));
+        decode.maxStack = 1;
+        decode.maxLocals = 1;
+        node.methods.add(decode);
+
+        Forge1201CallSiteAdapter.Session session = new Forge1201CallSiteAdapter.Session(
+                Forge1201CallSiteAdapter.load(profileFile));
+        session.apply(node);
+        Forge1201CallSiteAdapter.Stats stats = session.finish();
+
+        assertEquals("symbiote-itemstack-registry-codec", stats.profileId());
+        assertEquals(2, stats.rulesApplied());
+        assertEquals(2, stats.operationsApplied());
+        assertEquals(0, countCalls(encode, friendlyBuffer, "m_130055_", legacyWrite));
+        assertEquals(1, countCalls(encode, codec, "writeOptional", codecWrite));
+        assertEquals(0, countCalls(decode, friendlyBuffer, "m_130267_", legacyRead));
+        assertEquals(1, countCalls(decode, codec, "readOptional", codecRead));
+
+        MethodInsnNode write = (MethodInsnNode) java.util.stream.StreamSupport
+                .stream(java.util.Spliterators.spliteratorUnknownSize(
+                        encode.instructions.iterator(), 0), false)
+                .filter(instruction -> instruction instanceof MethodInsnNode call
+                        && call.owner.equals(codec) && call.name.equals("writeOptional"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(Opcodes.INVOKESTATIC, write.getOpcode());
+
+        MethodInsnNode read = (MethodInsnNode) java.util.stream.StreamSupport
+                .stream(java.util.Spliterators.spliteratorUnknownSize(
+                        decode.instructions.iterator(), 0), false)
+                .filter(instruction -> instruction instanceof MethodInsnNode call
+                        && call.owner.equals(codec) && call.name.equals("readOptional"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(Opcodes.INVOKESTATIC, read.getOpcode());
+    }
+
     private Path writeProfile(String json) throws IOException {
         Path file = tempDir.resolve("adapter-profile.json");
         Files.writeString(file, json, StandardCharsets.UTF_8);
