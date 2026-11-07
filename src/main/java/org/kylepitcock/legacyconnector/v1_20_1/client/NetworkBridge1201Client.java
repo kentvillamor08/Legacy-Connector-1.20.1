@@ -19,7 +19,6 @@ public final class NetworkBridge1201Client {
             public boolean isReady() {
                 ClientPacketListener listener = listener();
                 return listener != null
-                        && Minecraft.getInstance().level != null
                         && NetworkBridge1201.hasPlayCarrier(listener.getConnection());
             }
 
@@ -28,7 +27,9 @@ public final class NetworkBridge1201Client {
                 if (!isReady()) {
                     throw new IllegalStateException("Client registry access is unavailable before the Legacy Connector PLAY connection is ready");
                 }
-                return Minecraft.getInstance().level.registryAccess();
+                // ClientPacketListener owns the registry view negotiated during login; it is
+                // available before a ClientLevel has finished loading.
+                return listener().registryAccess();
             }
 
             @Override
