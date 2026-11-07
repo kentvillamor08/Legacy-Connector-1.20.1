@@ -77,6 +77,9 @@ final class Forge1201JarTransformerTest {
         assertEquals(1, bytecode.classEntriesRelocated());
         assertTrue(bytecode.relocatedTypes().stream()
                 .anyMatch(value -> value.startsWith("net/minecraftforge/fml/ModList -> ")));
+        assertTrue(bytecode.relocatedTypes().contains(
+                "net/minecraftforge/network/NetworkEvent$Context -> "
+                        + "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkEvent$Context"));
         assertFalse(bytecode.manualAdapterTypes().contains("net/minecraftforge/registries/ForgeRegistries"));
         assertFalse(bytecode.manualAdapterTypes().contains("net/minecraftforge/registries/IForgeRegistry"));
         assertEquals(1, bytecode.registryAdapters().builtInRegistryFieldReads());
@@ -165,7 +168,7 @@ final class Forge1201JarTransformerTest {
     void analyzerTracksConnectorOwnedNetworkShimReferencesInTranslatedJar() throws Exception {
         Path translated = tempDir.resolve("translated-shim-reference.jar");
         try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(translated))) {
-            put(out, Forge1201JarArchiveTransformer.TARGET_METADATA, "modLoader=\\"javafml\\"\\n");
+            put(out, Forge1201JarArchiveTransformer.TARGET_METADATA, "modLoader=\"javafml\"\n");
             put(out, "sample/TranslatedShimCaller.class", translatedShimReferenceClass());
         }
 
@@ -298,6 +301,7 @@ final class Forge1201JarTransformerTest {
                 null,
                 null);
         networkFactory.visitCode();
+        networkFactory.visitVarInsn(Opcodes.ALOAD, 0);
         networkFactory.visitInvokeDynamicInsn(
                 "get",
                 "(L" + context + ";)Ljava/util/function/Supplier;",
