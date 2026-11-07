@@ -213,6 +213,12 @@ dependencies {
 }
 tasks.withType(Test).configureEach { useJUnitPlatform() }
 
+// ModDev supplies the Minecraft/NeoForge compile and runtime classpaths to the main source set.
+// The root JUnit tests that exercise runtime bridge classes need those same game APIs; Gradle's
+// default test configurations do not inherit the main source set's compileOnly game dependencies.
+sourceSets.test.compileClasspath += sourceSets.main.compileClasspath
+sourceSets.test.runtimeClasspath += sourceSets.main.runtimeClasspath
+
 // The addon API alone (classes + sources), the compile-time dependency of addons: build/dist/legacyconnector-api-<version>.jar.
 // Not a mod: at runtime the API is part of the Legacy Connector jar.
 tasks.register('apiJar', Jar) {
