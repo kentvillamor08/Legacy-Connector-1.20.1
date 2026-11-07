@@ -15,7 +15,6 @@ import net.minecraft.network.ConnectionProtocol;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketFlow;
-import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.network.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -113,10 +112,6 @@ public final class NetworkBridge1201 {
         Set<ServerPlayer> recipients = new LinkedHashSet<>(level.getChunkSource().chunkMap.getPlayersWatching(entity));
         if (includeSelf && entity instanceof ServerPlayer self) recipients.add(self);
         for (ServerPlayer player : recipients) sendToPlayerIfCarrierPresent(player, packet);
-    }
-
-    public static CustomPacketPayload clientboundPayload(LegacyPayload payload) {
-        return new ClientboundCustomPayloadPacket(payload).payload();
     }
 
     public static void registerMessage(
