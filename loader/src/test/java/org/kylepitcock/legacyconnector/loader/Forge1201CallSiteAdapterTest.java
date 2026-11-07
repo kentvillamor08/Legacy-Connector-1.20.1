@@ -1584,13 +1584,13 @@ final class Forge1201CallSiteAdapterTest {
                 "(Lcom/scout/symbiote/network/ClientboundSymbioteSyncPacket;Lnet/minecraft/network/FriendlyByteBuf;)V",
                 null, null);
         encode.instructions.add(new VarInsnNode(Opcodes.ALOAD, 1));
-        encode.instructions.add(new VarInsnNode(Opcodes.ALOAD, 2));
+        encode.instructions.add(new InsnNode(Opcodes.ACONST_NULL));
         encode.instructions.add(new MethodInsnNode(
                 Opcodes.INVOKEVIRTUAL, friendlyBuffer, "m_130055_", legacyWrite, false));
         encode.instructions.add(new InsnNode(Opcodes.POP));
         encode.instructions.add(new InsnNode(Opcodes.RETURN));
         encode.maxStack = 2;
-        encode.maxLocals = 3;
+        encode.maxLocals = 2;
         node.methods.add(encode);
 
         MethodNode decode = new MethodNode(
@@ -1601,6 +1601,8 @@ final class Forge1201CallSiteAdapterTest {
         decode.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
         decode.instructions.add(new MethodInsnNode(
                 Opcodes.INVOKEVIRTUAL, friendlyBuffer, "m_130267_", legacyRead, false));
+        decode.instructions.add(new InsnNode(Opcodes.POP));
+        decode.instructions.add(new InsnNode(Opcodes.ACONST_NULL));
         decode.instructions.add(new InsnNode(Opcodes.ARETURN));
         decode.maxStack = 1;
         decode.maxLocals = 1;
