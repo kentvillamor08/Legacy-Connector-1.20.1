@@ -5,14 +5,23 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.netty.buffer.ByteBuf;
+import net.minecraft.SharedConstants;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.RegistryFriendlyByteBuf;
+import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.network.connection.ConnectionType;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.kylepitcock.legacyconnector.core.network.LegacyBuffers;
 
 class RegistryFriendlyBuffers1201Test {
+    @BeforeAll
+    static void bootstrapMinecraftRegistries() {
+        SharedConstants.tryDetectVersion();
+        Bootstrap.bootStrap();
+    }
+
     @Test
     void heapBufferCarriesRegistryAndNeoForgeConnectionContext() {
         ByteBuf raw = LegacyBuffers.buffer();
