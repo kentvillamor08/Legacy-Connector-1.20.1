@@ -213,8 +213,9 @@ public final class Forge1201TargetApiVerifier {
     }
 
     private boolean isCandidate(String sourceInternalName) {
-        return Forge1201MappingCatalog.classify(sourceInternalName).kind()
-                == Forge1201MappingCatalog.Kind.PACKAGE_RELOCATION_CANDIDATE
+        Forge1201MappingCatalog.Kind kind = Forge1201MappingCatalog.classify(sourceInternalName).kind();
+        return kind == Forge1201MappingCatalog.Kind.PACKAGE_RELOCATION_CANDIDATE
+                || kind == Forge1201MappingCatalog.Kind.EXPLICIT_TYPE_REPLACEMENT
                 || Forge1201MappingCatalog.isReviewedTargetApiType(sourceInternalName)
                 || Forge1211TargetMethodAliases.isTargetApiOwner(sourceInternalName);
     }
@@ -222,6 +223,7 @@ public final class Forge1201TargetApiVerifier {
     private static String mapType(String sourceInternalName) {
         Forge1201MappingCatalog.Decision decision = Forge1201MappingCatalog.classify(sourceInternalName);
         return decision.kind() == Forge1201MappingCatalog.Kind.PACKAGE_RELOCATION_CANDIDATE
+                        || decision.kind() == Forge1201MappingCatalog.Kind.EXPLICIT_TYPE_REPLACEMENT
                 ? decision.targetInternalName()
                 : sourceInternalName;
     }

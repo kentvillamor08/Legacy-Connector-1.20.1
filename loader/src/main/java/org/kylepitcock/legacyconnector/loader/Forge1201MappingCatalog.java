@@ -71,26 +71,28 @@ public final class Forge1201MappingCatalog {
      * RegistryObject maps to Supplier because the audited usage only calls get(), and
      * IForgeMenuType maps to the target IMenuTypeExtension contract.
      */
-    private static final Map<String, String> EXPLICIT_TYPE_REPLACEMENTS = Map.of(
-            "net/minecraftforge/common/ForgeConfigSpec",
-            "net/neoforged/neoforge/common/ModConfigSpec",
-            "net/minecraftforge/common/ForgeConfigSpec$Builder",
-            "net/neoforged/neoforge/common/ModConfigSpec$Builder",
-            "net/minecraftforge/common/ForgeConfigSpec$BooleanValue",
-            "net/neoforged/neoforge/common/ModConfigSpec$BooleanValue",
-            "net/minecraftforge/common/ForgeConfigSpec$IntValue",
-            "net/neoforged/neoforge/common/ModConfigSpec$IntValue",
-            "net/minecraftforge/common/ForgeConfigSpec$DoubleValue",
-            "net/neoforged/neoforge/common/ModConfigSpec$DoubleValue",
-            "net/minecraftforge/registries/RegistryObject",
-            "java/util/function/Supplier",
-            "net/minecraftforge/common/extensions/IForgeMenuType",
-            "net/neoforged/neoforge/common/extensions/IMenuTypeExtension"
+    private static final Map<String, String> EXPLICIT_TYPE_REPLACEMENTS = Map.ofEntries(
+            Map.entry("net/minecraftforge/common/ForgeConfigSpec", "net/neoforged/neoforge/common/ModConfigSpec"),
+            Map.entry("net/minecraftforge/common/ForgeConfigSpec$Builder", "net/neoforged/neoforge/common/ModConfigSpec$Builder"),
+            Map.entry("net/minecraftforge/common/ForgeConfigSpec$BooleanValue", "net/neoforged/neoforge/common/ModConfigSpec$BooleanValue"),
+            Map.entry("net/minecraftforge/common/ForgeConfigSpec$IntValue", "net/neoforged/neoforge/common/ModConfigSpec$IntValue"),
+            Map.entry("net/minecraftforge/common/ForgeConfigSpec$DoubleValue", "net/neoforged/neoforge/common/ModConfigSpec$DoubleValue"),
+            Map.entry("net/minecraftforge/registries/RegistryObject", "java/util/function/Supplier"),
+            Map.entry("net/minecraftforge/common/extensions/IForgeMenuType", "net/neoforged/neoforge/common/extensions/IMenuTypeExtension"),
+            Map.entry("net/minecraftforge/network/NetworkRegistry", "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkRegistry"),
+            Map.entry("net/minecraftforge/network/NetworkDirection", "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkDirection"),
+            Map.entry("net/minecraftforge/network/NetworkEvent", "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkEvent"),
+            Map.entry("net/minecraftforge/network/NetworkEvent$Context", "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkEvent$Context"),
+            Map.entry("net/minecraftforge/network/PacketDistributor", "legacyconnector/v1_20_1/net/minecraftforge/network/PacketDistributor"),
+            Map.entry("net/minecraftforge/network/PacketDistributor$PacketTarget", "legacyconnector/v1_20_1/net/minecraftforge/network/PacketDistributor$PacketTarget"),
+            Map.entry("net/minecraftforge/network/simple/SimpleChannel", "legacyconnector/v1_20_1/net/minecraftforge/network/simple/SimpleChannel"),
+            Map.entry("net/minecraftforge/network/simple/SimpleChannel$MessageBuilder", "legacyconnector/v1_20_1/net/minecraftforge/network/simple/SimpleChannel$MessageBuilder")
     );
 
     /**
      * Types whose migration is not a safe package-only rewrite. Their behavior, signatures,
      * ownership, or lifecycle contracts need a dedicated adapter or source-level change.
+     * The audited Forge 1.20.1 SimpleChannel facade types are explicit connector-owned runtime shims.
      */
     private static final Map<String, String> MANUAL_ADAPTERS = Map.ofEntries(
             Map.entry("net/minecraftforge/common/MinecraftForge",
@@ -125,22 +127,6 @@ public final class Forge1201MappingCatalog {
                     "No target class exists at the package-mapped path; rewrite menu opening against the 1.21.1 menu API and preserve extra-data synchronization."),
             Map.entry("net/minecraftforge/registries/IForgeRegistry",
                     "The old registry interface is not present at the mapped target; migrate registry access to the appropriate vanilla/NeoForge registry and holder APIs."),
-            Map.entry("net/minecraftforge/network/simple/SimpleChannel",
-                    "Rewrite packets as CustomPacketPayload with StreamCodec and payload registration."),
-            Map.entry("net/minecraftforge/network/NetworkRegistry",
-                    "The old SimpleChannel construction path is replaced by payload registration."),
-            Map.entry("net/minecraftforge/network/PacketDistributor",
-                    "Rewrite recipient routing for typed payloads and the new send APIs."),
-            Map.entry("net/minecraftforge/network/NetworkEvent",
-                    "The old SimpleChannel event context is replaced by the typed custom-payload handling model."),
-            Map.entry("net/minecraftforge/network/NetworkEvent$Context",
-                    "Migrate handler execution, sender access, and packet context to IPayloadContext."),
-            Map.entry("net/minecraftforge/network/NetworkDirection",
-                    "Old SimpleChannel direction descriptors do not map directly to payload registration flow."),
-            Map.entry("net/minecraftforge/network/simple/SimpleChannel$MessageBuilder",
-                    "The message-builder registration API is removed; define typed payloads, codecs, and handlers."),
-            Map.entry("net/minecraftforge/network/PacketDistributor$PacketTarget",
-                    "Old packet-target objects do not map directly to typed payload sending."),
             Map.entry("net/minecraftforge/common/ForgeMod",
                     "Migrate each referenced attribute to its exact vanilla Attributes or NeoForge equivalent."),
             Map.entry("net/minecraftforge/client/ConfigScreenHandler",

@@ -17,12 +17,14 @@ import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.InvokeDynamicInsnNode;
 
 final class Forge1201JarTransformerTest {
     @TempDir
@@ -113,6 +115,38 @@ final class Forge1201JarTransformerTest {
             LdcInsnNode classLiteral = firstInstruction(invoke, LdcInsnNode.class);
             assertEquals("Lnet/neoforged/fml/ModList;", ((Type) classLiteral.cst).getDescriptor());
 
+            String shimPrefix = "legacyconnector/v1_20_1/net/minecraftforge/network/";
+            String contextType = shimPrefix + "NetworkEvent$Context";
+            String simpleChannelType = shimPrefix + "simple/SimpleChannel";
+            String messageBuilderType = shimPrefix + "simple/SimpleChannel$MessageBuilder";
+            String contextDescriptor = "L" + contextType + ";";
+            String messageBuilderDescriptor = "L" + messageBuilderType + ";";
+
+            var networkFactory = caller.methods.stream()
+                    .filter(method -> method.name.equals("networkFactory"))
+                    .findFirst().orElseThrow();
+            assertEquals("(" + contextDescriptor + ")Ljava/util/function/Supplier;", networkFactory.desc);
+            InvokeDynamicInsnNode dynamic = firstInstruction(networkFactory, InvokeDynamicInsnNode.class);
+            assertEquals("(" + contextDescriptor + ")Ljava/util/function/Supplier;", dynamic.desc);
+            Handle lambdaImplementation = (Handle) dynamic.bsmArgs[1];
+            assertEquals(simpleChannelType, lambdaImplementation.getOwner());
+            assertEquals("(" + contextDescriptor + ")" + messageBuilderDescriptor,
+                    lambdaImplementation.getDesc());
+            assertEquals(Type.getMethodType("()" + messageBuilderDescriptor), dynamic.bsmArgs[2]);
+
+            var networkHandle = caller.methods.stream()
+                    .filter(method -> method.name.equals("networkHandle"))
+                    .findFirst().orElseThrow();
+            Handle classHandle = (Handle) firstInstruction(networkHandle, LdcInsnNode.class).cst;
+            assertEquals(shimPrefix + "NetworkRegistry", classHandle.getOwner());
+            assertEquals("()L" + shimPrefix + "simple/SimpleChannel;", classHandle.getDesc());
+
+            var networkTypeLiteral = caller.methods.stream()
+                    .filter(method -> method.name.equals("networkTypeLiteral"))
+                    .findFirst().orElseThrow();
+            assertEquals(contextDescriptor,
+                    ((Type) firstInstruction(networkTypeLiteral, LdcInsnNode.class).cst).getDescriptor());
+
             var missing = caller.methods.stream()
                     .filter(method -> method.name.equals("missingApi"))
                     .findFirst().orElseThrow();
@@ -125,6 +159,31 @@ final class Forge1201JarTransformerTest {
             assertTrue(metadata.contains("type=\"required\""));
             assertFalse(metadata.contains("modId=\"forge\""));
         }
+    }
+
+    @Test
+    void analyzerTracksConnectorOwnedNetworkShimReferencesInTranslatedJar() throws Exception {
+        Path translated = tempDir.resolve("translated-shim-reference.jar");
+        try (ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(translated))) {
+            put(out, Forge1201JarArchiveTransformer.TARGET_METADATA, "modLoader=\\"javafml\\"\\n");
+            put(out, "sample/TranslatedShimCaller.class", translatedShimReferenceClass());
+        }
+
+        Forge1201ApiUsageAnalyzer.Analysis analysis =
+                Forge1201ApiUsageAnalyzer.analyzeTranslated(translated);
+        String context = "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkEvent$Context";
+        String direction = "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkDirection";
+
+        assertTrue(analysis.referencedApiClasses().contains(context));
+        assertTrue(analysis.referencedApiClasses().contains(direction));
+        assertTrue(analysis.methodReferences().stream().anyMatch(reference ->
+                reference.owner().equals(context) && reference.name().equals("isHandled")
+                        && reference.descriptor().equals("()Z")));
+        assertTrue(analysis.fieldReferences().stream().anyMatch(reference ->
+                reference.owner().equals(context) && reference.name().equals("direction")
+                        && reference.descriptor().equals("L" + direction + ";")));
+        assertTrue(analysis.methodCallSites().stream().anyMatch(callSite ->
+                callSite.targetOwner().equals(context) && callSite.targetName().equals("isHandled")));
     }
 
     @Test
@@ -174,6 +233,32 @@ final class Forge1201JarTransformerTest {
         throw new AssertionError("Instruction not found: " + type.getName());
     }
 
+    private static byte[] translatedShimReferenceClass() {
+        String context = "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkEvent$Context";
+        String direction = "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkDirection";
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "sample/TranslatedShimCaller", null,
+                "java/lang/Object", null);
+        var inspect = writer.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "inspect",
+                "(L" + context + ";)V",
+                null,
+                null);
+        inspect.visitCode();
+        inspect.visitVarInsn(Opcodes.ALOAD, 0);
+        inspect.visitMethodInsn(Opcodes.INVOKEVIRTUAL, context, "isHandled", "()Z", false);
+        inspect.visitInsn(Opcodes.POP);
+        inspect.visitVarInsn(Opcodes.ALOAD, 0);
+        inspect.visitFieldInsn(Opcodes.GETFIELD, context, "direction", "L" + direction + ";");
+        inspect.visitInsn(Opcodes.POP);
+        inspect.visitInsn(Opcodes.RETURN);
+        inspect.visitMaxs(1, 1);
+        inspect.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
     private static byte[] callerClass() {
         ClassWriter writer = new ClassWriter(0);
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "sample/Caller", null, "java/lang/Object", null);
@@ -202,6 +287,63 @@ final class Forge1201JarTransformerTest {
         missing.visitInsn(Opcodes.ARETURN);
         missing.visitMaxs(1, 0);
         missing.visitEnd();
+
+        String context = "net/minecraftforge/network/NetworkEvent$Context";
+        String channel = "net/minecraftforge/network/simple/SimpleChannel";
+        String builder = "net/minecraftforge/network/simple/SimpleChannel$MessageBuilder";
+        var networkFactory = writer.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "networkFactory",
+                "(L" + context + ";)Ljava/util/function/Supplier;",
+                null,
+                null);
+        networkFactory.visitCode();
+        networkFactory.visitInvokeDynamicInsn(
+                "get",
+                "(L" + context + ";)Ljava/util/function/Supplier;",
+                new Handle(
+                        Opcodes.H_INVOKESTATIC,
+                        "java/lang/invoke/LambdaMetafactory",
+                        "metafactory",
+                        "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/invoke/MethodType;"
+                                + "Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodHandle;"
+                                + "Ljava/lang/invoke/MethodType;)Ljava/lang/invoke/CallSite;",
+                        false),
+                Type.getMethodType("()Ljava/lang/Object;"),
+                new Handle(
+                        Opcodes.H_INVOKESTATIC,
+                        channel,
+                        "makeBuilder",
+                        "(L" + context + ";)L" + builder + ";",
+                        false),
+                Type.getMethodType("()L" + builder + ";"));
+        networkFactory.visitInsn(Opcodes.ARETURN);
+        networkFactory.visitMaxs(1, 1);
+        networkFactory.visitEnd();
+
+        var networkHandle = writer.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "networkHandle", "()V", null, null);
+        networkHandle.visitCode();
+        networkHandle.visitLdcInsn(new Handle(
+                Opcodes.H_INVOKESTATIC,
+                "net/minecraftforge/network/NetworkRegistry",
+                "newChannel",
+                "()Lnet/minecraftforge/network/simple/SimpleChannel;",
+                false));
+        networkHandle.visitInsn(Opcodes.POP);
+        networkHandle.visitInsn(Opcodes.RETURN);
+        networkHandle.visitMaxs(1, 0);
+        networkHandle.visitEnd();
+
+        var networkTypeLiteral = writer.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "networkTypeLiteral", "()V", null, null);
+        networkTypeLiteral.visitCode();
+        networkTypeLiteral.visitLdcInsn(Type.getObjectType(context));
+        networkTypeLiteral.visitInsn(Opcodes.POP);
+        networkTypeLiteral.visitInsn(Opcodes.RETURN);
+        networkTypeLiteral.visitMaxs(1, 0);
+        networkTypeLiteral.visitEnd();
+
         writer.visitEnd();
         return writer.toByteArray();
     }

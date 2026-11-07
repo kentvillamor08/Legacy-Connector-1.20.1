@@ -154,13 +154,53 @@ final class Forge1201TargetApiVerifierTest {
     }
 
     @Test
-    void ignoresManualAdapterOwnersBecauseTheyAreNotPackageMoves() throws Exception {
+    void mapsExplicitNetworkShimOwnersAndDescriptorsToConnectorRuntimeTypes() throws Exception {
+        String sourceContext = "net/minecraftforge/network/NetworkEvent$Context";
+        String sourceDirection = "net/minecraftforge/network/NetworkDirection";
+        String targetContext = "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkEvent$Context";
+        String targetDirection = "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkDirection";
+        String memberDescriptor = "(L" + targetDirection + ";)V";
+        String fieldDescriptor = "L" + targetDirection + ";";
+
+        ClassWriter contextWriter = new ClassWriter(0);
+        contextWriter.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, targetContext, null, "java/lang/Object", null);
+        contextWriter.visitMethod(Opcodes.ACC_PUBLIC, "setDirection", memberDescriptor, null, null).visitEnd();
+        contextWriter.visitField(Opcodes.ACC_PUBLIC, "direction", fieldDescriptor, null, null).visitEnd();
+        contextWriter.visitEnd();
+
+        Map<String, byte[]> classes = Map.of(
+                targetContext, contextWriter.toByteArray(),
+                targetDirection, targetEmptyClass(targetDirection, "java/lang/Object"));
+
         Forge1201TargetApiVerifier.Result result = verify(
                 analysis(
-                        List.of("net/minecraftforge/network/simple/SimpleChannel"),
+                        List.of(sourceContext, sourceDirection),
                         List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
-                                "net/minecraftforge/network/simple/SimpleChannel",
-                                "sendToServer", "(Ljava/lang/Object;)V", 1)),
+                                sourceContext, "setDirection",
+                                "(L" + sourceDirection + ";)V", 1)),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                sourceContext, "direction", "L" + sourceDirection + ";", 1))),
+                classes);
+
+        assertEquals(2, result.candidateClassCount());
+        assertEquals(2, result.verifiedClassCount());
+        assertTrue(result.missingTargetClasses().isEmpty());
+        assertEquals(1, result.uniqueMethodReferences());
+        assertEquals(1, result.verifiedMethodReferences());
+        assertTrue(result.methodIssues().isEmpty());
+        assertEquals(1, result.uniqueFieldReferences());
+        assertEquals(1, result.verifiedFieldReferences());
+        assertTrue(result.fieldIssues().isEmpty());
+    }
+
+    @Test
+    void ignoresManualAdapterOwnersBecauseTheyAreNotTypeReplacements() throws Exception {
+        Forge1201TargetApiVerifier.Result result = verify(
+                analysis(
+                        List.of("net/minecraftforge/network/NetworkHooks"),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                "net/minecraftforge/network/NetworkHooks",
+                                "openScreen", "()V", 1)),
                         List.of()),
                 Map.of());
 

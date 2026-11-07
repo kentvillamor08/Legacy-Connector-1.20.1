@@ -435,11 +435,14 @@ tasks.named('compileJava', JavaCompile) {
 tasks.register('verifyForge1201TranslatedJar', JavaExec) {
     group = 'verification'
     description = 'Checks relocated NeoForge API references after normalizing Forge 1.20.1 SRG member names against the configured target compile classpath.'
-    dependsOn project(':loader').tasks.named('classes'), project(':loader').tasks.named('extractForge1201SrgMappings')
+    dependsOn tasks.named('classes'),
+            project(':loader').tasks.named('classes'),
+            project(':loader').tasks.named('extractForge1201SrgMappings')
     classpath = (
             project(':loader').sourceSets.main.runtimeClasspath
                     + project(':loader').sourceSets.main.compileClasspath
                     + configurations.forge1201VerifierTargetClasspath
+                    + sourceSets.main.output
     )
     mainClass = 'org.kylepitcock.legacyconnector.loader.Forge1201TranslatedJarVerifier'
     systemProperty 'legacyconnector.targetNeoForgeVersion', project.neo_version

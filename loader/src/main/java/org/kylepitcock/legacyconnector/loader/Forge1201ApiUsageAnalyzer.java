@@ -193,6 +193,7 @@ public final class Forge1201ApiUsageAnalyzer {
 
         private static boolean isForgeOrOptionalApi(String name) {
             return name.startsWith("net/minecraftforge/")
+                    || name.startsWith("legacyconnector/v1_20_1/net/minecraftforge/")
                     || name.startsWith("net/neoforged/")
                     || name.startsWith("top/theillusivec4/curios/")
                     || name.startsWith("com/illusivesoulworks/")
@@ -202,6 +203,7 @@ public final class Forge1201ApiUsageAnalyzer {
         private static boolean isGameApi(String name) {
             return name.startsWith("net/minecraft/")
                     || name.startsWith("net/minecraftforge/")
+                    || name.startsWith("legacyconnector/v1_20_1/net/minecraftforge/")
                     || name.startsWith("net/neoforged/")
                     || name.startsWith("com/mojang/blaze3d/")
                     || name.startsWith("com/mojang/math/")

@@ -34,14 +34,15 @@ final class Forge1201MappingCatalogTest {
     }
 
     @Test
-    void identifiesNetworkingAndDamageTypesAsManualAdapters() {
+    void identifiesSimpleChannelAsRuntimeShimAndDamageAsManualAdapter() {
         var channel = Forge1201MappingCatalog.classify("net/minecraftforge/network/simple/SimpleChannel");
         var damage = Forge1201MappingCatalog.classify(
                 "net/minecraftforge/event/entity/living/LivingHurtEvent");
 
-        assertEquals(Forge1201MappingCatalog.Kind.MANUAL_ADAPTER_REQUIRED, channel.kind());
+        assertEquals(Forge1201MappingCatalog.Kind.EXPLICIT_TYPE_REPLACEMENT, channel.kind());
+        assertEquals("legacyconnector/v1_20_1/net/minecraftforge/network/simple/SimpleChannel",
+                channel.targetInternalName());
         assertEquals(Forge1201MappingCatalog.Kind.MANUAL_ADAPTER_REQUIRED, damage.kind());
-        assertNull(channel.targetInternalName());
         assertNull(damage.targetInternalName());
     }
 
@@ -108,21 +109,23 @@ final class Forge1201MappingCatalogTest {
 
     @Test
     void explicitTypeReplacementsAreLimitedToReviewedCompatibilityTypes() {
-        var replacements = java.util.Map.of(
-                "net/minecraftforge/common/ForgeConfigSpec",
-                "net/neoforged/neoforge/common/ModConfigSpec",
-                "net/minecraftforge/common/ForgeConfigSpec$Builder",
-                "net/neoforged/neoforge/common/ModConfigSpec$Builder",
-                "net/minecraftforge/common/ForgeConfigSpec$BooleanValue",
-                "net/neoforged/neoforge/common/ModConfigSpec$BooleanValue",
-                "net/minecraftforge/common/ForgeConfigSpec$IntValue",
-                "net/neoforged/neoforge/common/ModConfigSpec$IntValue",
-                "net/minecraftforge/common/ForgeConfigSpec$DoubleValue",
-                "net/neoforged/neoforge/common/ModConfigSpec$DoubleValue",
-                "net/minecraftforge/registries/RegistryObject",
-                "java/util/function/Supplier",
-                "net/minecraftforge/common/extensions/IForgeMenuType",
-                "net/neoforged/neoforge/common/extensions/IMenuTypeExtension");
+        var replacements = java.util.Map.ofEntries(
+                java.util.Map.entry("net/minecraftforge/common/ForgeConfigSpec", "net/neoforged/neoforge/common/ModConfigSpec"),
+                java.util.Map.entry("net/minecraftforge/common/ForgeConfigSpec$Builder", "net/neoforged/neoforge/common/ModConfigSpec$Builder"),
+                java.util.Map.entry("net/minecraftforge/common/ForgeConfigSpec$BooleanValue", "net/neoforged/neoforge/common/ModConfigSpec$BooleanValue"),
+                java.util.Map.entry("net/minecraftforge/common/ForgeConfigSpec$IntValue", "net/neoforged/neoforge/common/ModConfigSpec$IntValue"),
+                java.util.Map.entry("net/minecraftforge/common/ForgeConfigSpec$DoubleValue", "net/neoforged/neoforge/common/ModConfigSpec$DoubleValue"),
+                java.util.Map.entry("net/minecraftforge/registries/RegistryObject", "java/util/function/Supplier"),
+                java.util.Map.entry("net/minecraftforge/common/extensions/IForgeMenuType", "net/neoforged/neoforge/common/extensions/IMenuTypeExtension"),
+                java.util.Map.entry("net/minecraftforge/network/NetworkRegistry", "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkRegistry"),
+                java.util.Map.entry("net/minecraftforge/network/NetworkDirection", "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkDirection"),
+                java.util.Map.entry("net/minecraftforge/network/NetworkEvent", "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkEvent"),
+                java.util.Map.entry("net/minecraftforge/network/NetworkEvent$Context", "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkEvent$Context"),
+                java.util.Map.entry("net/minecraftforge/network/PacketDistributor", "legacyconnector/v1_20_1/net/minecraftforge/network/PacketDistributor"),
+                java.util.Map.entry("net/minecraftforge/network/PacketDistributor$PacketTarget", "legacyconnector/v1_20_1/net/minecraftforge/network/PacketDistributor$PacketTarget"),
+                java.util.Map.entry("net/minecraftforge/network/simple/SimpleChannel", "legacyconnector/v1_20_1/net/minecraftforge/network/simple/SimpleChannel"),
+                java.util.Map.entry("net/minecraftforge/network/simple/SimpleChannel$MessageBuilder", "legacyconnector/v1_20_1/net/minecraftforge/network/simple/SimpleChannel$MessageBuilder")
+        );
 
         assertEquals(replacements, Forge1201MappingCatalog.explicitTypeReplacements());
         replacements.forEach((source, target) -> {
@@ -134,7 +137,7 @@ final class Forge1201MappingCatalogTest {
             assertNull(Forge1201MappingCatalog.manualAdapterReason(source), source);
         });
 
-        assertEquals(7, replacements.size());
+        assertEquals(15, replacements.size());
         org.junit.jupiter.api.Assertions.assertFalse(
                 Forge1201MappingCatalog.isNeoForgeRelocationTarget("java/util/function/Supplier"));
     }
