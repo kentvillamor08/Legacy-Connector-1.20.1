@@ -164,7 +164,11 @@ final class Forge1201TargetApiVerifierTest {
 
         ClassWriter contextWriter = new ClassWriter(0);
         contextWriter.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, targetContext, null, "java/lang/Object", null);
-        contextWriter.visitMethod(Opcodes.ACC_PUBLIC, "setDirection", memberDescriptor, null, null).visitEnd();
+        var setter = contextWriter.visitMethod(Opcodes.ACC_PUBLIC, "setDirection", memberDescriptor, null, null);
+        setter.visitCode();
+        setter.visitInsn(Opcodes.RETURN);
+        setter.visitMaxs(0, 2);
+        setter.visitEnd();
         contextWriter.visitField(Opcodes.ACC_PUBLIC, "direction", fieldDescriptor, null, null).visitEnd();
         contextWriter.visitEnd();
 
