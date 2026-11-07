@@ -10,15 +10,22 @@ import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.ItemStack;
+import net.neoforged.fml.loading.LoadingModList;
 import net.neoforged.neoforge.network.connection.ConnectionType;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.kylepitcock.legacyconnector.core.network.LegacyBuffers;
 
+import java.util.List;
+import java.util.Map;
+
 class RegistryFriendlyBuffers1201Test {
     @BeforeAll
     static void bootstrapMinecraftRegistries() {
         SharedConstants.tryDetectVersion();
+        // NeoForge's feature-flag bootstrap expects the FML loading-list singleton.
+        // These codec tests do not load mods, so install an empty list before vanilla bootstrap.
+        LoadingModList.of(List.of(), List.of(), List.of(), List.of(), Map.of());
         Bootstrap.bootStrap();
     }
 
