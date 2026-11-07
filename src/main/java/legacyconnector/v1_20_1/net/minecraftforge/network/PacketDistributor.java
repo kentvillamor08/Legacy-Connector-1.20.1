@@ -2,6 +2,8 @@ package legacyconnector.v1_20_1.net.minecraftforge.network;
 
 import java.util.Objects;
 import java.util.function.Supplier;
+import java.util.function.Function;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
@@ -29,8 +31,23 @@ public final class PacketDistributor<T> {
         return new PacketTarget(this, Objects.requireNonNull(value, "value"));
     }
 
+    private RegistryAccess registryAccess(Object supplied) {
+        if (target == Target.PLAYER && supplied instanceof ServerPlayer player) {
+            return player.level().registryAccess();
+        }
+        if (target == Target.TRACKING_ENTITY_AND_SELF
+                && supplied instanceof Entity entity
+                && entity.level() instanceof net.minecraft.server.level.ServerLevel level) {
+            return level.registryAccess();
+        }
+        throw new IllegalArgumentException("Packet target has no server registry context");
+    }
+
     private void send(Supplier<T> value, Packet<?> packet) {
-        Object supplied = Objects.requireNonNull(value.get(), "packet target supplier returned null");
+        sendResolved(Objects.requireNonNull(value.get(), "packet target supplier returned null"), packet);
+    }
+
+    private void sendResolved(Object supplied, Packet<?> packet) {
         if (target == Target.PLAYER) {
             if (!(supplied instanceof ServerPlayer player)) {
                 throw new IllegalArgumentException("PLAYER target requires a ServerPlayer");
@@ -60,6 +77,14 @@ public final class PacketDistributor<T> {
 
         public void send(Packet<?> packet) {
             distributor.sendUnchecked(value, Objects.requireNonNull(packet, "packet"));
+        }
+
+        /** Builds the packet with the target's active server registries and evaluates the target supplier once. */
+        public void sendWithRegistryAccess(Function<RegistryAccess, Packet<?>> packetFactory) {
+            Object supplied = Objects.requireNonNull(value.get(), "packet target supplier returned null");
+            RegistryAccess registries = distributor.registryAccess(supplied);
+            Packet<?> packet = Objects.requireNonNull(packetFactory.apply(registries), "packet factory returned null");
+            distributor.sendResolved(supplied, packet);
         }
 
         public NetworkDirection getDirection() {

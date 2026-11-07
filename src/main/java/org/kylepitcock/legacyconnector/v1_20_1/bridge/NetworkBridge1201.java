@@ -13,6 +13,7 @@ import java.util.function.Supplier;
 import net.minecraft.network.Connection;
 import net.minecraft.network.ConnectionProtocol;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketFlow;
 import net.minecraft.server.level.ServerLevel;
@@ -51,6 +52,12 @@ public final class NetworkBridge1201 {
     }
 
     public interface ClientTransport {
+        /** Whether the active PLAY connection has the outer Legacy Connector carrier. */
+        boolean isReady();
+
+        /** Active client registry access; called only after isReady() succeeds. */
+        RegistryAccess registryAccess();
+
         /** Send only when the active connection negotiated LegacyPayload.TYPE in PLAY. */
         boolean sendIfReady(LegacyPayload payload);
     }
@@ -90,9 +97,20 @@ public final class NetworkBridge1201 {
     public static void sendToServer(LegacyPayload payload) {
         ClientTransport transport = clientTransport;
         if (transport == null) throw new IllegalStateException("Client PLAY transport has not been installed");
-        if (!transport.sendIfReady(payload)) {
+        if (!transport.isReady() || !transport.sendIfReady(payload)) {
             LOGGER.debug("Skipping Forge 1.20.1 send: server did not negotiate the Legacy Connector PLAY carrier");
         }
+    }
+
+    /** Encode a serverbound message with the active client's registry context. */
+    public static void sendToServer(Channel channel, Object message) {
+        ClientTransport transport = clientTransport;
+        if (transport == null) throw new IllegalStateException("Client PLAY transport has not been installed");
+        if (!transport.isReady()) {
+            LOGGER.debug("Skipping Forge 1.20.1 send: no negotiated Legacy Connector PLAY connection");
+            return;
+        }
+        sendToServer(encode(channel, message, transport.registryAccess()));
     }
 
     public static void sendToPlayerIfCarrierPresent(ServerPlayer player, Packet<?> packet) {
@@ -143,11 +161,11 @@ public final class NetworkBridge1201 {
         return definition;
     }
 
-    public static LegacyPayload encode(Channel channel, Object message) {
+    public static LegacyPayload encode(Channel channel, Object message, RegistryAccess registryAccess) {
         MessageDefinition definition = requireMessage(channel, message);
         ByteBuf raw = LegacyBuffers.buffer();
         try {
-            FriendlyByteBuf buffer = new FriendlyByteBuf(raw);
+            FriendlyByteBuf buffer = RegistryFriendlyBuffers1201.wrap(raw, registryAccess);
             definition.encode(message, buffer);
             byte[] data = new byte[raw.readableBytes()];
             raw.getBytes(raw.readerIndex(), data);
@@ -183,7 +201,7 @@ public final class NetworkBridge1201 {
 
         ByteBuf raw = LegacyBuffers.wrap(payload.data());
         try {
-            FriendlyByteBuf buffer = new FriendlyByteBuf(raw);
+            FriendlyByteBuf buffer = RegistryFriendlyBuffers1201.wrap(raw, context.player().level().registryAccess());
             Object decoded = definition.decode(buffer);
             if (!definition.messageType.isInstance(decoded)) {
                 throw new IllegalArgumentException("Decoder returned an unexpected message type");

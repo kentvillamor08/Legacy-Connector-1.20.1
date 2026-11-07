@@ -35,9 +35,10 @@ public final class SimpleChannel {
         if (definition.direction() != direction) {
             throw new IllegalArgumentException("Message direction does not match PacketDistributor target");
         }
-        CustomPacketPayload payload = NetworkBridge1201.encode(channel, message);
-        Packet<?> packet = new ClientboundCustomPayloadPacket(payload);
-        target.send(packet);
+        target.sendWithRegistryAccess(registryAccess -> {
+            CustomPacketPayload payload = NetworkBridge1201.encode(channel, message, registryAccess);
+            return new ClientboundCustomPayloadPacket(payload);
+        });
     }
 
     public <M> void sendToServer(M message) {
@@ -45,7 +46,7 @@ public final class SimpleChannel {
         if (definition.direction() != NetworkDirection.PLAY_TO_SERVER) {
             throw new IllegalArgumentException("sendToServer requires a PLAY_TO_SERVER message");
         }
-        NetworkBridge1201.sendToServer(NetworkBridge1201.encode(channel, message));
+        NetworkBridge1201.sendToServer(channel, message);
     }
 
     public static final class MessageBuilder<M> {
