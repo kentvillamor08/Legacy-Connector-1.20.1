@@ -2,6 +2,7 @@ package org.kylepitcock.legacyconnector.v1_20_1.bridge;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.netty.buffer.ByteBuf;
@@ -48,7 +49,7 @@ class RegistryFriendlyBuffers1201Test {
         ByteBuf raw = LegacyBuffers.buffer();
         try {
             RegistryFriendlyByteBuf buffer = RegistryFriendlyBuffers1201.wrap(raw, RegistryAccess.EMPTY);
-            ItemStackCodec1201.writeOptional(buffer, ItemStack.EMPTY);
+            assertSame(buffer, ItemStackCodec1201.writeOptional(buffer, ItemStack.EMPTY));
             ItemStack decoded = ItemStackCodec1201.readOptional(buffer);
             assertTrue(decoded.isEmpty());
         } finally {
@@ -61,7 +62,7 @@ class RegistryFriendlyBuffers1201Test {
         ByteBuf raw = LegacyBuffers.buffer();
         try {
             RegistryFriendlyByteBuf buffer = RegistryFriendlyBuffers1201.wrap(raw, RegistryAccess.EMPTY);
-            ItemStackCodec1201.writeOptional(buffer, null);
+            assertSame(buffer, ItemStackCodec1201.writeOptional(buffer, null));
             assertTrue(ItemStackCodec1201.readOptional(buffer).isEmpty());
         } finally {
             raw.release();
