@@ -15,6 +15,8 @@ import org.kylepitcock.legacyconnector.core.LegacyLifecycle;
 import org.kylepitcock.legacyconnector.core.LegacyMods;
 import org.kylepitcock.legacyconnector.core.data.CompatComponents;
 import org.kylepitcock.legacyconnector.core.network.LegacyNetwork;
+import org.kylepitcock.legacyconnector.v1_20_1.bridge.NetworkBridge1201;
+import org.kylepitcock.legacyconnector.v1_20_1.client.NetworkBridge1201Client;
 import org.kylepitcock.legacyconnector.core.pack.CoreData;
 import org.kylepitcock.legacyconnector.core.pack.GeneratedPack;
 import org.kylepitcock.legacyconnector.core.worldgen.LegacyWorldGenFeature;
@@ -93,6 +95,7 @@ public final class LegacyConnector {
 
     public LegacyConnector(IEventBus modBus, ModContainer container) {
         org.kylepitcock.legacyconnector.core.DirectMemoryGuard.start();
+        NetworkBridge1201.bootstrap();
         org.kylepitcock.legacyconnector.core.LegacyLogFilter.install();
         org.kylepitcock.legacyconnector.core.EntityCensus.register();
         LegacyMods.registerPlatform(new Platform1710());
@@ -123,6 +126,7 @@ public final class LegacyConnector {
         if (net.neoforged.fml.ModList.get().isLoaded("create")) org.kylepitcock.legacyconnector.compat.create.CreateCompat.init();
         if (FMLEnvironment.dist.isClient()) org.kylepitcock.legacyconnector.v1_7_10.client.Client1710.register(modBus);
         if (FMLEnvironment.dist.isClient()) org.kylepitcock.legacyconnector.v1_12_2.client.Client1122.register(modBus);
+        if (FMLEnvironment.dist.isClient()) NetworkBridge1201Client.register();
         if (FMLEnvironment.dist.isClient()) org.kylepitcock.legacyconnector.core.pack.ModernizedTextures.register();
         // LOWEST: legacy loading runs after every modern mod registered its own entries for that registry.
         modBus.addListener(EventPriority.LOWEST, LegacyLifecycle::onRegister);
