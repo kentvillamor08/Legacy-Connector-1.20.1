@@ -10,9 +10,11 @@ public final class ItemStackCodec1201 {
     private ItemStackCodec1201() {}
 
     /** Writes an optional stack; null legacy slots are normalized to ItemStack.EMPTY. */
-    public static void writeOptional(FriendlyByteBuf buffer, ItemStack stack) {
+    public static FriendlyByteBuf writeOptional(FriendlyByteBuf buffer, ItemStack stack) {
         RegistryFriendlyByteBuf registryBuffer = requireRegistryBuffer(buffer);
         ItemStack.OPTIONAL_STREAM_CODEC.encode(registryBuffer, stack == null ? ItemStack.EMPTY : stack);
+        // Match FriendlyByteBuf#writeItem's fluent return so a transformed call keeps its stack shape.
+        return buffer;
     }
 
     /** Reads an optional stack using the registry view attached to the PLAY buffer. */
