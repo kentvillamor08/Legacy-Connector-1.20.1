@@ -9,11 +9,16 @@ final class Forge1211TargetMethodAliases {
     static final String TARGET_MINECRAFT_VERSION = "1.21.1";
 
     private static final String RESOURCE_LOCATION = "net/minecraft/resources/ResourceLocation";
-    private static final String DESCRIPTOR =
+    private static final String RESOURCE_LOCATION_DESCRIPTOR =
             "(Ljava/lang/String;Ljava/lang/String;)Lnet/minecraft/resources/ResourceLocation;";
+    private static final String ENTITY_DIMENSIONS = "net/minecraft/world/entity/EntityDimensions";
+    private static final String WITH_EYE_HEIGHT_DESCRIPTOR =
+            "(F)Lnet/minecraft/world/entity/EntityDimensions;";
     private static final Map<MethodKey, String> METHOD_ALIASES = Map.of(
-            new MethodKey(RESOURCE_LOCATION, "m_339182_", DESCRIPTOR),
-            "fromNamespaceAndPath");
+            new MethodKey(RESOURCE_LOCATION, "m_339182_", RESOURCE_LOCATION_DESCRIPTOR),
+            "fromNamespaceAndPath",
+            new MethodKey(ENTITY_DIMENSIONS, "m_320568_", WITH_EYE_HEIGHT_DESCRIPTOR),
+            "withEyeHeight");
 
     private Forge1211TargetMethodAliases() {}
 
