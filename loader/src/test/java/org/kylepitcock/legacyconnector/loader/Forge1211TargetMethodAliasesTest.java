@@ -336,8 +336,8 @@ final class Forge1211TargetMethodAliasesTest {
         Path methodsCsv = temporaryDirectory.resolve("holder-methods.csv");
         Path fieldsCsv = temporaryDirectory.resolve("holder-fields.csv");
         Files.writeString(methodsCsv,
-                "searge,name,side,desc\\n" + "m_203334_,SHOULD_NOT_APPLY,0,\\n");
-        Files.writeString(fieldsCsv, "searge,name,side,desc\\nf_12345_,SAMPLE_FIELD,0,\\n");
+                "searge,name,side,desc\n" + "m_203334_,SHOULD_NOT_APPLY,0,\n");
+        Files.writeString(fieldsCsv, "searge,name,side,desc\nf_12345_,SAMPLE_FIELD,0,\n");
 
         Forge1201SrgNameMappings mappings = Forge1201SrgNameMappings.load(methodsCsv, fieldsCsv);
         Forge1211TargetMethodAliases.Normalization aliases =
