@@ -108,6 +108,98 @@ final class Forge1211TargetMethodAliasesTest {
         assertTrue(verified.methodIssues().isEmpty());
     }
 
+    @Test
+    void aliasesOnlyTheExactEntityDimensionsWithEyeHeightSignature() {
+        String owner = "net/minecraft/world/entity/EntityDimensions";
+        String otherOwner = "net/minecraft/world/entity/OtherDimensions";
+        String targetName = "m_320568_";
+        String readableName = "withEyeHeight";
+        String descriptor = "(F)Lnet/minecraft/world/entity/EntityDimensions;";
+        String wrongDescriptor = "(D)Lnet/minecraft/world/entity/EntityDimensions;";
+        Forge1201ApiUsageAnalyzer.Analysis source = analysis(
+                List.of(
+                        new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                owner, targetName, descriptor, 2),
+                        new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                otherOwner, targetName, descriptor, 1),
+                        new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                owner, targetName, wrongDescriptor, 1)),
+                List.of(
+                        callSite(owner, targetName, descriptor),
+                        callSite(otherOwner, targetName, descriptor),
+                        callSite(owner, targetName, wrongDescriptor)));
+
+        Forge1211TargetMethodAliases.Normalization result =
+                Forge1211TargetMethodAliases.normalize(source);
+
+        assertEquals(readableName, result.analysis().methodReferences().get(0).name());
+        assertEquals(targetName, result.analysis().methodReferences().get(1).name());
+        assertEquals(targetName, result.analysis().methodReferences().get(2).name());
+        assertEquals(readableName, result.analysis().methodCallSites().get(0).targetName());
+        assertEquals(targetName, result.analysis().methodCallSites().get(1).targetName());
+        assertEquals(targetName, result.analysis().methodCallSites().get(2).targetName());
+        assertEquals(1, result.methodAliases().size());
+        assertTrue(result.methodAliases().get(0).endsWith(" -> " + readableName + descriptor));
+    }
+
+    @Test
+    void entityDimensionsTargetAliasRunsBeforeSourceVersionSrgNormalization() throws Exception {
+        String owner = "net/minecraft/world/entity/EntityDimensions";
+        String descriptor = "(F)Lnet/minecraft/world/entity/EntityDimensions;";
+        Path methodsCsv = temporaryDirectory.resolve("dimensions-methods.csv");
+        Path fieldsCsv = temporaryDirectory.resolve("dimensions-fields.csv");
+        Files.writeString(methodsCsv,
+                "searge,name,side,desc\\n" + "m_320568_,SHOULD_NOT_APPLY,0,\\n");
+        Files.writeString(fieldsCsv, "searge,name,side,desc\\nf_12345_,SAMPLE_FIELD,0,\\n");
+
+        Forge1201SrgNameMappings mappings = Forge1201SrgNameMappings.load(methodsCsv, fieldsCsv);
+        Forge1211TargetMethodAliases.Normalization aliases =
+                Forge1211TargetMethodAliases.normalize(analysis(
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                owner, "m_320568_", descriptor, 1)),
+                        List.of(callSite(owner, "m_320568_", descriptor))));
+        Forge1201SrgNameMappings.Normalization normalized = mappings.normalize(aliases.analysis());
+
+        assertEquals("withEyeHeight", normalized.analysis().methodReferences().get(0).name());
+        assertEquals("withEyeHeight", normalized.analysis().methodCallSites().get(0).targetName());
+        assertTrue(normalized.unmappedMethods().isEmpty());
+        assertTrue(normalized.methodMappings().isEmpty());
+        assertEquals(1, aliases.methodAliases().size());
+    }
+
+    @Test
+    void aliasedWithEyeHeightMethodMatchesTheTargetClassFileStructurally() throws Exception {
+        String owner = "net/minecraft/world/entity/EntityDimensions";
+        String descriptor = "(F)Lnet/minecraft/world/entity/EntityDimensions;";
+        Forge1211TargetMethodAliases.Normalization aliases =
+                Forge1211TargetMethodAliases.normalize(analysis(
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                owner, "m_320568_", descriptor, 1)),
+                        List.of()));
+
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL,
+                owner, null, "java/lang/Object", null);
+        var method = writer.visitMethod(Opcodes.ACC_PUBLIC, "withEyeHeight", descriptor, null, null);
+        method.visitCode();
+        method.visitInsn(Opcodes.ACONST_NULL);
+        method.visitInsn(Opcodes.ARETURN);
+        method.visitMaxs(1, 2);
+        method.visitEnd();
+        writer.visitEnd();
+
+        byte[] targetClass = writer.toByteArray();
+        Forge1201TargetApiVerifier.Result verified = Forge1201TargetApiVerifier.verify(
+                aliases.analysis(),
+                internalName -> owner.equals(internalName) ? new ByteArrayInputStream(targetClass) : null);
+
+        assertEquals(1, verified.candidateClassCount());
+        assertEquals(1, verified.verifiedClassCount());
+        assertEquals(1, verified.uniqueMethodReferences());
+        assertEquals(1, verified.verifiedMethodReferences());
+        assertTrue(verified.methodIssues().isEmpty());
+    }
+
     private static Forge1201ApiUsageAnalyzer.ApiMethodCallSite callSite(
             String owner, String name, String descriptor) {
         return new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
