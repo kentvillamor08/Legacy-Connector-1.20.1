@@ -14,11 +14,21 @@ final class Forge1211TargetMethodAliases {
     private static final String ENTITY_DIMENSIONS = "net/minecraft/world/entity/EntityDimensions";
     private static final String WITH_EYE_HEIGHT_DESCRIPTOR =
             "(F)Lnet/minecraft/world/entity/EntityDimensions;";
+    private static final String FLOAT_ACCESSOR_DESCRIPTOR = "()F";
+    private static final String BOOLEAN_ACCESSOR_DESCRIPTOR = "()Z";
     private static final Map<MethodKey, String> METHOD_ALIASES = Map.of(
             new MethodKey(RESOURCE_LOCATION, "m_339182_", RESOURCE_LOCATION_DESCRIPTOR),
             "fromNamespaceAndPath",
             new MethodKey(ENTITY_DIMENSIONS, "m_320568_", WITH_EYE_HEIGHT_DESCRIPTOR),
-            "withEyeHeight");
+            "withEyeHeight",
+            new MethodKey(ENTITY_DIMENSIONS, "f_20377_", FLOAT_ACCESSOR_DESCRIPTOR),
+            "width",
+            new MethodKey(ENTITY_DIMENSIONS, "f_20378_", FLOAT_ACCESSOR_DESCRIPTOR),
+            "height",
+            new MethodKey(ENTITY_DIMENSIONS, "f_20379_", BOOLEAN_ACCESSOR_DESCRIPTOR),
+            "fixed",
+            new MethodKey(ENTITY_DIMENSIONS, "f_316573_", FLOAT_ACCESSOR_DESCRIPTOR),
+            "eyeHeight");
 
     private Forge1211TargetMethodAliases() {}
 
