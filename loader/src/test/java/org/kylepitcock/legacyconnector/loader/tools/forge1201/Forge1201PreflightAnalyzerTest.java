@@ -121,7 +121,7 @@ final class Forge1201PreflightAnalyzerTest {
         assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("Source SRG -> Minecraft 1.20.1 Mojang member names:"));
         assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("not a compatibility approval"));
         assertTrue(first.limitations().stream().anyMatch(value ->
-                value.contains("outer JAR") && value.contains("nested archive class bytecode")));
+                value.contains("outer source JAR") && value.contains("source-nested Forge/library archives")));
         assertTrue(first.limitations().stream().anyMatch(value -> value.contains("API compatibility are not verified")));
     }
 
