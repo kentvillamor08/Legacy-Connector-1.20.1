@@ -447,7 +447,7 @@ This validates the nested oversized-class warning-summary fix. The console excer
 
 Repository: kentvillamor08/Legacy-Connector-1.20.1
 Branch: feat/forge1201-preflight-analyzer
-Latest code/test commit before this documentation update: 3c01dc6d6361d7140324265d30df8f1eb5880a6f
+The annotation fixture lifecycle correction is `3c01dc6d6361d7140324265d30df8f1eb5880a6f`; a final assertion that annotation rows retain the supplied nested archive path and class-entry path was added in `ba52f6ae643b2720655450551c480ebfa2edf094`.
 
 Key source changes:
 
@@ -480,3 +480,5 @@ Review the complete output. Do not generate the new Symbiote report before this 
 After a green gate: review/finish duplicate raw-ZIP-entry and deep nested ConstantDynamic/depth-limit tests; generate a new uniquely suffixed Symbiote Schema 1.3 JSON/text report (never overwrite Slice 2 run-3); inspect all nested/SRG/annotation evidence; then run the consolidated clean build. Runtime launch/gameplay compatibility remains unverified.
 
 Keep Palladium + Alien Evolution paused and isolated from this Universal branch. Preserve the goal of a reusable, modpack-ready Forge 1.20.1-to-NeoForge 1.21.1 compatibility platform, not one-off mod-specific hacks.
+
+The final annotation provenance assertion commit `ba52f6ae643b2720655450551c480ebfa2edf094` is part of the same untested ClassRemapper batch. The exact pull target is the latest branch SHA recorded by the testbench handoff after this plan update.
