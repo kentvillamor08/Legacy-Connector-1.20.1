@@ -425,3 +425,8 @@ The integration test initially retained an assertion for the previous Slice 3 li
 ### Generated mapping-resource test wiring — 2026-11-14
 
 Commit 0c7c55b72033c986d94f1cba5d836dfce26e95a0 updates loader/build.gradle so the loader test task depends on genSrgMojang and adds srgMojangDir to the test runtime classpath. The generated mapping table is not a committed source resource: SrgMojangTable.load() returns an empty map when that resource is absent. A clean forced loader test therefore runs the existing fetchMojangMappings1201 task (pinned Mojang client mapping URL) followed by genSrgMojang1201 before tests. The build wiring is committed but has not yet been exercised by the user.
+
+
+## 2026-11-14 — Oversized nested-class summary warning regression
+
+The user pulled commit `1c403bcc93f3e2c1d57215aea7e41419f29e1ed3` and ran the forced clean loader test gate. JUnit completed 454 tests with one failure at `Forge1201PreflightAnalyzerTest.java:144`, in `reportsOversizedNestedClassEntriesAsExplicitlySkipped()`. The oversized class was correctly counted as skipped and the archive snapshot correctly emitted the limit warning, but the per-archive `ClassScanSummary.warnings()` did not include snapshot class-entry warnings. The fix is committed in `54afdec3350bd31cf0ca8f5df63017f45a0e8af0`; the accompanying Slice 3 design documentation is committed in `0c22c684f984f20e8404f91cadcf65dcbd75818b`. Current branch tip after these commits: `0c22c684f984f20e8404f91cadcf65dcbd75818b`. User test gate for this fix is pending. Do not generate the Symbiote Schema 1.3 report before it passes.
