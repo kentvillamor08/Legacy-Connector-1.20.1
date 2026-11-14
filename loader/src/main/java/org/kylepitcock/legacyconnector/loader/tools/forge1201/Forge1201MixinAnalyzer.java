@@ -1433,12 +1433,9 @@ public final class Forge1201MixinAnalyzer {
         };
     }
 
-    /** Mixin 0.8.5 AP removes whitespace from source references before storing refmap keys. */
+    /** Mirrors Mixin 0.8.5 ReferenceMapper.addMapping's exact source-key normalization. */
     private static String normalizeRefmapReferenceKey(String raw) {
-        if (raw == null) return null;
-        StringBuilder result = new StringBuilder(raw.length());
-        raw.codePoints().filter(Character::isWhitespace).forEach(result::appendCodePoint);
-        return result.toString();
+        return raw == null ? null : raw.replaceAll("\\s", "");
     }
 
     private static RefmapResourceFinding refmapResourceFailure(
