@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Compatibility Analyzer
 
-**Status:** Slice 1 implemented and archived; Slice 2 implementation committed, focused loader tests passed, and the real Symbiote 1.1.3 Schema 1.1 / Analyzer 1.1.0 JSON+text report generated and inspected; consolidated build and dependency-graph corrections remain pending
+**Status:** Slice 1 implemented and archived; Slice 2 host-provider and NeoForge dependency-type corrections are committed as Schema 1.2 / Analyzer 1.2.0; forced local tests, the corrected real-JAR report, and the consolidated clean build are pending
 
 **Report filename rule:** every analyzer output filename includes its slice number, e.g. `symbiote-1.1.3.jar-slice-2.json` and `symbiote-1.1.3.jar-slice-2.txt`. Repeated runs append a run number, e.g. `symbiote-1.1.3.jar-slice-2-run-2.json` and `.txt`. Use the root Gradle task's explicit `-PpreflightJson=<path>` and `-PpreflightText=<path>` options. Never overwrite the unsuffixed legacy root filenames or an earlier slice/run. The testbench archive index is `archive/preflight/README.md`.
   
@@ -227,13 +227,15 @@ The focused loader tests are confirmed passing as recorded above. Treat the real
 
 **Already completed:** the focused loader tests passed at source HEAD `e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb`. The latest root testbench JSON/text are the actual Slice 2 report and have been parsed/reviewed. They are archived immutably at `archive/preflight/slice-2/`. Do not regenerate or overwrite them.
 
-**Review findings requiring a code/test correction before accepting Slice 2:**
-1. The graph reports the `neoforge` dependency as `REQUIRED_MISSING` for installed NeoForge mods including Architectury, AzureLib, GeckoLib, KubeJS, and nested Better Advanced Tooltips. The selected host is NeoForge 21.1.258. The resolver must treat the target NeoForge loader as a host provider and evaluate its version against each declared range rather than searching only in the installed mod archive list. Add synthetic tests for satisfying and unsatisfying NeoForge host ranges.
-2. KubeJS dependency edges for `emi`, `jei`, and `roughlyenoughitems` are recorded with `mandatory=true`. Inspect actual KubeJS metadata and compare its `mandatory` values with the parser; do not change optional/required semantics without evidence.
-3. GeckoLib's `geckoanimfix` edge is also `mandatory=true`; verify its metadata before deciding whether it is truly required.
-4. Qualified versions such as Rhino `2101.2.8-build.91` and Better Advanced Tooltips `2101.1.0-build.1` remain `UNPARSEABLE`. Keep the uncertainty explicit; do not treat them as verified matches.
+**Slice 2 correction implementation — committed; local validation pending:**
+1. `minecraft` and `neoforge` are now treated as host-provided dependencies, not searched for among installed mod archives. Their version ranges are evaluated against target Minecraft `1.21.1` and NeoForge `21.1.258`; an out-of-range host version emits `HOST_VERSION_MISMATCH`. Unknown or qualified ranges remain `UNPARSEABLE`.
+2. NeoForge metadata uses `type` rather than Forge's legacy `mandatory` key. The inspector now preserves `REQUIRED`, `OPTIONAL`, `INCOMPATIBLE`, `DISCOURAGED`, and `UNKNOWN`; absent NeoForge `type` defaults to `REQUIRED`. The graph reports incompatible/discouraged presence separately rather than incorrectly treating those relations as required dependencies.
+3. Existing Forge `mandatory=true/false` metadata continues to map to required/optional. The old four-argument archive-graph entry point remains available; the preflight analyzer supplies both target host versions.
+4. Qualified versions such as Rhino `2101.2.8-build.91`, Better Advanced Tooltips `2101.1.0-build.1`, and prerelease NeoForge bounds remain explicitly unverified. Do not silently coerce them to numeric versions.
 
-After implementing the fixes, run the forced loader test gate in the Universal worktree on the intended branch, then generate a new report pair using explicit `-PpreflightJson` / `-PpreflightText` paths ending in `symbiote-1.1.3.jar-slice-2-run-2.json` and `symbiote-1.1.3.jar-slice-2-run-2.txt` under the testbench root. Never overwrite the archived Slice 1 or Slice 2 reports or the canonical Slice 2 filenames. When reviewing the rerun, preserve the original Symbiote SHA-256 `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c` and saved input paths from the continuation handoff. Use `-run-3` for any further rerun.
+**Validation still required:** the user must run the forced loader tests, inspect the corrected Schema 1.2 / Analyzer 1.2.0 real-JAR report, and run the consolidated clean build. No successful validation is claimed for this correction yet.
+
+After implementing the fixes, run the forced loader test gate in the Universal worktree on the intended branch, then generate a new report pair using explicit `-PpreflightJson` / `-PpreflightText` paths ending in `symbiote-1.1.3.jar-slice-2-run-3.json` and `symbiote-1.1.3.jar-slice-2-run-3.txt` under the testbench root. The `-run-2` filenames have now been used and must not be overwritten, even though their content was identical to the earlier Slice 2 report. Never overwrite the archived Slice 1 or Slice 2 reports or canonical Slice 2 filenames. When reviewing the rerun, preserve the original Symbiote SHA-256 `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c` and saved input paths from the continuation handoff. Use `-run-4` for any further rerun.
 
 If the corrected report is consistent and tests pass, run the consolidated clean build:
 ```powershell
