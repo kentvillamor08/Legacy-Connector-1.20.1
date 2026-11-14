@@ -387,7 +387,7 @@ public final class Forge1201PreflightAnalyzer {
                 "Reflection/resource string candidates remain heuristic and are not treated as confirmed bytecode references.",
                 "Installed provider discovery records top-level and nested archive paths, mod IDs, and declared versions. A provider ID/version match does not establish API or behavioral compatibility; installed version ranges and API compatibility are not verified.",
                 "Maven-style version ranges with numeric dotted versions are evaluated conservatively. Qualified or otherwise unsupported version strings remain explicitly unverified.",
-                "Target class/member verification, shim behavior checks, translated-resource comparison, and runtime feedback are later analyzer slices."
+                "General source API reference-to-target member verification, shim behavior checks, translated-resource comparison, and runtime feedback remain later analyzer slices. The current Mixin class-presence check is limited to statically mapped @Mixin class targets and does not validate target members or injection semantics."
         );
 
         return new PreflightResult(
