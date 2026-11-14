@@ -227,3 +227,14 @@ The new code/test batch has not yet been run by the user. Do not claim compilati
 4. Add/confirm deep nested ConstantDynamic recursion and depth-limit coverage.
 5. After tests pass, generate a uniquely suffixed Symbiote Schema 1.3 JSON/text report; never overwrite Slice 2 run-3. Review nested archive class counts, annotation/dynamic references, SRG mapped/unmapped evidence and warnings.
 6. Run the consolidated clean build. Runtime launch/gameplay compatibility remains a separate unverified gate.
+## Duplicate ZIP entries and deep ConstantDynamic regression coverage — 2026-11-14
+
+### Added synthetic tests (pending user test gate)
+
+- `reportsDuplicateNestedClassEntryNamesAsAmbiguousAndSkipsAllCopies()` builds a raw ZIP byte stream with two local-file records and two central-directory records for the same class-entry name. This intentionally avoids ZipOutputStream, which rejects duplicate entry names before the archive reader can be tested. The regression asserts both copies are discovered, neither is scanned, both are counted as skipped, the per-archive warning names the duplicated class path, and no bytecode references from that ambiguous class leak into the result.
+- `recordsDeepConstantDynamicNestingAndExplicitlyStopsAtTheDepthLimit()` creates a nested ConstantDynamic chain with 17 nodes. It asserts all 17 constants at depths 0 through 16 are recorded and the attempted value at depth 17 becomes exactly one VALUE_DEPTH_LIMIT finding. It checks the repeated constant-argument path and full archive/class provenance.
+- The earlier one-level ConstantDynamic bootstrap-argument case remains in the main deterministic inventory fixture.
+
+Latest test source commit for these two edge cases: `ba8428932da023f9c527a6b6eb0d6056626a88bb` (includes exact recursion-boundary assertion).
+
+These tests have not yet been run locally. Keep the Schema 1.3 real Symbiote report blocked until the complete forced loader test gate passes on the latest branch tip.
