@@ -1,4 +1,4 @@
-**Status:** Slices 1–3 are implemented, the focused Slice 3 forced loader test gate passed at `b0d2b7b68915137aed44ef9153fdfa304fa5819`, the real Symbiote Schema 1.3 / Analyzer 1.3.0 report is generated/inspected, and the user-confirmed consolidated clean build passed at Universal source/docs tip `3e1291494b6c10cc58b2c54be8978df972e6cd68` (`BUILD SUCCESSFUL in 1m 23s`, 33 actionable tasks: 24 executed, 9 from cache). Slice 4 Mixin analysis is now the next milestone; its design is documented in [`docs/FORGE1201-PREFLIGHT-SLICE-4-MIXIN-DESIGN.md`](FORGE1201-PREFLIGHT-SLICE-4-MIXIN-DESIGN.md). No Slice 4 source implementation is claimed yet.
+**Status:** Slices 1–3 are implemented and validated, including the real Symbiote Schema 1.3 / Analyzer 1.3.0 report and the user-confirmed consolidated clean build. Slice 4 Mixin analysis is in progress: the shared target verifier now exposes a reusable per-run, descriptor-aware target index, and focused synthetic ASM tests have been added. Those new tests still require the user's forced loader test run; the Mixin analyzer/result model, config/refmap/selector analysis, and preflight integration remain unimplemented.
 
 **Status:** Slices 1 and 2 are implemented and validated. The first Slice 3 dynamic-reference batch passed the user's forced focused loader test gate at `4457199a4109d774b25a428e7c68e23b4ec3b4ce` (`BUILD SUCCESSFUL in 24s`, 12/12 tasks executed). The nested-bytecode/SRG integration was committed as a494d20a3be797abd3de563fa3672df69e2276da; its stale limitation assertion was corrected in 3c6febb075c32391b6879b0f3ef00c5856e80d51; and test runtime mapping-resource wiring was added in 0c7c55b72033c986d94f1cba5d836dfce26e95a0. The test/runtime wiring checkpoint is 0c7c55b72033c986d94f1cba5d836dfce26e95a0; the branch may include a later documentation-only commit. Use the exact remote tip in the testbench handoff for the guarded pull. Structural reference coverage remains under audit.
 
@@ -114,6 +114,13 @@ Provide both:
 - Check target classes, mixin classes, shadow/accessor/invoker targets, injection target names and descriptors, `@At`, slice `from`/`to`, and handler descriptors.
 - Report mixin plugins/refmaps/dynamic targets as requiring manual or runtime validation when static resolution is not authoritative.
 - Compare target classes against the pinned NeoForge/Minecraft 1.21.1 index.
+
+### Slice 4 implementation checkpoint — target index API (2026-11-14)
+
+- Source commit `e3aa921d01d8ee134de3a71d3aa1016d249dbaf1` exposes `Forge1201TargetApiVerifier.TargetIndex`, backed by the existing target verifier's per-instance cache and exact descriptor-aware inherited lookup.
+- Test commit `69a93e13183466e51a6bab8023eecb0bb906e5e9` adds synthetic ASM tests for exact method/field descriptors, inherited lookup, missing classes, incomplete hierarchies, and independent index instances.
+- These tests are authored but not yet run. First pull the latest feature-branch commits and run the forced loader test gate.
+- Next implementation after that gate: add the state-free `Forge1201MixinAnalyzer` result API and bounded config/mixin-class discovery, then incrementally add target annotations, member annotations, injectors, `@At`/slices, refmaps/plugins, nested archive provenance, and unified preflight reporting. Do not duplicate target hierarchy logic or create another unbounded ZIP walker.
 
 ### Slice 5 — shared migration/bridge/shim coverage
 
