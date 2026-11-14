@@ -1,4 +1,4 @@
-**Current checkpoint — 2026-11-14:** Slice 4 Mixin preflight has passed the user-forced loader test gate through Schema 1.7 at commit 267db731f7b16b30498f3402daf83bcb340849d1 (BUILD SUCCESSFUL in 39s; 14/14 actionable tasks executed). Schema 1.8 adds source-side @Slice from/to boundary inventory, explicit/default provenance, and JSON/text reporting. Its implementation is committed at 0dc6ae5b7d4497e341ef2968040f08ef124bdb3a; local Gradle verification is pending. This is source metadata capture only: no target instruction order, slice validity, or injection success is asserted.
+**Current checkpoint — 2026-11-14:** Slice 4 Mixin preflight has passed the user-forced loader test gate through Schema 1.8 at commit `4b4f9ce437671f08eafd3f9cf4a18e34a3d24284` (`BUILD SUCCESSFUL in 33s; 14/14 actionable tasks executed`). Schema 1.8 adds source-side `@Slice` `from`/`to` boundary inventory, explicit/default provenance, and JSON/text reporting. This validates the loader test suite only; target instruction order, slice validity, Mixin application, and runtime compatibility are not asserted. The next bounded Mixin task is a contract/design investigation of semantic refmap interpretation using explicit, versioned mapping inputs.
 
 **Historical status notes below describe earlier checkpoints. The newest dated entries at the end of this file control the current status.**
 
@@ -970,3 +970,35 @@ Implementation commit: 0dc6ae5b7d4497e341ef2968040f08ef124bdb3a.
 ### Exact next action
 
 The user's last confirmed local Universal checkout is expected clean at 267db731f7b16b30498f3402daf83bcb340849d1. Verify branch, local HEAD, clean worktree, remote SHA, and then fast-forward exactly to the current feature-branch tip before running the forced loader gate. Do not run the full clean build as a substitute for this focused gate.
+
+
+---
+
+## 2026-11-14 — Schema 1.8 @Slice boundary inventory passed the user loader test gate
+
+The user confirmed local branch `feat/forge1201-preflight-analyzer` at commit `4b4f9ce437671f08eafd3f9cf4a18e34a3d24284`. Branch, local HEAD, clean-worktree, remote SHA, fast-forward, post-pull HEAD, and final clean-worktree guards passed.
+
+The user then ran:
+
+```powershell
+.\gradlew.bat :loader:clean :loader:test --no-daemon --console=plain --rerun-tasks
+```
+
+Result: **BUILD SUCCESSFUL in 33s; 14 actionable tasks, all 14 executed.** This confirms the Schema 1.8 loader test suite, including explicit @Slice from/to boundary parsing, default HEAD/TAIL provenance, unsupported nested annotation status, and unified JSON/text output assertions.
+
+The earlier Schema 1.7 green checkpoint remains confirmed at `267db731f7b16b30498f3402daf83bcb340849d1` (BUILD SUCCESSFUL in 39s; 14/14 tasks).
+
+### Evidence boundary
+
+Schema 1.8 still inventories declaration metadata. It does not inspect target method instructions, establish that a from boundary precedes a to boundary, validate slice applicability, resolve selectors through a semantic refmap, or prove Mixin injection success. Mixin plugin code remains unexecuted. Nested source-JAR config/class discovery remains future work and must reuse `Forge1201ArchiveGraph`, never a second ZIP walker.
+
+### Next bounded task — semantic refmap contract and design
+
+Before implementing remapping, research and document the exact Mixin 0.8.5 refmap JSON shape and remapper lookup semantics relevant to Forge 1.20.1. Separate:
+1. Raw refmap resource discovery and bounded JSON parsing.
+2. Source namespace/context and target namespace identification.
+3. Selector lookup behavior, including context-specific mappings and missing/ambiguous entries.
+4. Explicit, versioned mapping inputs and provenance for any namespace conversion.
+5. States for absent refmap, malformed JSON, unsupported structure, missing mapping, ambiguous mapping, plugin-dependent runtime behavior, and successfully interpreted source mapping data.
+
+Do not infer a mapping from a same-name selector. Do not rewrite selectors or claim target resolution until the applicable source/target namespaces and reviewed mapping set are explicit. Keep plugin execution disabled. Semantic refmap interpretation must remain separate from target member/instruction resolution and runtime confirmation.
