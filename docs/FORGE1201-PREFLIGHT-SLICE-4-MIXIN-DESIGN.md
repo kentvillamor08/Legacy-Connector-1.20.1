@@ -303,3 +303,23 @@ The preflight schema/analyzer versions are `1.6 / 1.6.0`; JSON includes `mixinAn
 ### Next bounded increment
 
 Implement source-side `@At` and `@Constant` inventory: preserve injection-point value, target selector, opcode, ordinal, shift/by, slice ID, args, remap, and the typed constant values/constraints used by `@ModifyConstant`. Parse method/field target selectors conservatively with exact descriptors. Do not resolve a target unless a reviewed versioned mapping and the shared `Forge1201TargetApiVerifier.TargetIndex` can prove it; preserve non-member injection-point codes such as HEAD/RETURN/CONSTANT as such. Then implement `@Slice` from/to boundaries, followed by refmap interpretation. Do not create a second hierarchy cache or ZIP walker.
+
+---
+
+## Implementation checkpoint — Schema 1.7 @At and @Constant source inventory (2026-11-14)
+
+The analyzer now retains detailed source-side injection-point and constant discriminator metadata beneath each core injector finding.
+
+### @At capture
+
+Each @At finding preserves its annotation index, value, built-in-vs-custom/unknown classification, raw target, conservatively parsed owner/member/descriptor, optional nested @Desc selector, opcode, ordinal, shift/by, slice ID, named args, remap, ID, status, evidence, and warnings. Method and field descriptors are syntax-checked using JVM descriptor rules. Selector chains and malformed target forms remain unsupported/invalid instead of being guessed. These records do not claim that a target exists or that an instruction matches.
+
+### @ModifyConstant capture
+
+Each nested @Constant is represented separately with nullable explicit typed values for null/int/float/long/double/string/class, ordinal, slice ID, zero-condition enum values, and log. An absent discriminator array is represented explicitly as Mixin's implicit match-by-handler-return-type behavior. Conflicting typed discriminators and unknown enum/nested annotation values are reported rather than normalized away.
+
+Preflight schema/analyzer versions are now `1.7 / 1.7.0`. JSON includes the nested records through `mixinAnalysis.injectors`; text output prints every captured @At and @Constant. The analyzer's class documentation and preflight limitations now state that @Slice from/to interpretation, target instruction resolution, target member mapping, handler stack compatibility, semantic refmap mapping, and nested config/class provenance remain future work.
+
+Synthetic ASM tests cover a field target and exact field descriptor, opcode, ordinal, BY shift, shift amount, named arguments, slice ID, remap override, custom ID, nested @Desc method target, built-in HEAD defaults, each supported constant value type, implicit constant matching, and conflicting discriminators.
+
+**Validation remains pending.** The user previously confirmed Schema 1.6 loader tests pass at `b661313f41460321845f617b4b81684f314eb614` (14/14 tasks, 50s). Schema 1.7 source and test changes have not yet been run locally. Do not treat this increment as green until the forced loader test output is reviewed.
