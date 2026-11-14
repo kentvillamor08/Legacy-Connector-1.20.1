@@ -137,12 +137,26 @@ final class Forge1201PreflightAnalyzerTest {
         List<String> references = result.referencedApiClasses();
 
         // Class headers, implemented interfaces, generic signatures and descriptors.
-        assertTrue(references.contains("net/minecraft/world/entity/Entity"));
-        assertTrue(references.contains("net/minecraft/world/entity/Entity$Feature"));
+        assertTrue(references.contains("net/minecraft/world/entity/HeaderBase"));
+        assertTrue(references.contains("net/minecraft/world/entity/HeaderInterface"));
+        assertTrue(references.contains("net/minecraft/world/entity/GenericClassBound"));
+        assertTrue(references.contains("net/minecraft/world/item/FieldDescriptorType"));
+        assertTrue(references.contains("net/minecraft/world/entity/GenericFieldType"));
+        assertTrue(references.contains("net/minecraft/world/entity/MethodParameterType"));
+        assertTrue(references.contains("net/minecraft/world/entity/MethodReturnType"));
+        assertTrue(references.contains("net/minecraft/world/entity/GenericMethodType"));
+        assertTrue(references.contains("net/minecraft/world/entity/GenericMethodReturnType"));
+        assertTrue(references.contains("net/minecraft/world/entity/DeclaredException"));
+        assertTrue(references.contains("net/minecraft/world/entity/CatchException"));
+        assertTrue(references.contains("net/minecraft/world/entity/FrameType"));
+        assertTrue(references.contains("net/minecraft/world/entity/LocalVariableType"));
+        assertTrue(references.contains("net/minecraft/world/entity/NewInstructionType"));
+        assertTrue(references.contains("net/minecraft/world/item/ArrayInstructionType"));
+        assertTrue(references.contains("net/minecraft/world/entity/RecordComponentType"));
         assertTrue(references.contains("net/minecraft/world/item/ItemStack"));
         assertTrue(references.contains("net/minecraft/resources/ResourceLocation"));
         assertTrue(references.contains("net/minecraft/client/Minecraft"));
-        assertTrue(references.contains("net/minecraft/world/entity/Entity$RemovalReason"));
+        assertTrue(references.contains("net/minecraft/client/ClassTypeMarker"));
 
         // Class, field, method, parameter, type and record-component annotation descriptors.
         assertTrue(references.contains("net/minecraft/client/ClientMarker"));
@@ -410,11 +424,15 @@ final class Forge1201PreflightAnalyzerTest {
     }
 
     private static byte[] structuralReferenceClass() {
-        String entity = "net/minecraft/world/entity/Entity";
+        String headerBase = "net/minecraft/world/entity/HeaderBase";
+        String headerInterface = "net/minecraft/world/entity/HeaderInterface";
+        String fieldType = "net/minecraft/world/item/FieldDescriptorType";
+        String methodParameter = "net/minecraft/world/entity/MethodParameterType";
+        String methodReturn = "net/minecraft/world/entity/MethodReturnType";
         ClassWriter writer = new ClassWriter(0);
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "fixture/StructuralReferences",
-                "L" + entity + ";L" + entity + "$Feature;", entity,
-                new String[] {entity + "$Feature"});
+                "<T:Lnet/minecraft/world/entity/GenericClassBound;>L" + headerBase + ";L"
+                        + headerInterface + ";", headerBase, new String[] {headerInterface});
 
         AnnotationVisitor classAnnotation = writer.visitAnnotation(
                 "Lnet/minecraft/client/ClientMarker;", true);
@@ -432,8 +450,8 @@ final class Forge1201PreflightAnalyzerTest {
                 org.objectweb.asm.TypeReference.newSuperTypeReference(-1).getValue(),
                 null, "Lnet/minecraft/client/ClassTypeMarker;", true).visitEnd();
 
-        var field = writer.visitField(Opcodes.ACC_PRIVATE, "entity", "L" + entity + ";",
-                "Ljava/util/List<L" + entity + ";>;", null);
+        var field = writer.visitField(Opcodes.ACC_PRIVATE, "entity", "L" + fieldType + ";",
+                "Ljava/util/List<Lnet/minecraft/world/entity/GenericFieldType;>;", null);
         AnnotationVisitor fieldAnnotation = field.visitAnnotation("Lnet/minecraft/client/FieldMarker;", true);
         fieldAnnotation.visit("type", org.objectweb.asm.Type.getType("Lnet/minecraft/world/item/ItemStack;"));
         fieldAnnotation.visitEnd();
@@ -443,9 +461,10 @@ final class Forge1201PreflightAnalyzerTest {
         field.visitEnd();
 
         MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, "resolve",
-                "(L" + entity + ";)L" + entity + ";",
-                "(Ljava/util/List<L" + entity + ";>;)L" + entity + ";",
-                new String[] {entity + "$RemovalReason"});
+                "(L" + methodParameter + ";)L" + methodReturn + ";",
+                "(Ljava/util/List<Lnet/minecraft/world/entity/GenericMethodType;>;)"
+                        + "Lnet/minecraft/world/entity/GenericMethodReturnType;",
+                new String[] {"net/minecraft/world/entity/DeclaredException"});
         AnnotationVisitor methodAnnotation = method.visitAnnotation("Lnet/minecraft/client/MethodMarker;", true);
         methodAnnotation.visit("type", org.objectweb.asm.Type.getType("Lnet/minecraft/client/Minecraft;"));
         methodAnnotation.visitEnd();
@@ -460,24 +479,25 @@ final class Forge1201PreflightAnalyzerTest {
         org.objectweb.asm.Label start = new org.objectweb.asm.Label();
         org.objectweb.asm.Label end = new org.objectweb.asm.Label();
         org.objectweb.asm.Label handler = new org.objectweb.asm.Label();
-        method.visitTryCatchBlock(start, end, handler, entity + "$RemovalReason");
+        method.visitTryCatchBlock(start, end, handler, "net/minecraft/world/entity/CatchException");
         method.visitCode();
         method.visitLabel(start);
-        method.visitTypeInsn(Opcodes.NEW, entity);
+        method.visitTypeInsn(Opcodes.NEW, "net/minecraft/world/entity/NewInstructionType");
         method.visitInsn(Opcodes.POP);
-        method.visitMultiANewArrayInsn("[[Lnet/minecraft/world/item/ItemStack;", 2);
+        method.visitMultiANewArrayInsn("[[Lnet/minecraft/world/item/ArrayInstructionType;", 2);
         method.visitInsn(Opcodes.POP);
         method.visitInsn(Opcodes.ACONST_NULL);
         method.visitLabel(end);
         method.visitInsn(Opcodes.ARETURN);
         method.visitLabel(handler);
-        method.visitFrame(Opcodes.F_FULL, 1, new Object[] {entity}, 1,
-                new Object[] {entity + "$RemovalReason"});
+        method.visitFrame(Opcodes.F_FULL, 2, new Object[] {"fixture/StructuralReferences",
+                "net/minecraft/world/entity/FrameType"}, 1,
+                new Object[] {"net/minecraft/world/entity/CatchException"});
         method.visitInsn(Opcodes.POP);
         method.visitInsn(Opcodes.ACONST_NULL);
         method.visitInsn(Opcodes.ARETURN);
-        method.visitLocalVariable("entity", "L" + entity + ";",
-                "Ljava/util/List<L" + entity + ";>;", start, end, 1);
+        method.visitLocalVariable("entity", "Lnet/minecraft/world/entity/LocalVariableType;",
+                "Ljava/util/List<Lnet/minecraft/world/entity/LocalVariableGenericType;>;", start, end, 1);
         method.visitMaxs(2, 2);
         method.visitEnd();
         writer.visitEnd();
@@ -489,7 +509,8 @@ final class Forge1201PreflightAnalyzerTest {
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL | Opcodes.ACC_RECORD,
                 "fixture/RecordReferences", null, "java/lang/Record", null);
         var component = writer.visitRecordComponent(
-                "entity", "Lnet/minecraft/world/entity/Entity;", null);
+                "entity", "Lnet/minecraft/world/entity/RecordComponentType;",
+                "Lnet/minecraft/world/entity/RecordComponentGenericType;");
         AnnotationVisitor annotation = component.visitAnnotation("Lnet/minecraft/client/RecordMarker;", true);
         annotation.visit("type", org.objectweb.asm.Type.getType("Lnet/minecraft/world/item/ItemStack;"));
         annotation.visitEnd();
