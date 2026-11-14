@@ -245,9 +245,9 @@ The current implementation deliberately **does not claim target member presence 
 
 - A member annotation's remap default is inherited from class-level `@Mixin(remap=...)`, unless the member explicitly overrides it.
 - `@Shadow` prefix stripping applies to methods only. An explicitly supplied prefix on a shadow field is warned and marked as an invalid annotation value; the field name is not stripped.
-- Shadow/Overwrite aliases are retained and checked against the private-member restriction.
+- Shadow aliases are retained and checked against the documented private-member restriction; Overwrite aliases are preserved without applying the Shadow-only private-member restriction.
 - Accessor inference uses `get`, `is`, or `set` followed by an uppercase character. Invoker inference uses `call` or `invoke` followed by an uppercase character. Constructor invocation is represented from an explicit `<init>` or fully qualified target value, not inferred from a generic method name.
-- Accessor getter/setter shape is inventoried from its exact source descriptor; this is not a comparison to a target field descriptor.
+- Accessor getter/setter shape is inventoried from its exact source descriptor, and Accessor/Invoker methods must be abstract; these are source-side contract checks, not comparisons to target members or descriptors.
 - `@Overwrite.constraints` is preserved as source annotation data.
 
 The report schema/analyzer were bumped to `1.5 / 1.5.0`. JSON exposes `mixinAnalysis.memberAnnotations`; text output prints every finding's descriptor, candidates, remap state, prefix/aliases/value/constraints, and warnings. The limitation text explicitly says member target mapping/presence/descriptor comparison is not implemented.
@@ -263,7 +263,7 @@ ASM-generated fixtures and assertions cover:
 - Plugin-declared configurations retain a plugin-dependent state; plugin code is never loaded or executed.
 - Schema 1.5 JSON/text report serialization and deterministic empty member findings in the base fixture.
 
-Current source feature-branch HEAD after these source/test changes: `e60447ed3769077ebf391d21d1a724cda4a64d40`. **No Gradle test or build has yet been run against this increment.** The last user-confirmed green checkpoint remains the Schema 1.4 build at `afdf5c0b8b4410d0deb401683e60b0255843c58d`.
+Current source feature-branch HEAD after these source/test changes: `a118a81b69f6d94f81d02840c258ab26a84e7249`. **No Gradle test or build has yet been run against this increment.** The last user-confirmed green checkpoint remains the Schema 1.4 build at `afdf5c0b8b4410d0deb401683e60b0255843c58d`.
 
 ### Remaining Slice 4 work
 
@@ -276,3 +276,13 @@ The four annotation inventory is not complete Mixin analysis. Next increments re
 6. Dynamic/unknown Mixin annotations and plugin-provided decisions, without executing plugin code.
 7. Nested configs/classes by reusing `Forge1201ArchiveGraph` and its bounds/provenance; never add a second ZIP walker.
 
+
+
+### Follow-up correction — annotation contract validation (2026-11-14)
+
+The source/test batch has since been tightened:
+- `@Accessor` and `@Invoker` methods are flagged when the source method is not abstract, matching the documented annotation contract.
+- The private-alias restriction is applied to `@Shadow` aliases. `@Overwrite` aliases remain recorded but are not subjected to the Shadow-only private-member restriction.
+- Test ASM mixin classes are abstract when they contain Accessor/Invoker methods; a separate concrete Accessor fixture verifies the explicit invalid-value state.
+
+Latest feature-branch code/test commit: `a118a81b69f6d94f81d02840c258ab26a84e7249`. The current changes remain **pending user Gradle verification**.
