@@ -179,3 +179,8 @@ Do not overwrite the prior Symbiote Slice 2 run-3 artifacts. Keep Palladium + Al
 ### Pre-test review correction — 2026-11-14
 
 The first integration commit was followed by commit 3c6febb075c32391b6879b0f3ef00c5856e80d51, which updates the existing limitation assertion to match the now-implemented source-nested Forge/library scan. Both commits remain pending the user's forced loader test gate.
+
+
+### Generated mapping-resource test wiring — 2026-11-14
+
+Commit 0c7c55b72033c986d94f1cba5d836dfce26e95a0 updates loader/build.gradle so the loader test task depends on genSrgMojang and includes the generated srgMojangDir on its runtime classpath. This is necessary because SrgMojangTable.load() returns an empty map when the generated resource is absent. A clean forced loader test will therefore run the existing fetchMojangMappings1201 and genSrgMojang1201 tasks before executing the regression suite. This is committed but not yet user-tested.

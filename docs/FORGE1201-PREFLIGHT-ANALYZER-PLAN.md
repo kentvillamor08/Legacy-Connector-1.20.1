@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Compatibility Analyzer
 
-**Status:** Slices 1 and 2 are implemented and validated. The first Slice 3 dynamic-reference batch passed the user's forced focused loader test gate at `4457199a4109d774b25a428e7c68e23b4ec3b4ce` (`BUILD SUCCESSFUL in 24s`, 12/12 tasks executed). A follow-on integration batch was committed as a494d20a3be797abd3de563fa3672df69e2276da; the test's stale limitation assertion was corrected in 3c6febb075c32391b6879b0f3ef00c5856e80d51. Both commits await the user's forced test gate. Structural reference coverage remains under audit.
+**Status:** Slices 1 and 2 are implemented and validated. The first Slice 3 dynamic-reference batch passed the user's forced focused loader test gate at `4457199a4109d774b25a428e7c68e23b4ec3b4ce` (`BUILD SUCCESSFUL in 24s`, 12/12 tasks executed). The nested-bytecode/SRG integration was committed as a494d20a3be797abd3de563fa3672df69e2276da; its stale limitation assertion was corrected in 3c6febb075c32391b6879b0f3ef00c5856e80d51; and test runtime mapping-resource wiring was added in 0c7c55b72033c986d94f1cba5d836dfce26e95a0. The current branch tip is 0c7c55b72033c986d94f1cba5d836dfce26e95a0 and awaits the user's forced test gate. Structural reference coverage remains under audit.
 
 **Report filename rule:** every analyzer output filename includes its slice number, e.g. `symbiote-1.1.3.jar-slice-2.json` and `symbiote-1.1.3.jar-slice-2.txt`. Repeated runs append a run number, e.g. `symbiote-1.1.3.jar-slice-2-run-2.json` and `.txt`. Use the root Gradle task's explicit `-PpreflightJson=<path>` and `-PpreflightText=<path>` options. Never overwrite the unsuffixed legacy root filenames or an earlier slice/run. The testbench archive index is `archive/preflight/README.md`.
   
@@ -408,7 +408,7 @@ This confirms the dynamic-reference outer-JAR batch and corrected assertion. The
 
 - The integration batch is committed as a494d20a3be797abd3de563fa3672df69e2276da, followed by the stale-limitation assertion correction in 3c6febb075c32391b6879b0f3ef00c5856e80d51. These changes are not yet user-tested. Do not claim that the code compiles or that the new tests pass.
 - Existing confirmed green checkpoint remains 4457199a4109d774b25a428e7c68e23b4ec3b4ce.
-- Next: the user's local checkout is still expected at 4457199a4109d774b25a428e7c68e23b4ec3b4ce. Pull the Universal branch through its latest tip 3c6febb075c32391b6879b0f3ef00c5856e80d51 with path/branch/HEAD/clean-worktree guards, then run the forced :loader:clean :loader:test gate. Do not generate a new Symbiote report until the integration forced test gate is green.
+- Next: the user's local checkout is still expected at 4457199a4109d774b25a428e7c68e23b4ec3b4ce. Pull the Universal branch through its latest tip 0c7c55b72033c986d94f1cba5d836dfce26e95a0 with path/branch/HEAD/clean-worktree guards, then run the forced :loader:clean :loader:test gate. This gate now also runs fetchMojangMappings1201 and genSrgMojang1201 and places the generated table on the test classpath. Do not generate a new Symbiote report until this gate is green.
 - The next Symbiote output must use a new run suffix; do not overwrite Slice 2 run-3.
 - Keep the friend Palladium + Alien Evolution worktree/branch untouched.
 
@@ -420,3 +420,8 @@ Read docs/CHATGPT-CONTINUATION-HANDOFF.md in the testbench repository first. Con
 ### Pre-test review correction — 2026-11-14
 
 The integration test initially retained an assertion for the previous Slice 3 limitation that nested class bytecode was pending. The report limitation now correctly says the outer source JAR and bounded source-nested Forge/library archives are inventoried. Commit 3c6febb075c32391b6879b0f3ef00c5856e80d51 updates that assertion. The current Universal branch tip is 3c6febb075c32391b6879b0f3ef00c5856e80d51; user validation is still pending.
+
+
+### Generated mapping-resource test wiring — 2026-11-14
+
+Commit 0c7c55b72033c986d94f1cba5d836dfce26e95a0 updates loader/build.gradle so the loader test task depends on genSrgMojang and adds srgMojangDir to the test runtime classpath. The generated mapping table is not a committed source resource: SrgMojangTable.load() returns an empty map when that resource is absent. A clean forced loader test therefore runs the existing fetchMojangMappings1201 task (pinned Mojang client mapping URL) followed by genSrgMojang1201 before tests. The build wiring is committed but has not yet been exercised by the user.
