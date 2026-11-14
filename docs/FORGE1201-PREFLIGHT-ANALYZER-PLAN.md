@@ -817,7 +817,7 @@ The prior Schema 1.4 integration has been user-validated:
 - Forced `:loader:test --no-daemon --console=plain --rerun-tasks`: **BUILD SUCCESSFUL in 45s; 13/13 tasks** at `afdf5c0b8b4410d0deb401683e60b0255843c58d`.
 - Full `clean build --no-daemon --console=plain --rerun-tasks`: **BUILD SUCCESSFUL in 2m 34s; 33/33 tasks** at the same user-tested base commit.
 
-A new untested increment is now committed on `feat/forge1201-preflight-analyzer`, currently at `e60447ed3769077ebf391d21d1a724cda4a64d40`.
+A new untested increment is now committed on `feat/forge1201-preflight-analyzer`, latest branch HEAD (including the updated design/plan documents) is `c91c69e48f9c0f9ecd9d2735afc18adfb0c3afb3`; the member-analysis source/test changes were committed through `e60447ed3769077ebf391d21d1a724cda4a64d40`.
 
 ### New source-side structural findings
 
