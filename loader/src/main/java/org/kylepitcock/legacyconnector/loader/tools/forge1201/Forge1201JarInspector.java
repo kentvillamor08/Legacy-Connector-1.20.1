@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.jar.Attributes;
 import java.util.jar.JarFile;
@@ -123,10 +124,24 @@ public final class Forge1201JarInspector {
             Map<String, String> values = section.values();
             String dependencyId = values.get("modId");
             if (dependencyId == null || dependencyId.isBlank()) continue;
+            String declaredType = values.get("type");
+            Forge1201JarInfo.DependencyType dependencyType;
+            if (declaredType == null || declaredType.isBlank()) {
+                dependencyType = "false".equalsIgnoreCase(values.getOrDefault("mandatory", "true"))
+                        ? Forge1201JarInfo.DependencyType.OPTIONAL
+                        : Forge1201JarInfo.DependencyType.REQUIRED;
+            } else {
+                try {
+                    dependencyType = Forge1201JarInfo.DependencyType.valueOf(
+                            declaredType.trim().toUpperCase(Locale.ROOT));
+                } catch (IllegalArgumentException exception) {
+                    dependencyType = Forge1201JarInfo.DependencyType.UNKNOWN;
+                }
+            }
             dependencies.add(new Forge1201JarInfo.Dependency(
                     dependencyId,
                     values.getOrDefault("versionRange", "*"),
-                    !"false".equalsIgnoreCase(values.getOrDefault("mandatory", "true")),
+                    dependencyType,
                     values.getOrDefault("ordering", "NONE"),
                     values.getOrDefault("side", "BOTH")));
         }
