@@ -246,6 +246,7 @@ final class Forge1201PreflightAnalyzerTest {
         method.visitCode();
         method.visitMethodInsn(Opcodes.INVOKESTATIC, "net/minecraftforge/fml/ModList",
                 "get", "()Lnet/minecraftforge/fml/ModList;", false);
+        method.visitInsn(Opcodes.POP);
         org.objectweb.asm.Handle bootstrap = new org.objectweb.asm.Handle(
                 Opcodes.H_INVOKESTATIC,
                 "net/minecraft/world/entity/Entity",
@@ -254,10 +255,14 @@ final class Forge1201PreflightAnalyzerTest {
                 false);
         method.visitLdcInsn(new org.objectweb.asm.Handle(
                 Opcodes.H_GETFIELD, "net/minecraft/world/entity/Entity", "f_123_", "I", false));
+        method.visitInsn(Opcodes.POP);
         method.visitLdcInsn(new org.objectweb.asm.Handle(
                 Opcodes.H_INVOKEVIRTUAL, "net/minecraft/world/entity/Entity", "m_789_", "()V", false));
+        method.visitInsn(Opcodes.POP);
         method.visitLdcInsn(org.objectweb.asm.Type.getType("Lnet/minecraft/world/entity/Entity;"));
+        method.visitInsn(Opcodes.POP);
         method.visitLdcInsn(org.objectweb.asm.Type.getMethodType("()Lnet/minecraft/world/entity/Entity;"));
+        method.visitInsn(Opcodes.POP);
         method.visitInvokeDynamicInsn(
                 "createEntity",
                 "()Ljava/lang/Object;",
