@@ -23,6 +23,8 @@ import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldNode;
+import org.objectweb.asm.tree.MethodNode;
 
 /**
  * Bounded, read-only static Mixin configuration and target discovery for Forge 1.20.1 archives.
@@ -43,6 +45,10 @@ public final class Forge1201MixinAnalyzer {
     public static final long MAX_TOTAL_CLASS_BYTES = 128L * 1024 * 1024;
 
     private static final String MIXIN_ANNOTATION = "Lorg/spongepowered/asm/mixin/Mixin;";
+    private static final String SHADOW_ANNOTATION = "Lorg/spongepowered/asm/mixin/Shadow;";
+    private static final String OVERWRITE_ANNOTATION = "Lorg/spongepowered/asm/mixin/Overwrite;";
+    private static final String ACCESSOR_ANNOTATION = "Lorg/spongepowered/asm/mixin/gen/Accessor;";
+    private static final String INVOKER_ANNOTATION = "Lorg/spongepowered/asm/mixin/gen/Invoker;";
 
     private Forge1201MixinAnalyzer() {}
 
@@ -162,6 +168,58 @@ public final class Forge1201MixinAnalyzer {
             String mappingVersion,
             String evidence) {}
 
+    public enum MemberAnnotationKind {
+        SHADOW,
+        OVERWRITE,
+        ACCESSOR,
+        INVOKER
+    }
+
+    public enum MemberElementKind {
+        FIELD,
+        METHOD
+    }
+
+    /**
+     * This first member-annotation increment records exact source classfile evidence only.
+     * None of these states claims that the target member exists or that the mixin will apply.
+     */
+    public enum MemberResolutionStatus {
+        MEMBER_REMAP_UNRESOLVED,
+        MEMBER_REMAP_DISABLED_UNVERIFIED,
+        PLUGIN_DEPENDENT,
+        INVALID_ANNOTATION_PLACEMENT,
+        INVALID_MEMBER_DESCRIPTOR,
+        INVALID_MEMBER_SELECTOR
+    }
+
+    public record MemberAnnotationFinding(
+            String archivePath,
+            String configPath,
+            String section,
+            String mixinClassName,
+            List<String> sourceTargetInternalNames,
+            MemberAnnotationKind annotationKind,
+            MemberElementKind elementKind,
+            String sourceMemberName,
+            String sourceMemberDescriptor,
+            String prefix,
+            List<String> aliases,
+            String explicitValue,
+            List<String> targetMemberNameCandidates,
+            boolean remap,
+            String operation,
+            MemberResolutionStatus status,
+            String evidence,
+            List<String> warnings) {
+        public MemberAnnotationFinding {
+            sourceTargetInternalNames = List.copyOf(sourceTargetInternalNames);
+            aliases = List.copyOf(aliases);
+            targetMemberNameCandidates = List.copyOf(targetMemberNameCandidates);
+            warnings = List.copyOf(warnings);
+        }
+    }
+
     public record Result(
             String sourceArchive,
             String targetProfile,
@@ -170,11 +228,13 @@ public final class Forge1201MixinAnalyzer {
             List<ConfigFinding> configs,
             List<MixinClassFinding> mixinClasses,
             List<TargetFinding> targets,
+            List<MemberAnnotationFinding> memberAnnotations,
             List<String> warnings) {
         public Result {
             configs = List.copyOf(configs);
             mixinClasses = List.copyOf(mixinClasses);
             targets = List.copyOf(targets);
+            memberAnnotations = List.copyOf(memberAnnotations);
             warnings = List.copyOf(warnings);
         }
     }
@@ -240,6 +300,7 @@ public final class Forge1201MixinAnalyzer {
             List<ConfigFinding> configFindings = new ArrayList<>();
             List<MixinClassFinding> classFindings = new ArrayList<>();
             List<TargetFinding> targetFindings = new ArrayList<>();
+            List<MemberAnnotationFinding> memberFindings = new ArrayList<>();
             boolean archiveEntryIndexIncomplete = count > MAX_ARCHIVE_ENTRIES;
             long totalConfigBytes = 0;
             long totalClassBytes = 0;
@@ -393,6 +454,9 @@ public final class Forge1201MixinAnalyzer {
                         }
 
                         List<ParsedTarget> parsedTargets = readMixinTargets(mixin);
+                        memberFindings.addAll(readMemberAnnotations(
+                                archivePath, configPath, section, mixin.name.replace('/', '.'),
+                                parsedTargets, mixin, pluginDependent));
                         boolean hasMixinAnnotation = hasMixinAnnotation(mixin);
                         List<String> classWarnings = new ArrayList<>();
                         if (!hasMixinAnnotation) {
@@ -422,11 +486,17 @@ public final class Forge1201MixinAnalyzer {
                     .thenComparing(TargetFinding::mixinClassName)
                     .thenComparing(TargetFinding::sourceTargetInternalName)
                     .thenComparing(TargetFinding::selectorForm));
+            memberFindings.sort(Comparator.comparing(MemberAnnotationFinding::configPath)
+                    .thenComparing(MemberAnnotationFinding::mixinClassName)
+                    .thenComparing(MemberAnnotationFinding::annotationKind)
+                    .thenComparing(MemberAnnotationFinding::elementKind)
+                    .thenComparing(MemberAnnotationFinding::sourceMemberName)
+                    .thenComparing(MemberAnnotationFinding::sourceMemberDescriptor));
             return new Result(archivePath, "Minecraft 1.21.1 / NeoForge 21.1.258",
                     mappingVersion,
                     targetIndex == null ? TargetIndexStatus.UNAVAILABLE_NO_TARGET_CLASSPATH
                             : TargetIndexStatus.AVAILABLE,
-                    configFindings, classFindings, targetFindings,
+                    configFindings, classFindings, targetFindings, memberFindings,
                     warnings.stream().distinct().sorted().toList());
         }
     }
@@ -512,6 +582,258 @@ public final class Forge1201MixinAnalyzer {
         }
     }
 
+
+    private static List<MemberAnnotationFinding> readMemberAnnotations(
+            String archivePath,
+            String configPath,
+            String section,
+            String mixinClassName,
+            List<ParsedTarget> parsedTargets,
+            ClassNode mixin,
+            boolean pluginDependent) {
+        List<String> sourceTargets = parsedTargets.stream()
+                .map(ParsedTarget::selector).distinct().sorted().toList();
+        List<MemberAnnotationFinding> findings = new ArrayList<>();
+
+        if (mixin.fields != null) {
+            for (FieldNode field : mixin.fields) {
+                for (List<AnnotationNode> annotations : annotationLists(
+                        field.visibleAnnotations, field.invisibleAnnotations)) {
+                    for (AnnotationNode annotation : annotations) {
+                        MemberAnnotationKind kind = memberAnnotationKind(annotation.desc);
+                        if (kind == null) continue;
+                        findings.add(memberAnnotationFinding(
+                                archivePath, configPath, section, mixinClassName, sourceTargets,
+                                kind, MemberElementKind.FIELD, field.name, field.desc,
+                                annotation, pluginDependent));
+                    }
+                }
+            }
+        }
+
+        if (mixin.methods != null) {
+            for (MethodNode method : mixin.methods) {
+                for (List<AnnotationNode> annotations : annotationLists(
+                        method.visibleAnnotations, method.invisibleAnnotations)) {
+                    for (AnnotationNode annotation : annotations) {
+                        MemberAnnotationKind kind = memberAnnotationKind(annotation.desc);
+                        if (kind == null) continue;
+                        findings.add(memberAnnotationFinding(
+                                archivePath, configPath, section, mixinClassName, sourceTargets,
+                                kind, MemberElementKind.METHOD, method.name, method.desc,
+                                annotation, pluginDependent));
+                    }
+                }
+            }
+        }
+        return findings;
+    }
+
+    private static MemberAnnotationKind memberAnnotationKind(String descriptor) {
+        return switch (descriptor) {
+            case SHADOW_ANNOTATION -> MemberAnnotationKind.SHADOW;
+            case OVERWRITE_ANNOTATION -> MemberAnnotationKind.OVERWRITE;
+            case ACCESSOR_ANNOTATION -> MemberAnnotationKind.ACCESSOR;
+            case INVOKER_ANNOTATION -> MemberAnnotationKind.INVOKER;
+            default -> null;
+        };
+    }
+
+    private static MemberAnnotationFinding memberAnnotationFinding(
+            String archivePath,
+            String configPath,
+            String section,
+            String mixinClassName,
+            List<String> sourceTargets,
+            MemberAnnotationKind kind,
+            MemberElementKind elementKind,
+            String sourceName,
+            String sourceDescriptor,
+            AnnotationNode annotation,
+            boolean pluginDependent) {
+        List<String> warnings = new ArrayList<>();
+        List<String> aliases = stringArrayAnnotationValue(annotation, "aliases");
+        LinkedHashSet<String> targetNames = new LinkedHashSet<>();
+        String prefix = null;
+        String explicitValue = stringAnnotationValue(annotation, "value");
+        boolean remap = booleanAnnotationValue(annotation, "remap", true);
+        String operation = elementKind.name();
+
+        boolean validPlacement = kind == MemberAnnotationKind.SHADOW
+                || elementKind == MemberElementKind.METHOD;
+        if (!validPlacement) {
+            warnings.add(kind + " is expected on a method, but was found on a field.");
+        }
+
+        boolean validDescriptor = isValidMemberDescriptor(elementKind, sourceDescriptor);
+        if (!validDescriptor) {
+            warnings.add("Member descriptor is not a valid JVM " + elementKind.name().toLowerCase() + " descriptor.");
+        }
+
+        switch (kind) {
+            case SHADOW -> {
+                prefix = stringAnnotationValue(annotation, "prefix");
+                if (prefix == null) prefix = "shadow$";
+                String targetName = sourceName;
+                if (!prefix.isEmpty() && sourceName.startsWith(prefix)) {
+                    targetName = sourceName.substring(prefix.length());
+                } else if (!prefix.isEmpty()) {
+                    warnings.add("Source member name does not start with the declared/default shadow prefix; the unstripped name is retained as a candidate.");
+                }
+                addSelectorCandidate(targetNames, targetName);
+                aliases.forEach(alias -> addSelectorCandidate(targetNames, alias));
+                operation = elementKind == MemberElementKind.FIELD ? "FIELD" : "METHOD";
+            }
+            case OVERWRITE -> {
+                addSelectorCandidate(targetNames, sourceName);
+                aliases.forEach(alias -> addSelectorCandidate(targetNames, alias));
+                operation = "METHOD";
+            }
+            case ACCESSOR -> {
+                operation = accessorOperation(sourceDescriptor, warnings);
+                if (explicitValue != null && !explicitValue.isBlank()) {
+                    addSelectorCandidate(targetNames, explicitValue);
+                } else {
+                    String inferred = inferAccessorTarget(sourceName);
+                    if (inferred == null) {
+                        warnings.add("Accessor target name is neither explicit nor inferable from a get/is/set method prefix.");
+                    } else {
+                        addSelectorCandidate(targetNames, inferred);
+                    }
+                }
+            }
+            case INVOKER -> {
+                if (explicitValue != null && !explicitValue.isBlank()) {
+                    addSelectorCandidate(targetNames, explicitValue);
+                } else {
+                    String inferred = inferInvokerTarget(sourceName);
+                    if (inferred == null) {
+                        warnings.add("Invoker target name is neither explicit nor inferable from a call/invoke/new method prefix.");
+                    } else {
+                        addSelectorCandidate(targetNames, inferred);
+                    }
+                }
+                operation = targetNames.contains("<init>") ? "CONSTRUCTOR" : "METHOD";
+            }
+        }
+
+        MemberResolutionStatus status;
+        if (!validPlacement) {
+            status = MemberResolutionStatus.INVALID_ANNOTATION_PLACEMENT;
+        } else if (!validDescriptor) {
+            status = MemberResolutionStatus.INVALID_MEMBER_DESCRIPTOR;
+        } else if (targetNames.isEmpty()) {
+            status = MemberResolutionStatus.INVALID_MEMBER_SELECTOR;
+        } else if (pluginDependent) {
+            status = MemberResolutionStatus.PLUGIN_DEPENDENT;
+        } else if (remap) {
+            status = MemberResolutionStatus.MEMBER_REMAP_UNRESOLVED;
+        } else {
+            status = MemberResolutionStatus.MEMBER_REMAP_DISABLED_UNVERIFIED;
+        }
+
+        String evidence = switch (status) {
+            case INVALID_ANNOTATION_PLACEMENT ->
+                    "The annotation was captured on an element kind that is not supported for this Mixin annotation.";
+            case INVALID_MEMBER_DESCRIPTOR ->
+                    "The annotation was captured, but the source member descriptor is malformed and cannot be compared.";
+            case INVALID_MEMBER_SELECTOR ->
+                    "The annotation was captured, but no explicit or statically inferable target member selector is available.";
+            case PLUGIN_DEPENDENT ->
+                    "The config declares a Mixin plugin; runtime plugin decisions may alter targets or member behavior. Plugin code was not executed.";
+            case MEMBER_REMAP_UNRESOLVED ->
+                    "Exact source member name and descriptor were captured. No versioned 1.20.1-to-1.21.1 member mapping was supplied, so target member presence is not asserted.";
+            case MEMBER_REMAP_DISABLED_UNVERIFIED ->
+                    "The annotation sets remap=false. Exact source member data was captured, but target member and descriptor parity are not verified.";
+        };
+
+        return new MemberAnnotationFinding(
+                archivePath, configPath, section, mixinClassName, sourceTargets,
+                kind, elementKind, sourceName, sourceDescriptor, prefix, aliases, explicitValue,
+                List.copyOf(targetNames), remap, operation, status, evidence, warnings);
+    }
+
+    private static boolean isValidMemberDescriptor(MemberElementKind kind, String descriptor) {
+        try {
+            if (descriptor == null || descriptor.isBlank()) return false;
+            if (kind == MemberElementKind.FIELD) {
+                Type type = Type.getType(descriptor);
+                return type.getSort() != Type.METHOD && type.getSort() != Type.VOID;
+            }
+            return descriptor.startsWith("(") && Type.getMethodType(descriptor) != null;
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
+
+    private static String accessorOperation(String descriptor, List<String> warnings) {
+        try {
+            Type method = Type.getMethodType(descriptor);
+            Type[] arguments = method.getArgumentTypes();
+            Type result = method.getReturnType();
+            if (arguments.length == 0 && result.getSort() != Type.VOID) return "GETTER";
+            if (arguments.length == 1 && result.getSort() == Type.VOID) return "SETTER";
+        } catch (RuntimeException ignored) {
+            // The invalid descriptor is already represented by the caller's explicit status.
+        }
+        warnings.add("Accessor method descriptor is not a zero-argument getter or one-argument void setter shape.");
+        return "UNSUPPORTED_SHAPE";
+    }
+
+    private static String inferAccessorTarget(String methodName) {
+        for (String prefix : List.of("get", "is", "set")) {
+            if (methodName.startsWith(prefix) && methodName.length() > prefix.length()) {
+                return decapitalize(methodName.substring(prefix.length()));
+            }
+        }
+        return null;
+    }
+
+    private static String inferInvokerTarget(String methodName) {
+        if (methodName.equals("new")) return "<init>";
+        for (String prefix : List.of("call", "invoke")) {
+            if (methodName.startsWith(prefix) && methodName.length() > prefix.length()) {
+                return decapitalize(methodName.substring(prefix.length()));
+            }
+        }
+        return null;
+    }
+
+    private static String decapitalize(String value) {
+        if (value.length() > 1 && Character.isUpperCase(value.charAt(0))
+                && Character.isUpperCase(value.charAt(1))) return value;
+        if (value.isEmpty()) return value;
+        return Character.toLowerCase(value.charAt(0)) + value.substring(1);
+    }
+
+    private static void addSelectorCandidate(Set<String> candidates, String value) {
+        if (value != null && !value.isBlank()) candidates.add(value);
+    }
+
+    private static Object annotationValue(AnnotationNode annotation, String name) {
+        if (annotation.values == null) return null;
+        for (int i = 0; i + 1 < annotation.values.size(); i += 2) {
+            if (name.equals(annotation.values.get(i))) return annotation.values.get(i + 1);
+        }
+        return null;
+    }
+
+    private static String stringAnnotationValue(AnnotationNode annotation, String name) {
+        Object value = annotationValue(annotation, name);
+        return value instanceof String string ? string : null;
+    }
+
+    private static boolean booleanAnnotationValue(AnnotationNode annotation, String name, boolean defaultValue) {
+        Object value = annotationValue(annotation, name);
+        return value instanceof Boolean bool ? bool : defaultValue;
+    }
+
+    private static List<String> stringArrayAnnotationValue(AnnotationNode annotation, String name) {
+        Object value = annotationValue(annotation, name);
+        if (!(value instanceof List<?> values)) return List.of();
+        return values.stream().filter(String.class::isInstance).map(String.class::cast).distinct().toList();
+    }
+
     private static List<ParsedTarget> readMixinTargets(ClassNode mixin) {
         List<ParsedTarget> targets = new ArrayList<>();
         for (List<AnnotationNode> annotations : annotationLists(mixin)) {
@@ -537,9 +859,14 @@ public final class Forge1201MixinAnalyzer {
     }
 
     private static List<List<AnnotationNode>> annotationLists(ClassNode mixin) {
+        return annotationLists(mixin.visibleAnnotations, mixin.invisibleAnnotations);
+    }
+
+    private static List<List<AnnotationNode>> annotationLists(
+            List<AnnotationNode> visible, List<AnnotationNode> invisible) {
         List<List<AnnotationNode>> result = new ArrayList<>(2);
-        if (mixin.visibleAnnotations != null) result.add(mixin.visibleAnnotations);
-        if (mixin.invisibleAnnotations != null) result.add(mixin.invisibleAnnotations);
+        if (visible != null) result.add(visible);
+        if (invisible != null) result.add(invisible);
         return result;
     }
 
