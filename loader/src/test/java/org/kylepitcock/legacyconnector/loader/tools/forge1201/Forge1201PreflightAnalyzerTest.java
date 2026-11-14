@@ -95,7 +95,8 @@ final class Forge1201PreflightAnalyzerTest {
         assertTrue(Forge1201PreflightAnalyzer.toJson(first).contains("\"dynamicReferences\""));
         assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("Dynamic / bootstrap references:"));
         assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("not a compatibility approval"));
-        assertTrue(first.limitations().stream().anyMatch(value -> value.contains("outer JAR only")));
+        assertTrue(first.limitations().stream().anyMatch(value ->
+                value.contains("outer JAR") && value.contains("nested archive class bytecode")));
         assertTrue(first.limitations().stream().anyMatch(value -> value.contains("API compatibility are not verified")));
     }
 
