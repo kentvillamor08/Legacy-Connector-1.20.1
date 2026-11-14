@@ -32,10 +32,11 @@ import org.objectweb.asm.tree.MethodNode;
  *
  * <p>This implementation analyzes the outer source archive only. It resolves declared config
  * resources and mixin class entries, reads visible/invisible @Mixin and member annotations, and
- * inventories source-side handler and selector data for core injectors. It checks mapped class
- * targets through the shared target index but never loads or executes mod classes or Mixin plugins.
- * Nested archive resources, detailed @At/@Constant/@Slice semantics, and semantic refmap remapping remain
- * later increments. Unified preflight consumes this result API.</p>
+ * inventories source-side handler and selector data for core injectors, including detailed @At
+ * metadata and typed @ModifyConstant discriminators. It checks mapped class targets through the shared
+ * target index but never loads or executes mod classes or Mixin plugins. Nested archive resources,
+ * @Slice from/to boundary interpretation, semantic refmap remapping, target instruction resolution, and
+ * injector handler stack validation remain later increments. Unified preflight consumes this result API.</p>
  */
 public final class Forge1201MixinAnalyzer {
     public static final int MAX_ARCHIVE_ENTRIES = 100_000;
@@ -1048,7 +1049,7 @@ public final class Forge1201MixinAnalyzer {
             if (descriptor == null || descriptor.isBlank()) return false;
             Type type = Type.getType(descriptor);
             return type.getSort() != Type.VOID && type.getSort() != Type.METHOD
-                    && type.getSort() != Type.VOID && type.getDescriptor().equals(descriptor);
+                    && type.getDescriptor().equals(descriptor);
         } catch (RuntimeException exception) {
             return false;
         }
