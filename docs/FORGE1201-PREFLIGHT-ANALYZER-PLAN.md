@@ -1,4 +1,4 @@
-**Status:** Slices 1–3 are implemented and validated. Slice 4 is in progress: the shared TargetIndex API and its synthetic ASM tests passed the user's forced loader test gate at `246002c6fcc1af371bb11a716483dd1df23a2dbe` (`BUILD SUCCESSFUL in 1m 40s`, 14/14 tasks executed). A first bounded outer-JAR `Forge1201MixinAnalyzer` API and synthetic tests have since been committed. The new analyzer tests remain pending; member/injector analysis and unified preflight integration are not implemented yet.
+**Status:** Slices 1–3 are implemented and validated. Slice 4 is in progress: the shared TargetIndex API/tests passed at `246002c6fcc1af371bb11a716483dd1df23a2dbe` (`BUILD SUCCESSFUL in 1m 40s`, 14/14 tasks), and the bounded outer-JAR `Forge1201MixinAnalyzer` plus its synthetic ZIP/ASM tests passed at `90daa1ee78d2de73ff44e27ffd01ba6e126858f4` (`BUILD SUCCESSFUL in 57s`, 14/14 tasks). Remaining Slice 4 work includes automatic config declaration integration, nested archive provenance, descriptor-aware member/injector/selector analysis, and unified preflight reporting.
 
 **Status:** Slices 1 and 2 are implemented and validated. The first Slice 3 dynamic-reference batch passed the user's forced focused loader test gate at `4457199a4109d774b25a428e7c68e23b4ec3b4ce` (`BUILD SUCCESSFUL in 24s`, 12/12 tasks executed). The nested-bytecode/SRG integration was committed as a494d20a3be797abd3de563fa3672df69e2276da; its stale limitation assertion was corrected in 3c6febb075c32391b6879b0f3ef00c5856e80d51; and test runtime mapping-resource wiring was added in 0c7c55b72033c986d94f1cba5d836dfce26e95a0. The test/runtime wiring checkpoint is 0c7c55b72033c986d94f1cba5d836dfce26e95a0; the branch may include a later documentation-only commit. Use the exact remote tip in the testbench handoff for the guarded pull. Structural reference coverage remains under audit.
 
@@ -120,7 +120,7 @@ Provide both:
 - Source commit `e3aa921d01d8ee134de3a71d3aa1016d249dbaf1` exposes `Forge1201TargetApiVerifier.TargetIndex`, backed by the existing target verifier's per-instance cache and exact descriptor-aware inherited lookup.
 - Test commit `69a93e13183466e51a6bab8023eecb0bb906e5e9` adds synthetic ASM tests for exact method/field descriptors, inherited lookup, missing classes, incomplete hierarchies, and independent index instances.
 - The user subsequently ran the forced loader test gate at `246002c6fcc1af371bb11a716483dd1df23a2dbe`: `BUILD SUCCESSFUL in 1m 40s`, 14 actionable tasks, all 14 executed. The TargetIndex implementation and its tests are validated.
-- The first `Forge1201MixinAnalyzer` outer-JAR config/target-discovery API and synthetic test class are now committed after that run. Those newer tests must be pulled and run before further expansion. See the Slice 4 design document's implementation checkpoint for exact scope and limitations.
+- The first `Forge1201MixinAnalyzer` outer-JAR config/target-discovery API and synthetic test class were pulled and passed in the user's forced loader test run at `90daa1ee78d2de73ff44e27ffd01ba6e126858f4`: `BUILD SUCCESSFUL in 57s`, 14 actionable tasks, all 14 executed. The implementation is validated within its documented scope; it is not complete Mixin semantic analysis.
 
 ### Slice 4 implementation checkpoint — bounded Mixin analyzer foundation (2026-11-14)
 
@@ -129,6 +129,15 @@ Provide both:
 - Follow-up source commits: `d0248dd544e028f55abb2bf41ac2d1a43f51c9ad` (mapping/class/plugin state corrections) and `c81b8a2556819f85332b7b527f09635fff9f1422` (archive inventory truncation states and annotation iteration).
 - Test commit `d852da1ffd64d59dca1e9b4f3148077e244d4cfd` adds synthetic ZIP/ASM tests. These new tests are pending the next user forced test run.
 - Scope limits: outer JAR only; configs are supplied explicitly; Minecraft target checks need a named mapping input; plugin presence is checked in the source JAR only; nested source archives, Forge metadata discovery, member annotations/injectors, `@At`/`@Slice`, semantic refmap validation, and preflight JSON/text integration remain future work.
+
+
+### Slice 4 validation checkpoint — Mixin config/target foundation passed (2026-11-14)
+
+- User pulled from local `246002c6fcc1af371bb11a716483dd1df23a2dbe` to `90daa1ee78d2de73ff44e27ffd01ba6e126858f4`; all branch/clean-worktree/remote-SHA guards and the fast-forward/final-HEAD checks passed.
+- User ran `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks`.
+- Result: `BUILD SUCCESSFUL in 57s`; 14 actionable tasks, all 14 executed. This validates the added `Forge1201MixinAnalyzerTest` along with the full loader test task at this source checkpoint.
+- Latest verified feature-branch HEAD: `90daa1ee78d2de73ff44e27ffd01ba6e126858f4`.
+- Next bounded step: inspect how the existing Gradle `preflight1201` task exposes the target classpath and how `Forge1201PreflightAnalyzer` discovers configs; then wire the tested Mixin result API into the unified preflight result without duplicating target indexes or archive traversal. Keep nested-archive config/class provenance explicit and reuse `Forge1201ArchiveGraph`.
 
 ### Slice 5 — shared migration/bridge/shim coverage
 
