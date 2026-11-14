@@ -500,6 +500,7 @@ final class Forge1201PreflightAnalyzerTest {
         org.objectweb.asm.Label start = new org.objectweb.asm.Label();
         org.objectweb.asm.Label end = new org.objectweb.asm.Label();
         org.objectweb.asm.Label handler = new org.objectweb.asm.Label();
+        method.visitCode();
         method.visitTryCatchBlock(start, end, handler, "net/minecraft/world/entity/CatchException");
         AnnotationVisitor tryCatchAnnotation = method.visitTryCatchAnnotation(
                 org.objectweb.asm.TypeReference.newTryCatchReference(0).getValue(),
@@ -507,7 +508,6 @@ final class Forge1201PreflightAnalyzerTest {
         tryCatchAnnotation.visit("type",
                 org.objectweb.asm.Type.getType("Lnet/minecraft/world/entity/TryCatchAnnotationType;"));
         tryCatchAnnotation.visitEnd();
-        method.visitCode();
         method.visitLabel(start);
         method.visitTypeInsn(Opcodes.NEW, "net/minecraft/world/entity/NewInstructionType");
         AnnotationVisitor instructionAnnotation = method.visitInsnAnnotation(
