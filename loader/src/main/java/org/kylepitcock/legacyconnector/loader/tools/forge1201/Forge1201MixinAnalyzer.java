@@ -783,7 +783,7 @@ public final class Forge1201MixinAnalyzer {
             for (RefmapResourceFinding finding : refmapFindings) {
                 refmapsByPath.put(finding.resourcePath(), finding);
             }
-            configFindings = configFindings.stream().map(finding -> {
+            configFindings = new ArrayList<>(configFindings.stream().map(finding -> {
                 if (finding.refmapPath() == null) return finding;
                 RefmapResourceFinding resource = refmapsByPath.get(finding.refmapPath());
                 ResourceStatus legacyStatus = resource == null
@@ -794,7 +794,7 @@ public final class Forge1201MixinAnalyzer {
                         finding.compatibilityLevel(), finding.pluginClass(), finding.pluginStatus(),
                         finding.refmapPath(), finding.refmapWrapperClass(), finding.refmapSelection(),
                         finding.refmapCandidatePath(), legacyStatus, finding.warnings());
-            }).toList();
+            }).toList());
 
             configFindings.sort(Comparator.comparing(ConfigFinding::configPath));
             classFindings.sort(Comparator.comparing(MixinClassFinding::configPath)
