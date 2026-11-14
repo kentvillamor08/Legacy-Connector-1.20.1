@@ -25,6 +25,18 @@ final class PalladiumResourceCompat1201 {
             "addon/alienevo/kubejs_scripts/diamond_creation.js";
     static final String ALIEN_EVO_STAT_ABILITY =
             "addon/alienevo/kubejs_scripts/stat_ability.js";
+    private static final String LEGACY_ATTRIBUTE_OPERATION_HELPER = """
+            function legacyConnectorAttributeOperation(operation) {
+                const key = String(operation);
+                switch (key) {
+                    case "addition": return "add_value";
+                    case "multiply_base": return "add_multiplied_base";
+                    case "multiply_total": return "add_multiplied_total";
+                    default: return key;
+                }
+            }
+
+            """;
     static final String ALIEN_EVO_FAILSAFE =
             "data/alienevo/kubejs_scripts/failsafe.js";
     static final String ALIEN_EVO_SERVER_STUFF =
@@ -217,6 +229,7 @@ final class PalladiumResourceCompat1201 {
         rewriteOmnitrixPacketPlayerAccess(resources);
         rewriteOmnitrixPacketStringValues(resources);
         rewriteAlienEvoXpDeathPlayerAccess(resources);
+        rewriteAlienEvoStatAbilityOperation(resources);
         // Both ScriptableAbility callbacks receive the active entity; KubeJS 7 no longer exposes Utils.server.
         rewrite(resources, ALIEN_EVO_STAT_ABILITY, new String[][] {
                 {"Utils.server.scoreboard", "entity.server.scoreboard", "2"},
@@ -926,6 +939,57 @@ final class PalladiumResourceCompat1201 {
         String migrated = "let player = source ? source.getEntity() : null;" + lineEnding
                 + "    if (player && player.isPlayer()) {";
         return rewrite(resources, path, new String[][] {{legacy, migrated, "1"}});
+    }
+
+    /**
+     * 1.20.1 AlienEvo stores AttributeModifier.Operation values using the old
+     * labels addition/multiply_base/multiply_total. Minecraft 1.21.1 renamed
+     * those enum constants to add_value/add_multiplied_base/add_multiplied_total.
+     * Normalize the property before passing it to KubeJS' Entity.modifyAttribute,
+     * otherwise Rhino rejects the old string while ticking a stat ability.
+     */
+    private static int rewriteAlienEvoStatAbilityOperation(Map<String, byte[]> resources) {
+        byte[] original = resources.get(ALIEN_EVO_STAT_ABILITY);
+        if (original == null) return 0;
+
+        String script = new String(original, StandardCharsets.UTF_8);
+        String legacyRead = "const attribute_mod = entry.getPropertyByName('Attribute_Mod');";
+        String migratedRead =
+                "const attribute_mod = legacyConnectorAttributeOperation(entry.getPropertyByName('Attribute_Mod'));";
+        int legacyReads = occurrences(script, legacyRead);
+        int migratedReads = occurrences(script, migratedRead);
+
+        String legacyDefault =
+                ".addProperty(\"Attribute_Mod\", \"string\", \"addition\", \"addition , multiply_total , multiply_base\")";
+        String migratedDefault =
+                ".addProperty(\"Attribute_Mod\", \"string\", \"add_value\", "
+                        + "\"add_value , add_multiplied_total , add_multiplied_base\")";
+        int legacyDefaults = occurrences(script, legacyDefault);
+        int migratedDefaults = occurrences(script, migratedDefault);
+        boolean helperPresent = script.contains("function legacyConnectorAttributeOperation(operation) {");
+
+        if (legacyReads == 0 && migratedReads == 2
+                && legacyDefaults == 0 && migratedDefaults == 1 && helperPresent) {
+            return 0;
+        }
+        if (legacyReads != 2 || migratedReads != 0
+                || legacyDefaults > 1 || migratedDefaults > 1
+                || (legacyDefaults == 0 && migratedDefaults != 0)
+                || (legacyDefaults == 1 && migratedDefaults != 0)) {
+            throw new IllegalStateException(
+                    "AlienEvo stat_ability.js has an unexpected Attribute_Mod operation migration shape: "
+                            + legacyReads + " legacy reads, " + migratedReads + " migrated reads, "
+                            + legacyDefaults + " legacy defaults, " + migratedDefaults + " migrated defaults");
+        }
+
+        String lineEnding = script.contains("\r\n") ? "\r\n" : "\n";
+        String migrated = script.replace(legacyRead, migratedRead);
+        if (legacyDefaults == 1) migrated = migrated.replace(legacyDefault, migratedDefault);
+        if (!helperPresent) {
+            migrated = LEGACY_ATTRIBUTE_OPERATION_HELPER.replace("\n", lineEnding) + migrated;
+        }
+        resources.put(ALIEN_EVO_STAT_ABILITY, migrated.getBytes(StandardCharsets.UTF_8));
+        return 1;
     }
 
     /** AlienEvo's flatten ability uses one optional Pehkui class at script load time; keep the script group loadable without Pehkui. */

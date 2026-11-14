@@ -523,14 +523,20 @@ class PalladiumResourceCompat1201Test {
     void migratesAlienEvoStatAbilityServerAccessAndIsIdempotent() {
         Map<String, byte[]> resources = new HashMap<>();
         put(resources, PalladiumResourceCompat1201.ALIEN_EVO_STAT_ABILITY, """
+                StartupEvents.registry('palladium:abilities', event => {
+                    event.create('alienevo:stat_ability')
+                        .addProperty("Attribute_Mod", "string", "addition", "addition , multiply_total , multiply_base");
+                });
                 .lastTick((entity, entry, holder, enabled) => {
                     const scoreboard = Utils.server.scoreboard;
                     const uuid = entry.getPropertyByName('UUID');
+                    const attribute_mod = entry.getPropertyByName('Attribute_Mod');
                     entity.removeAttribute(attribute, UUID);
                 });
                 .tick((entity, entry, holder, enabled) => {
                     const scoreboard = Utils.server.scoreboard;
                     const uuid = entry.getPropertyByName('UUID');
+                    const attribute_mod = entry.getPropertyByName('Attribute_Mod');
                     entity.modifyAttribute(attribute, UUID, (value / division), attribute_mod);
                 });
                 """);
@@ -546,6 +552,15 @@ class PalladiumResourceCompat1201Test {
         assertFalse(migrated.contains("entity.modifyAttribute(attribute, UUID,"));
         assertFalse(migrated.contains("entity.removeAttribute(attribute, uuid)"));
         assertFalse(migrated.contains("entity.modifyAttribute(attribute, uuid,"));
+        assertTrue(migrated.contains("function legacyConnectorAttributeOperation(operation)"));
+        assertTrue(migrated.contains('case "addition": return "add_value";'));
+        assertTrue(migrated.contains('case "multiply_base": return "add_multiplied_base";'));
+        assertTrue(migrated.contains('case "multiply_total": return "add_multiplied_total";'));
+        assertEquals(2, occurrences(migrated,
+                "const attribute_mod = legacyConnectorAttributeOperation(entry.getPropertyByName('Attribute_Mod'));"));
+        assertTrue(migrated.contains(
+                '.addProperty("Attribute_Mod", "string", "add_value", "add_value , add_multiplied_total , add_multiplied_base")'));
+        assertFalse(migrated.contains('case "addition": return "addition";'));
         assertEquals(0, PalladiumResourceCompat1201.apply(resources));
         assertEquals(migrated, get(resources, PalladiumResourceCompat1201.ALIEN_EVO_STAT_ABILITY));
 
