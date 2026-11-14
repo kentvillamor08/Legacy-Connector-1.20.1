@@ -256,11 +256,13 @@ final class Forge1201PreflightAnalyzerTest {
                 reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CONSTANT_DYNAMIC).count());
         assertEquals(1, dynamicRows.stream().filter(reference ->
                 reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.VALUE_DEPTH_LIMIT).count());
-        assertTrue(dynamicRows.stream().anyMatch(reference ->
-                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.VALUE_DEPTH_LIMIT
-                        && reference.context().contains("constant-argument-0")
-                        && reference.archivePath().equals("source/dynamic-fixture.jar!/nested.jar")
-                        && reference.classEntryPath().equals("fixture/DeepDynamic.class")));
+        var depthLimit = dynamicRows.stream().filter(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.VALUE_DEPTH_LIMIT)
+                .findFirst().orElseThrow();
+        assertTrue(depthLimit.context().contains("constant-argument-0"));
+        assertEquals(17, depthLimit.context().split("constant-argument-0", -1).length - 1);
+        assertEquals("source/dynamic-fixture.jar!/nested.jar", depthLimit.archivePath());
+        assertEquals("fixture/DeepDynamic.class", depthLimit.classEntryPath());
         assertTrue(dynamicRows.stream().filter(reference ->
                 reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CONSTANT_DYNAMIC)
                 .allMatch(reference -> reference.instructionOrdinal() == 0));
