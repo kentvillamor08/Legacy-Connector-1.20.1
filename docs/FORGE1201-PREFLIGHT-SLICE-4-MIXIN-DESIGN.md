@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Analyzer — Slice 4 Mixin Analysis Design
 
-Status (2026-11-14): Slice 4 remains in progress. Schema 1.7 @At/@Constant inventory passed the user loader test gate at `267db731f7b16b30498f3402daf83bcb340849d1` (BUILD SUCCESSFUL in 39s; 14/14 tasks). Schema 1.8 @Slice from/to inventory then passed at `4b4f9ce437671f08eafd3f9cf4a18e34a3d24284` (BUILD SUCCESSFUL in 33s; 14/14 tasks). Boundary capture does not establish target instruction ordering, slice applicability, or injection success. The next bounded task is a design/research pass over Mixin 0.8.5 semantic refmap interpretation with explicit versioned mapping inputs; implementation must not guess namespaces or same-name mappings.
+Status (2026-11-14): Slice 4 remains in progress. Schema 1.7 @At/@Constant inventory passed the user loader test gate at 267db731f7b16b30498f3402daf83bcb340849d1 (BUILD SUCCESSFUL in 39s; 14/14 tasks), and Schema 1.8 @Slice from/to inventory passed at 4b4f9ce437671f08eafd3f9cf4a18e34a3d24284 (BUILD SUCCESSFUL in 33s; 14/14 tasks). The Mixin 0.8.5 refmap runtime/AP contract has now been audited and the Schema 1.9 design is documented in docs/FORGE1201-PREFLIGHT-SCHEMA-1.9-REFMAP-DESIGN.md. Schema 1.9 implementation and tests have not started. The next step is bounded refmap resource/table inventory, not selector rewriting or guessed namespace conversion.
 
 Historical implementation checkpoints below remain useful context; the latest dated checkpoint at the end controls current status.
 ## Goal
@@ -363,3 +363,16 @@ The schema now preserves source-side @Slice index/ID, separate from/to records, 
 ### Next bounded design task
 
 Research the Mixin 0.8.5 refmap JSON contract and the actual runtime remapper's context/namespace lookup semantics before coding semantic interpretation. The design must identify raw resource discovery, JSON structure, context keys, source/target namespace assumptions, versioned mapping inputs, provenance, and explicit unknown/ambiguous/error states. A raw refmap entry is not itself proof of target member existence. Never guess a missing mapping from identical names; never execute Mixin plugins. Keep refmap interpretation distinct from target member/instruction resolution and runtime compatibility.
+
+
+---
+
+## 2026-11-14 — Mixin 0.8.5 refmap research completed; Schema 1.9 design authored
+
+See docs/FORGE1201-PREFLIGHT-SCHEMA-1.9-REFMAP-DESIGN.md for the pinned source audit, JSON model, runtime lookup rules, resource selection, wrapper/plugin limits, proposed records/statuses, namespace provenance contract, and synthetic regression matrix.
+
+The key runtime rule is that an absent requested context table falls back to base mappings, but a missing owner/reference inside an existing context table returns the original input and does not retry the base table. The design makes this distinction a mandatory test. Context labels are opaque obfuscation-type keys, not complete source/target namespace identities. The Mixin AP stores the internal mixin owner key and removes whitespace from its source reference key before writing.
+
+The current analyzer checks only the refmap resource/JSON object; it does not parse its two mapping tables or preserve refmapWrapper. Effective resource selection also differs when a config omits refmap: Mixin may use its default mixin.refmap.json resource or ask its runtime plugin for a resource path.
+
+**Next bounded step:** implement Schema 1.9A resource resolution and bounded inventory of mappings and each data context table. After that passes, implement Schema 1.9B exact owner-scoped lookup correlation for AP-emitted raw string references, with explicit runtime context input. Do not execute plugins/wrappers, simulate SRG runtime rewriting, or translate to NeoForge names without an explicit versioned mapping profile.

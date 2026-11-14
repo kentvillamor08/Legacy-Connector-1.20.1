@@ -1,6 +1,4 @@
-**Current checkpoint — 2026-11-14:** Slice 4 Mixin preflight has passed the user-forced loader test gate through Schema 1.8 at commit `4b4f9ce437671f08eafd3f9cf4a18e34a3d24284` (`BUILD SUCCESSFUL in 33s; 14/14 actionable tasks executed`). Schema 1.8 adds source-side `@Slice` `from`/`to` boundary inventory, explicit/default provenance, and JSON/text reporting. This validates the loader test suite only; target instruction order, slice validity, Mixin application, and runtime compatibility are not asserted. The next bounded Mixin task is a contract/design investigation of semantic refmap interpretation using explicit, versioned mapping inputs.
-
-**Historical status notes below describe earlier checkpoints. The newest dated entries at the end of this file control the current status.**
+**Current checkpoint — 2026-11-14:** Slice 4 Mixin preflight has passed the user-forced loader test gate through Schema 1.8 at commit `4b4f9ce437671f08eafd3f9cf4a18e34a3d24284` (`BUILD SUCCESSFUL in 33s; 14/14 actionable tasks executed`). The Mixin 0.8.5 refmap contract has now been audited and the Schema 1.9 design is documented in `docs/FORGE1201-PREFLIGHT-SCHEMA-1.9-REFMAP-DESIGN.md`. This is a docs/research checkpoint; Schema 1.9 code and tests have not started. The design preserves opaque obfuscation contexts, owner-scoped exact key lookup, correct context fallback semantics, plugin/wrapper boundaries, and explicit namespace provenance. Schema 1.8 test success does not establish runtime Mixin application or mod compatibility.
 
 ---
 
@@ -1002,3 +1000,33 @@ Before implementing remapping, research and document the exact Mixin 0.8.5 refma
 5. States for absent refmap, malformed JSON, unsupported structure, missing mapping, ambiguous mapping, plugin-dependent runtime behavior, and successfully interpreted source mapping data.
 
 Do not infer a mapping from a same-name selector. Do not rewrite selectors or claim target resolution until the applicable source/target namespaces and reviewed mapping set are explicit. Keep plugin execution disabled. Semantic refmap interpretation must remain separate from target member/instruction resolution and runtime confirmation.
+
+
+---
+
+## 2026-11-14 — Schema 1.9 Mixin 0.8.5 refmap research and design completed
+
+The Mixin 0.8.5 source audit is documented in docs/FORGE1201-PREFLIGHT-SCHEMA-1.9-REFMAP-DESIGN.md. It pins the exact upstream tag and key source blobs for ReferenceMapper, RemappingReferenceMapper, MixinConfig, MixinEnvironment, and annotation-processor reference generation.
+
+### Material findings
+
+- Refmap JSON contains base mappings and context-keyed data tables, each mapping owner mixin internal name to exact string reference keys and mapped string values.
+- Context labels are annotation-processor obfuscation-type keys, not complete namespace declarations. Default MCP service keys include searge and notch; other services can add their own.
+- Runtime lookup selects data[context] when that whole context table exists; only an absent context table falls back to base mappings. A missing owner/reference within an existing context does not fall back per entry.
+- The owner key is the mixin class internal name. The AP stores whitespace-stripped reference keys.
+- ReferenceMapper returns the original reference when no entry exists; absent or unreadable refmaps yield the default pass-through mapper.
+- Mixin config refmap is an exact resource path. Omission can select the mixin.refmap.json default or a plugin-supplied path. refmapWrapper loads custom mapper code; neither it nor plugin code may be executed in preflight.
+- The optional runtime SRG wrapper is a distinct stage from the refmap JSON tables and must not be approximated without explicit runtime options and a pinned mapping artifact.
+- Injector method[], @At.target, and the @At("NEW") class argument are the relevant AP-emitted string-reference paths. @Desc target annotations must not be fabricated into refmap string lookups.
+
+### Current implementation gap
+
+The current analyzer stores refmapPath and a coarse JSON-resource status, but does not parse the mappings/data tables or preserve refmapWrapper. It currently treats an omitted refmap as not declared, while Mixin 0.8.5 has a default/plugin resource-resolution path. The new design specifies how to correct these gaps without making dynamic behavior appear static.
+
+### Next implementation task
+
+Implement Schema 1.9A first: bounded resource resolution and parse/inventory of base mappings and each data context table, preserving resource origin, digest, owner buckets, raw keys/values, duplicate and limit status, and plugin/wrapper caveats. Add synthetic tests and JSON/text output. Do not rewrite selectors or convert namespace values yet.
+
+After 1.9A is green, implement Schema 1.9B owner-scoped exact lookup correlation. Runtime context must be explicitly supplied to select one context; otherwise inventory all available contexts. Add regression coverage for absent-context fallback versus present-context/missing-entry behavior. Keep namespace translation as a later stage requiring explicit mapping profiles.
+
+The Schema 1.8 green gate remains the latest user-run test checkpoint. Schema 1.9 is not implemented or tested yet.
