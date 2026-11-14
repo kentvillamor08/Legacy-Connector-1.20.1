@@ -59,9 +59,7 @@ final class PalladiumResourceCompat1201 {
     static final String LEGACY_SOUND_SOURCE_HELPER =
             "function getAlienEvoSoundSource(soundSource) {\n"
                     + "    const AlienEvoSoundSource = Java.loadClass('net.minecraft.sounds.SoundSource');\n"
-                    + "    const enumName = soundSource != null && typeof soundSource.name === 'function'\n"
-                    + "            ? String(soundSource.name()) : String(soundSource).toUpperCase();\n"
-                    + "    return AlienEvoSoundSource.valueOf(enumName);\n"
+                    + "    return AlienEvoSoundSource.valueOf(String(soundSource).toUpperCase());\n"
                     + "}\n\n";
     private static final String ALIEN_EVO_CYCLE = "addon/alienevo/kubejs_scripts/cycle_sounds.js";
     private static final String ALIEN_EVO_DETRANSFORM = "addon/alienevo/kubejs_scripts/detransform.js";
@@ -597,6 +595,8 @@ final class PalladiumResourceCompat1201 {
             String path = entry.getKey();
             String script = new String(entry.getValue(), StandardCharsets.UTF_8);
             List<ScriptRewrite> rewrites = new java.util.ArrayList<>();
+            boolean needsSoundEventHelper = false;
+            boolean needsSoundSourceHelper = false;
             int searchFrom = 0;
             while (true) {
                 int call = script.indexOf(".playSound(", searchFrom);
@@ -609,17 +609,23 @@ final class PalladiumResourceCompat1201 {
                 }
 
                 List<ScriptArgument> arguments = splitScriptArguments(script, open + 1, close);
-                if (arguments.size() == 8) {
+                if (arguments.size() == 8
+                        && "null".equals(script.substring(arguments.get(0).start(), arguments.get(0).end()).trim())) {
                     ScriptArgument sound = arguments.get(4);
                     String soundExpression = script.substring(sound.start(), sound.end()).trim();
                     if (!soundExpression.startsWith("getAlienEvoSoundEvent(")) {
                         rewrites.add(new ScriptRewrite(sound.start(), sound.end(), "getAlienEvoSoundEvent"));
+                        needsSoundEventHelper = true;
                     }
 
                     ScriptArgument source = arguments.get(5);
                     String sourceExpression = script.substring(source.start(), source.end()).trim();
-                    if (!sourceExpression.startsWith("getAlienEvoSoundSource(")) {
+                    boolean stringSoundSource = sourceExpression.startsWith("'")
+                            || sourceExpression.startsWith("\\\"")
+                            || (!sourceExpression.isEmpty() && sourceExpression.charAt(0) == 96);
+                    if (stringSoundSource && !sourceExpression.startsWith("getAlienEvoSoundSource(")) {
                         rewrites.add(new ScriptRewrite(source.start(), source.end(), "getAlienEvoSoundSource"));
+                        needsSoundSourceHelper = true;
                     }
                 }
                 searchFrom = close + 1;
@@ -636,7 +642,8 @@ final class PalladiumResourceCompat1201 {
                         + rewrite.helperName() + "(" + expression + ")"
                         + migrated.substring(rewrite.end());
             }
-            migrated = addSoundEventHelper(migrated);
+            if (needsSoundEventHelper) migrated = addSoundEventHelper(migrated);
+            if (needsSoundSourceHelper) migrated = addSoundSourceHelper(migrated);
             if (!migrated.equals(script)) {
                 entry.setValue(migrated.getBytes(StandardCharsets.UTF_8));
                 changed++;
@@ -984,13 +991,13 @@ final class PalladiumResourceCompat1201 {
     }
 
     private static String addSoundEventHelper(String script) {
-        if (!script.contains(SOUND_EVENT_HELPER_MARKER)) {
-            script = insertAfterOmnitrixIntegerHelper(script, LEGACY_SOUND_EVENT_HELPER);
-        }
-        if (!script.contains(SOUND_SOURCE_HELPER_MARKER)) {
-            script = insertAfterOmnitrixIntegerHelper(script, LEGACY_SOUND_SOURCE_HELPER);
-        }
-        return script;
+        if (script.contains(SOUND_EVENT_HELPER_MARKER)) return script;
+        return insertAfterOmnitrixIntegerHelper(script, LEGACY_SOUND_EVENT_HELPER);
+    }
+
+    private static String addSoundSourceHelper(String script) {
+        if (script.contains(SOUND_SOURCE_HELPER_MARKER)) return script;
+        return insertAfterOmnitrixIntegerHelper(script, LEGACY_SOUND_SOURCE_HELPER);
     }
 
     private static String replaceExactScriptOccurrence(

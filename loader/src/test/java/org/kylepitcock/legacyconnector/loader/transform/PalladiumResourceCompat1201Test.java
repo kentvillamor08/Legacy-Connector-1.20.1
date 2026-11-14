@@ -221,9 +221,9 @@ class PalladiumResourceCompat1201Test {
         assertEquals(1, PalladiumResourceCompat1201.apply(resources));
         String migrated = get(resources, PalladiumResourceCompat1201.ALIEN_EVO_DIAMOND_CREATION);
         assertTrue(migrated.contains("function getAlienEvoSoundEvent(soundId)"));
-        assertTrue(migrated.contains("function getAlienEvoSoundSource(soundSource)"));
+        assertFalse(migrated.contains("function getAlienEvoSoundSource(soundSource)"));
         assertTrue(migrated.contains("getAlienEvoSoundEvent(\"alienevo:\" + soundId)"));
-        assertTrue(migrated.contains("getAlienEvoSoundSource(entity.getSoundSource())"));
+        assertTrue(migrated.contains("getAlienEvoSoundEvent(\"alienevo:\" + soundId), entity.getSoundSource()"));
         assertFalse(migrated.contains("\"alienevo:\" + soundId, entity.getSoundSource()"));
 
         assertEquals(0, PalladiumResourceCompat1201.apply(resources));
@@ -252,7 +252,7 @@ class PalladiumResourceCompat1201Test {
         assertEquals(1, PalladiumResourceCompat1201.apply(resources));
         String migrated = get(resources, path);
         assertTrue(migrated.contains("getAlienEvoSoundEvent(`alienevo:${soundToPlay}`)"));
-        assertTrue(migrated.contains("getAlienEvoSoundSource(entity.getSoundSource())"));
+        assertTrue(migrated.contains("entity.getSoundSource()"));
         assertFalse(migrated.contains("`alienevo:${soundToPlay}`, entity.getSoundSource()"));
 
         assertEquals(0, PalladiumResourceCompat1201.apply(resources));
