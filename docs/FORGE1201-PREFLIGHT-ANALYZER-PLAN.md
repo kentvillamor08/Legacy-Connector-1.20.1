@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Compatibility Analyzer
 
-**Status:** Slice 1 implemented and reviewed; Slice 2 implementation committed on the working branch and awaiting local test/build validation  
+**Status:** Slice 1 implemented and reviewed; Slice 2 implementation committed and focused loader tests passed at `e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb`; real-JAR smoke validation and consolidated build remain pending  
 **Working branch:** `feat/forge1201-preflight-analyzer`  
 **Baseline:** `dde40275b9b3bd48ff811afa4c863e475e8a0cdf`  
 **Target:** Forge 1.20.1-only mod JARs on NeoForge 1.21.1 / 21.1.x  
@@ -179,7 +179,7 @@ Both report files are present and internally consistent; however, the Gradle con
 **Last code-bearing Slice 2 checkpoint:** `fdb4e111fab45b0f41c7f15cad26cefbbcf92f13` (the later branch commits in this checkpoint are documentation-only boundary/continuation updates).  
 **Working branch:** `feat/forge1201-preflight-analyzer`  
 **Implementation scope:** bounded nested archive inspection, provider provenance, dependency graph, target-range evaluation.  
-**Validation status:** code and regression fixtures are committed, but no local Gradle test/build has yet been run for Slice 2. Do not call Slice 2 validated until the user runs the focused test suite and real-JAR smoke test.
+**Validation status:** user-confirmed `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks` passed at source HEAD `e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb` on 2026-11-14. The output reports `BUILD SUCCESSFUL` and 12 actionable tasks, all 12 executed. Compilation, the new archive-graph regression tests, and `genBetaMappings` completed. The real-JAR smoke test and consolidated clean build remain pending; do not mark Slice 2 complete yet.
 
 Files changed:
 - `loader/src/main/java/org/kylepitcock/legacyconnector/loader/tools/forge1201/Forge1201ArchiveGraph.java` — new bounded archive graph analyzer.
@@ -216,38 +216,42 @@ Synthetic coverage added:
 
 The test suite is not yet confirmed. Potential test or implementation defects must be corrected from the actual Gradle output; do not treat a successful GitHub write or source inspection as a passing compile.
 
-### Exact next action — validate Slice 2 in the Universal worktree
+### Exact next action — run the Slice 2 real-JAR smoke test
 
-First synchronize only the Universal worktree, after verifying it is clean and on the expected branch:
+**Already completed:** the Universal worktree is synced to source HEAD `e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb`, and `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks` passed on 2026-11-14 (12 tasks executed).
+
+Next, regenerate the Symbiote 1.1.3 preflight report using the original input JAR (expected SHA-256 `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c`) and the same installed NeoForge mods directory used for the Slice 1 report. Use the root `preflight1201` task:
 
 ```powershell
 $repo = 'F:\\Program\\intellij-idea-portable\\Legacy-Connector-1.20.1'
 $branch = 'feat/forge1201-preflight-analyzer'
 $actual = (git -C $repo branch --show-current).Trim()
 if ($actual -ne $branch) { throw "Wrong branch: expected $branch, found $actual" }
-$dirty = @(git -C $repo status --porcelain)
-if ($dirty.Count -gt 0) { throw "Universal worktree is dirty. Inspect local changes before syncing." }
-git -C $repo fetch origin "$branch"
-if ($LASTEXITCODE -ne 0) { throw "Fetch failed." }
-git -C $repo pull --ff-only origin "$branch"
-if ($LASTEXITCODE -ne 0) { throw "Pull failed." }
-git -C $repo rev-parse HEAD
+if ((git -C $repo rev-parse HEAD).Trim() -ne 'e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb') { throw "Unexpected source HEAD." }
+Push-Location $repo
+.\\gradlew.bat preflight1201 -PpreflightJar="PATH_TO_ORIGINAL_SYMBIOTE_JAR" -PpreflightModsDirs="PATH_TO_INSTALLED_NEOFORGE_MODS" --no-daemon --console=plain
+$reportExit = $LASTEXITCODE
+Pop-Location
+if ($reportExit -ne 0) { throw "Slice 2 Symbiote preflight report failed." }
 ```
 
-Expected source HEAD: `fdb4e111fab45b0f41c7f15cad26cefbbcf92f13`.
+Replace the two path placeholders with the exact paths from the earlier Slice 1 report run. The task writes JSON and text under `build/reports/preflight1201/` by default. Verify the source JAR SHA-256 before accepting the report. Inspect the archive graph for nested archive provenance, provider paths/versions, dependency edges and statuses, plus the explicit target Minecraft range result for `[1.20.1,1.21)` versus target `1.21.1`. Preserve the output JSON/text for review.
 
-Then, still in that exact Universal checkout, run:
-
+If the report is correct, run the consolidated clean build:
 ```powershell
-.\\gradlew.bat :loader:clean :loader:test --no-daemon --console=plain
+$repo = 'F:\\Program\\intellij-idea-portable\\Legacy-Connector-1.20.1'
+$branch = 'feat/forge1201-preflight-analyzer'
+$actual = (git -C $repo branch --show-current).Trim()
+if ($actual -ne $branch) { throw "Wrong branch: expected $branch, found $actual" }
+if ((git -C $repo rev-parse HEAD).Trim() -ne 'e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb') { throw "Unexpected source HEAD." }
+Push-Location $repo
+.\\gradlew.bat :clean :loader:clean :testmods:clean :build :loader:build :testmods:assemble --no-daemon --console=plain
+$buildExit = $LASTEXITCODE
+Pop-Location
+if ($buildExit -ne 0) { throw "Universal consolidated build failed." }
 ```
 
-If the focused loader tests pass, run the `preflight1201` task against the original Symbiote 1.1.3 Forge JAR and the same installed NeoForge mods directory used for the previous report. Save both JSON and text reports, then inspect the JSON for archive graph provenance, dependency resolution, and the `[1.20.1,1.21)` target-range result. Keep the original JAR SHA-256 `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c` as the input identity check. If the report is correct, rerun the consolidated clean build before marking Slice 2 validated.
-
-Do not change the Palladium worktree or branch. Do not merge anything into `master`. Do not claim runtime compatibility from preflight output.
-
-Later slices remain unchanged: Slice 3 nested and complete bytecode references; Slice 4 first-class mixin validation; Slice 5 migration/bridge/shim coverage; Slice 6 pack-level graph and runtime feedback. Keep the SRG → 1.20.1 Mojang-name normalization stage separate from 1.20.1 → 1.21.1 migration.
-
+Do not touch `fix/forge1201-palladium-runtime-adapters`, the Palladium worktree, or `master`. Do not claim runtime compatibility from preflight output.
 
 ## Validation boundary
 
