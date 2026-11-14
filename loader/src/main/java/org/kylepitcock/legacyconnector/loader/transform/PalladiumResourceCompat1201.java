@@ -621,7 +621,7 @@ final class PalladiumResourceCompat1201 {
                     ScriptArgument source = arguments.get(5);
                     String sourceExpression = script.substring(source.start(), source.end()).trim();
                     boolean stringSoundSource = sourceExpression.startsWith("'")
-                            || sourceExpression.startsWith("\\\"")
+                            || sourceExpression.startsWith("\"")
                             || (!sourceExpression.isEmpty() && sourceExpression.charAt(0) == 96);
                     if (stringSoundSource && !sourceExpression.startsWith("getAlienEvoSoundSource(")) {
                         rewrites.add(new ScriptRewrite(source.start(), source.end(), "getAlienEvoSoundSource"));

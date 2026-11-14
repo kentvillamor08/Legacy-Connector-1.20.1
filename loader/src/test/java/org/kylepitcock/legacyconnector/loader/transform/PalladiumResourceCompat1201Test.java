@@ -209,7 +209,7 @@ class PalladiumResourceCompat1201Test {
 
 
     @Test
-    void resolvesDiamondCreationSoundAndSourceBeforeLevelPlaySoundOverloadResolution() {
+    void resolvesDiamondCreationSoundAndPreservesNativeSoundSourceBeforeLevelPlaySoundOverloadResolution() {
         Map<String, byte[]> resources = new HashMap<>();
         put(resources, PalladiumResourceCompat1201.ALIEN_EVO_DIAMOND_CREATION, """
                 function tickDiamondCreation(entity, soundId) {
@@ -222,8 +222,8 @@ class PalladiumResourceCompat1201Test {
         String migrated = get(resources, PalladiumResourceCompat1201.ALIEN_EVO_DIAMOND_CREATION);
         assertTrue(migrated.contains("function getAlienEvoSoundEvent(soundId)"));
         assertFalse(migrated.contains("function getAlienEvoSoundSource(soundSource)"));
-        assertTrue(migrated.contains("getAlienEvoSoundEvent(\"alienevo:\" + soundId)"));
-        assertTrue(migrated.contains("getAlienEvoSoundEvent(\"alienevo:\" + soundId), entity.getSoundSource()"));
+        assertTrue(migrated.contains(
+                "getAlienEvoSoundEvent(\"alienevo:\" + soundId), entity.getSoundSource()"));
         assertFalse(migrated.contains("\"alienevo:\" + soundId, entity.getSoundSource()"));
 
         assertEquals(0, PalladiumResourceCompat1201.apply(resources));
