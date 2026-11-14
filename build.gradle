@@ -376,7 +376,7 @@ tasks.register('preflight1201', JavaExec) {
             args.add('--mods-dir')
             args.add(file(dir).absolutePath)
         }
-        targetClasspathFile = new File(reportDir, 'target-classpath.txt')
+        def targetClasspathFile = new File(reportDir, 'target-classpath.txt')
         def targetClasspathEntries = targetCompileClasspath.files.collect { it.absolutePath }
         targetClasspathFile.parentFile.mkdirs()
         targetClasspathFile.setText(targetClasspathEntries.join(System.lineSeparator())
