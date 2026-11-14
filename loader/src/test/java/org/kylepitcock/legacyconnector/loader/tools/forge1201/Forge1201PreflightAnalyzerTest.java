@@ -48,8 +48,8 @@ final class Forge1201PreflightAnalyzerTest {
                         && candidate.discoveredBy().contains("manifest")));
         assertTrue(first.mixinConfigCandidates().stream().anyMatch(candidate ->
                 candidate.path().equals("config/feature.json")));
-        assertEquals("1.6", first.schemaVersion());
-        assertEquals("1.6.0", first.analyzerVersion());
+        assertEquals("1.7", first.schemaVersion());
+        assertEquals("1.7.0", first.analyzerVersion());
         assertEquals(Forge1201MixinAnalyzer.TargetIndexStatus.UNAVAILABLE_NO_TARGET_CLASSPATH,
                 first.mixinAnalysis().targetIndexStatus());
         assertTrue(first.mixinAnalysis().memberAnnotations().isEmpty());
