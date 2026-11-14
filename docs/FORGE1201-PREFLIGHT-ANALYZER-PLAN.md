@@ -916,3 +916,8 @@ Implement `@Slice` boundary inventory using both `from` and `to` nested `@At` an
 ### Schema 1.7 parser follow-up
 
 A review correction preserves the valid owner-only `@At.target` selector form used by construction injection points. The parser no longer rejects the absent member name when an owner is present, and a synthetic ASM regression assertion covers this case. This source/test correction is included in the current Schema 1.7 validation batch; Gradle verification remains pending.
+### Schema 1.7 test correction — owner-only @At fixture count
+
+The first user-run Schema 1.7 test execution compiled successfully and completed 471 tests with one failure at `Forge1201MixinAnalyzerTest.java:350`. The failed assertion expected three `@At` entries, but the same synthetic fixture now contains four (`FIELD`, `INVOKE`, `HEAD`, and the added owner-only `NEW` target). This was a stale test expectation, not a production parser/compiler failure.
+
+Fixed by changing the expected `atHandler.injectionPoints().size()` from `3` to `4` in commit `fbe5b9e5739561bd561819ef26f05224c1baed2d`. The user's next validation must rerun the forced loader test gate at that exact commit. Schema 1.7 remains **pending** until it passes.
