@@ -1014,7 +1014,8 @@ public final class Forge1201MixinAnalyzer {
                     ? AtTargetSelectorStatus.OWNER_ONLY : AtTargetSelectorStatus.MEMBER_NAME_ONLY;
         }
 
-        if (name != null && (name.isBlank() || name.contains("*") || name.contains("+")
+        if (name != null && ((name.isBlank() && status != AtTargetSelectorStatus.OWNER_ONLY)
+                || name.contains("*") || name.contains("+")
                 || name.contains("{") || name.contains("}") || name.contains("->"))) {
             status = AtTargetSelectorStatus.UNSUPPORTED_SYNTAX;
         }
