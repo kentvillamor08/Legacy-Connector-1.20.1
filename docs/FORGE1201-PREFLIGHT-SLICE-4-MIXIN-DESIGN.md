@@ -326,3 +326,6 @@ Synthetic ASM tests cover a field target and exact field descriptor, opcode, ord
 ### Schema 1.7 parser follow-up
 
 A review correction preserves the valid owner-only `@At.target` selector form used by construction injection points. The parser no longer rejects the absent member name when an owner is present, and a synthetic ASM regression assertion covers this case. This source/test correction is included in the current Schema 1.7 validation batch; Gradle verification remains pending.
+### Validation follow-up — corrected @At finding count
+
+The first Schema 1.7 local loader run compiled successfully; 470 of 471 tests passed. The only failure was a stale expected count of three @At findings at `Forge1201MixinAnalyzerTest.java:350`. The fixture now contains four points: FIELD, INVOKE, HEAD, and owner-only NEW. Commit `fbe5b9e5739561bd561819ef26f05224c1baed2d` corrects the expected count to four. No production-code change was needed for this failure. The full Schema 1.7 test gate remains pending.
