@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Analyzer — Slice 3 Design
 
-Status: design checkpoint only. No Slice 3 production implementation is claimed by this document.
+Status: implementation checkpoint. The dynamic/bootstrap reference batch is committed; nested source-archive bytecode scanning and SRG-to-1.20.1 Mojang-name normalization are prepared in the first integration batch. Structural-reference coverage audit and its broader fixture matrix remain in progress.
 
 ## Goal
 
@@ -143,3 +143,34 @@ Use ASM `ClassWriter` to build bytecode fixtures; do not compile fixture source 
 - No semantic Mixin target/handler validation (Slice 4).
 - No reflection string rewriting; reflection/resource strings can be a later heuristic layer.
 - No installed native provider bytecode scanning as part of the source mod's bytecode inventory.
+
+
+## Implementation checkpoint — 2026-11-14
+
+### Implemented in the current integration batch (pending user test gate)
+
+- The existing Forge1201ArchiveGraph now accepts an optional nested-class consumer. It reuses its bounded in-memory ZipInputStream pass to capture safe .class entries alongside metadata and child JARs; there is no extraction or second nested-archive walker.
+- Only nested archives originating inside the input Forge JAR are submitted to the bytecode consumer. Installed provider JARs remain dependency evidence only.
+- Nested FORGE_1201_MOD and LIBRARY_OR_UNRECOGNIZED archives are fed into the same Forge1201ApiUsageAnalyzer.Inventory that scans the outer JAR. Embedded native NeoForge mod bytecode is explicitly excluded from the legacy-source scan.
+- Class entry paths and archive chains are preserved in dynamic-reference provenance and member-reference source locations. Per-archive summaries report discovered, scanned, and skipped class entries.
+- Additional bounds are 8 MiB per class, 16 MiB captured class payload per nested archive, 128 MiB aggregate nested class payload submitted to the scanner, and 64 MiB aggregate outer class payload. Unsafe paths, duplicate entry names, oversize payloads, aggregate-limit skips, and parser rejections remain visible as warnings/summaries.
+- SRG method/field member tokens owned by net/minecraft/ are looked up through the existing generated SrgMojangTable.load() resource. Reports preserve the raw token, 1.20.1 Mojang name, descriptor, count, and archive/class source locations. Unknown tokens are explicitly UNMAPPED. No Forge/NeoForge/third-party owner is normalized, and mapping is not a 1.21.1 compatibility verdict.
+- The preflight report adds nested class totals, per-archive class scan summaries, normalized member rows, and bytecode scan warnings while keeping classCount as the outer source-JAR count.
+
+### Synthetic coverage added in this batch
+
+- A nested ZIP fixture containing a class with Minecraft SRG member references proves that the shared collector sees nested call sites and retains the nested archive path.
+- The fixture chooses a method token from the generated 1.20.1 SRG table and also contains an intentionally unknown token, covering both MAPPED and UNMAPPED reporting.
+- A nested class larger than the class payload limit proves it is counted as skipped rather than silently omitted.
+- Utility-level coverage proves mapped/unmapped behavior and excludes third-party owners from normalization.
+
+### Still pending / not claimed complete
+
+1. User must pull and run the forced loader test gate against the integration commit. No compile/test success is claimed for this integration batch yet.
+2. Add raw ZIP duplicate-entry regression coverage if a stable fixture can be constructed without relying on invalid ZipOutputStream behavior.
+3. Complete the ClassRemapper coverage audit with deterministic fixtures for class headers, generic signatures, annotation structures, descriptors, exceptions, try/catch, type instructions, frames, and local-variable descriptors; prove which callbacks already capture these without double-counting.
+4. Review source SRG mapping behavior against real Symbiote references after the focused test passes; keep all unknown cases visible.
+5. Generate a new uniquely suffixed Symbiote Schema 1.3 report, inspect JSON/text and per-archive counts, then run the consolidated clean build.
+6. Mixin semantic target/handler analysis remains Slice 4; runtime/gameplay compatibility remains unverified.
+
+Do not overwrite the prior Symbiote Slice 2 run-3 artifacts. Keep Palladium + Alien Evolution isolated from this Universal branch.

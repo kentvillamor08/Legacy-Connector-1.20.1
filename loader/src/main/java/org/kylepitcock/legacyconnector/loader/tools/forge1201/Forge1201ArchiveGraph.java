@@ -34,8 +34,8 @@ import java.util.zip.ZipInputStream;
  * Bounded, read-only Jar-in-Jar and installed-provider inventory for the Forge 1.20.1 preflight report.
  *
  * <p>Nested archives are inspected in memory. No archive entries are extracted to disk. Byte, depth,
- * count, and inflated-size limits prevent unbounded recursive work. This slice inventories metadata
- * and dependency provenance only; nested bytecode scanning is intentionally deferred to Slice 3.</p>
+ * count, class-payload, and inflated-size limits prevent unbounded recursive work. Source-nested
+ * class entries can be streamed to the shared ASM inventory without extraction or a second ZIP walk.</p>
  */
 public final class Forge1201ArchiveGraph {
     public static final int MAX_NESTED_DEPTH = 4;
@@ -45,6 +45,9 @@ public final class Forge1201ArchiveGraph {
     public static final long MAX_NESTED_ARCHIVE_BYTES = 32L * 1024 * 1024;
     public static final long MAX_ARCHIVE_INFLATED_BYTES = 64L * 1024 * 1024;
     public static final long MAX_TOTAL_INFLATED_BYTES = 256L * 1024 * 1024;
+    public static final long MAX_CLASS_ENTRY_BYTES = 8L * 1024 * 1024;
+    public static final long MAX_NESTED_CLASS_BYTES_PER_ARCHIVE = 16L * 1024 * 1024;
+    public static final long MAX_TOTAL_NESTED_CLASS_BYTES = 128L * 1024 * 1024;
     private static final int MAX_METADATA_BYTES = 1024 * 1024;
     private static final String JARJAR_METADATA = "META-INF/jarjar/metadata.json";
 
@@ -165,18 +168,49 @@ public final class Forge1201ArchiveGraph {
             VersionRangeStatus status,
             String explanation) {}
 
+    @FunctionalInterface
+    public interface NestedClassConsumer {
+        /** Returns true when the supplied class bytes were successfully parsed by the bytecode inventory. */
+        boolean scan(String archivePath, String classEntryPath, byte[] classBytes);
+    }
+
+    public record ClassScanSummary(
+            String archivePath,
+            ArchiveKind archiveKind,
+            int discoveredClassEntries,
+            int scannedClassEntries,
+            int skippedClassEntries,
+            long submittedClassBytes,
+            List<String> warnings) {
+        public ClassScanSummary {
+            warnings = List.copyOf(warnings);
+        }
+    }
+
     public record Result(
             List<ArchiveFinding> archives,
             List<ProviderFinding> providers,
             List<DependencyEdge> dependencyEdges,
             List<TargetRangeFinding> targetRangeFindings,
+            List<ClassScanSummary> classScanSummaries,
             List<String> warnings) {
         public Result {
             archives = List.copyOf(archives);
             providers = List.copyOf(providers);
             dependencyEdges = List.copyOf(dependencyEdges);
             targetRangeFindings = List.copyOf(targetRangeFindings);
+            classScanSummaries = List.copyOf(classScanSummaries);
             warnings = List.copyOf(warnings);
+        }
+
+        /** Source-compatible constructor for callers that do not collect nested class inventory. */
+        public Result(
+                List<ArchiveFinding> archives,
+                List<ProviderFinding> providers,
+                List<DependencyEdge> dependencyEdges,
+                List<TargetRangeFinding> targetRangeFindings,
+                List<String> warnings) {
+            this(archives, providers, dependencyEdges, targetRangeFindings, List.of(), warnings);
         }
     }
 
@@ -185,6 +219,10 @@ public final class Forge1201ArchiveGraph {
             String modsToml,
             String neoForgeModsToml,
             Map<String, Candidate> nestedJars,
+            Map<String, byte[]> classEntries,
+            int discoveredClassEntries,
+            int skippedClassEntries,
+            long capturedClassBytes,
             List<String> warnings,
             ArchiveKind incompleteKind,
             String incompleteReason) {}
@@ -203,6 +241,8 @@ public final class Forge1201ArchiveGraph {
         private final List<ProviderFinding> providers = new ArrayList<>();
         private final List<DeclaringMod> declaringMods = new ArrayList<>();
         private final List<String> warnings = new ArrayList<>();
+        private final List<ClassScanSummary> classScanSummaries = new ArrayList<>();
+        private long nestedClassBytesCaptured;
         private boolean archiveCountWarningAdded;
     }
 
@@ -222,6 +262,18 @@ public final class Forge1201ArchiveGraph {
             Collection<Path> installedModDirectories,
             String targetMinecraftVersion,
             String targetNeoForgeVersion) throws IOException {
+        return analyze(sourceJar, sourceInfo, installedModDirectories,
+                targetMinecraftVersion, targetNeoForgeVersion, null);
+    }
+
+    /** Analyze providers and stream source-nested class entries to the shared bytecode scanner. */
+    public static Result analyze(
+            Path sourceJar,
+            Forge1201JarInfo sourceInfo,
+            Collection<Path> installedModDirectories,
+            String targetMinecraftVersion,
+            String targetNeoForgeVersion,
+            NestedClassConsumer nestedClassConsumer) throws IOException {
         Budget budget = new Budget();
         String sourcePath = "source/" + sourceJar.getFileName();
         String sourceDigest = sha256(sourceJar);
@@ -234,7 +286,7 @@ public final class Forge1201ArchiveGraph {
                     "FORGE_1201", sourceDigest, null, null, null, null, budget);
         }
 
-        scanNestedFromZipFile(sourceJar, sourcePath, 1, ArchiveOrigin.INPUT_NESTED, budget);
+        scanNestedFromZipFile(sourceJar, sourcePath, 1, ArchiveOrigin.INPUT_NESTED, budget, nestedClassConsumer);
 
         List<Path> directories = installedModDirectories == null ? List.of()
                 : installedModDirectories.stream().filter(java.util.Objects::nonNull)
@@ -272,7 +324,8 @@ public final class Forge1201ArchiveGraph {
                         addProvidersAndDeclarations(displayPath, root.mods(), providerKind, root.loaderKind(),
                                 digest, null, null, null, null, budget);
                     }
-                    scanNestedFromZipFile(jar, displayPath, 1, ArchiveOrigin.INSTALLED_NESTED, budget);
+                    // Installed provider archives are dependency evidence, not source bytecode to migrate.
+                    scanNestedFromZipFile(jar, displayPath, 1, ArchiveOrigin.INSTALLED_NESTED, budget, null);
                 } catch (IOException | RuntimeException exception) {
                     budget.warnings.add(displayPath + ": provider archive inspection failed: "
                             + conciseMessage(exception));
@@ -292,8 +345,9 @@ public final class Forge1201ArchiveGraph {
         targetRanges = targetRanges.stream().sorted(Comparator.comparing(TargetRangeFinding::declaringArchivePath)
                 .thenComparing(TargetRangeFinding::declaringModId)
                 .thenComparing(TargetRangeFinding::dependencyModId)).toList();
+        budget.classScanSummaries.sort(Comparator.comparing(ClassScanSummary::archivePath));
         return new Result(budget.archives, budget.providers, edges, targetRanges,
-                budget.warnings.stream().distinct().sorted().toList());
+                budget.classScanSummaries, budget.warnings.stream().distinct().sorted().toList());
     }
 
     private static List<Forge1201PreflightAnalyzer.ModMetadata> toReportMods(
@@ -343,7 +397,8 @@ public final class Forge1201ArchiveGraph {
     }
 
     private static void scanNestedFromZipFile(
-            Path parentJar, String parentDisplayPath, int depth, ArchiveOrigin origin, Budget budget) throws IOException {
+            Path parentJar, String parentDisplayPath, int depth, ArchiveOrigin origin, Budget budget,
+            NestedClassConsumer nestedClassConsumer) throws IOException {
         Snapshot snapshot;
         try (ZipFile zip = new ZipFile(parentJar.toFile())) {
             snapshot = snapshotFromZipFile(zip, budget);
@@ -354,7 +409,7 @@ public final class Forge1201ArchiveGraph {
         }
         budget.warnings.addAll(snapshot.warnings());
         for (Candidate candidate : snapshot.nestedJars().values()) {
-            processCandidate(candidate, parentDisplayPath, depth, origin, budget);
+            processCandidate(candidate, parentDisplayPath, depth, origin, budget, nestedClassConsumer);
         }
     }
 
@@ -420,7 +475,8 @@ public final class Forge1201ArchiveGraph {
             }
         }
         warnings.addAll(parsed.warnings());
-        return new Snapshot(modsToml, neoToml, candidates, warnings, null, null);
+        return new Snapshot(modsToml, neoToml, candidates, Map.of(),
+                0, 0, 0, warnings, null, null);
     }
 
     private record ParsedJarJarMetadata(Map<String, JarJarCoordinate> coordinates, List<String> warnings) {}
@@ -468,7 +524,8 @@ public final class Forge1201ArchiveGraph {
     }
 
     private static void processCandidate(
-            Candidate candidate, String parentPath, int depth, ArchiveOrigin origin, Budget budget) {
+            Candidate candidate, String parentPath, int depth, ArchiveOrigin origin, Budget budget,
+            NestedClassConsumer nestedClassConsumer) {
         String displayPath = parentPath + "!/" + candidate.path();
         JarJarCoordinate coordinate = candidate.coordinate();
         String group = coordinate == null ? null : coordinate.group();
@@ -521,7 +578,8 @@ public final class Forge1201ArchiveGraph {
 
         Snapshot snapshot;
         try {
-            snapshot = snapshotFromBytes(bytes, budget);
+            snapshot = snapshotFromBytes(bytes, budget, origin == ArchiveOrigin.INPUT_NESTED
+                    && nestedClassConsumer != null, displayPath);
         } catch (IOException | RuntimeException exception) {
             ArchiveFinding finding = new ArchiveFinding(displayPath, parentPath, depth, origin, bytes.length, digest,
                     ArchiveKind.CORRUPT_ARCHIVE, group, artifact, range, artifactVersion, List.of(),
@@ -534,6 +592,14 @@ public final class Forge1201ArchiveGraph {
             budget.archives.add(new ArchiveFinding(displayPath, parentPath, depth, origin, bytes.length, digest,
                     snapshot.incompleteKind(), group, artifact, range, artifactVersion, List.of(),
                     List.of(snapshot.incompleteReason())));
+            if (origin == ArchiveOrigin.INPUT_NESTED && nestedClassConsumer != null) {
+                List<String> classWarnings = new ArrayList<>();
+                classWarnings.add("Nested archive parsing stopped before class scanning: " + snapshot.incompleteReason());
+                budget.classScanSummaries.add(new ClassScanSummary(displayPath, snapshot.incompleteKind(),
+                        snapshot.discoveredClassEntries(), 0,
+                        snapshot.discoveredClassEntries(), 0, classWarnings));
+                budget.warnings.add(displayPath + ": nested class inventory is incomplete because archive parsing stopped.");
+            }
             return;
         }
         ParsedArchive parsed = classifyArchive(displayPath, snapshot);
@@ -549,16 +615,26 @@ public final class Forge1201ArchiveGraph {
             addProvidersAndDeclarations(displayPath, parsed.mods(), providerKind, parsed.loaderKind(),
                     digest, group, artifact, range, artifactVersion, budget);
         }
+        if (origin == ArchiveOrigin.INPUT_NESTED && nestedClassConsumer != null) {
+            scanNestedClassEntries(displayPath, parsed.kind(), snapshot, budget, nestedClassConsumer);
+        }
         for (Candidate child : snapshot.nestedJars().values()) {
-            processCandidate(child, displayPath, depth + 1, origin, budget);
+            processCandidate(child, displayPath, depth + 1, origin, budget, nestedClassConsumer);
         }
     }
 
-    private static Snapshot snapshotFromBytes(byte[] bytes, Budget budget) throws IOException {
+    private static Snapshot snapshotFromBytes(
+            byte[] bytes, Budget budget, boolean captureClassEntries, String archivePath) throws IOException {
         Map<String, byte[]> selected = new TreeMap<>();
+        Map<String, byte[]> classEntries = new TreeMap<>();
+        Set<String> seenClassEntryNames = new HashSet<>();
+        Set<String> duplicateClassEntryNames = new HashSet<>();
         Set<String> oversizedJars = new TreeSet<>();
         List<String> warnings = new ArrayList<>();
         long archiveInflated = 0;
+        long capturedClassBytes = 0;
+        int discoveredClassEntries = 0;
+        int skippedClassEntries = 0;
         int entryCount = 0;
         ArchiveKind incompleteKind = null;
         String incompleteReason = null;
@@ -575,9 +651,38 @@ public final class Forge1201ArchiveGraph {
                         || lower.equals("meta-inf/neoforge.mods.toml")
                         || lower.equals(JARJAR_METADATA.toLowerCase(Locale.ROOT));
                 boolean jarCandidate = lower.endsWith(".jar");
+                boolean classCandidate = captureClassEntries && !entry.isDirectory() && lower.endsWith(".class");
                 boolean safe = isSafeArchivePath(name);
-                boolean capture = metadata || (jarCandidate && safe);
+                boolean duplicateClassEntry = false;
+                if (classCandidate) {
+                    discoveredClassEntries++;
+                    if (!seenClassEntryNames.add(name)) {
+                        duplicateClassEntry = true;
+                        if (duplicateClassEntryNames.add(name)) {
+                            byte[] previous = classEntries.remove(name);
+                            if (previous != null) {
+                                capturedClassBytes -= previous.length;
+                                skippedClassEntries += 2;
+                            } else {
+                                skippedClassEntries++;
+                            }
+                            warnings.add(archivePath + "!/" + name
+                                    + " is duplicated within the archive; all entries with this name were skipped.");
+                        } else {
+                            skippedClassEntries++;
+                        }
+                    } else if (!safe) {
+                        skippedClassEntries++;
+                        warnings.add(archivePath + "!/" + name + " skipped: unsafe class-entry path.");
+                    }
+                }
+                boolean captureClass = classCandidate && safe && !duplicateClassEntry
+                        && !duplicateClassEntryNames.contains(name);
+                boolean capture = metadata || (jarCandidate && safe) || captureClass;
+                long classEntryLimit = Math.min(MAX_CLASS_ENTRY_BYTES,
+                        Math.max(0, MAX_NESTED_CLASS_BYTES_PER_ARCHIVE - capturedClassBytes));
                 long entryBytes = 0;
+                boolean classCaptureLimitExceeded = false;
                 ByteArrayOutputStream output = capture ? new ByteArrayOutputStream() : null;
                 byte[] buffer = new byte[8192];
                 int read;
@@ -591,20 +696,41 @@ public final class Forge1201ArchiveGraph {
                         throw new BudgetLimitException("nested archive inflated-byte budget exceeded");
                     }
                     if (output != null) {
-                        long entryLimit = metadata ? MAX_METADATA_BYTES : MAX_NESTED_ARCHIVE_BYTES;
-                        if (entryBytes <= entryLimit) output.write(buffer, 0, read);
+                        long entryLimit = metadata ? MAX_METADATA_BYTES
+                                : classCandidate ? classEntryLimit : MAX_NESTED_ARCHIVE_BYTES;
+                        if (entryBytes <= entryLimit) {
+                            output.write(buffer, 0, read);
+                        } else {
+                            if (classCandidate) classCaptureLimitExceeded = true;
+                            output = null;
+                        }
                     }
                 }
-                if (capture && output != null) {
-                    long entryLimit = metadata ? MAX_METADATA_BYTES : MAX_NESTED_ARCHIVE_BYTES;
-                    if (entryBytes > entryLimit) {
-                        if (jarCandidate) oversizedJars.add(name);
-                        else warnings.add(name + " exceeds the metadata read limit and was not parsed.");
+                if (metadata) {
+                    if (entryBytes > MAX_METADATA_BYTES || output == null) {
+                        warnings.add(name + " exceeds the metadata read limit and was not parsed.");
+                    } else {
+                        selected.putIfAbsent(name, output.toByteArray());
+                    }
+                } else if (jarCandidate && safe) {
+                    if (output == null || entryBytes > MAX_NESTED_ARCHIVE_BYTES) {
+                        oversizedJars.add(name);
                     } else {
                         selected.putIfAbsent(name, output.toByteArray());
                     }
                 } else if (jarCandidate && !safe) {
                     oversizedJars.add(name);
+                } else if (classCandidate && captureClass) {
+                    if (output == null || classCaptureLimitExceeded
+                            || entryBytes > classEntryLimit) {
+                        skippedClassEntries++;
+                        warnings.add(archivePath + "!/" + name + " skipped: class payload exceeded the "
+                                + "per-class or per-archive class-byte capture limit.");
+                    } else {
+                        byte[] classBytes = output.toByteArray();
+                        classEntries.put(name, classBytes);
+                        capturedClassBytes += classBytes.length;
+                    }
                 }
                 zip.closeEntry();
             }
@@ -644,7 +770,58 @@ public final class Forge1201ArchiveGraph {
                 candidates.put(path, new Candidate(path, selected.get(path), coordinate, null));
             }
         }
-        return new Snapshot(modsToml, neoToml, candidates, warnings, incompleteKind, incompleteReason);
+        return new Snapshot(modsToml, neoToml, candidates, classEntries,
+                discoveredClassEntries, skippedClassEntries, capturedClassBytes,
+                warnings, incompleteKind, incompleteReason);
+    }
+
+    private static void scanNestedClassEntries(
+            String archivePath,
+            ArchiveKind archiveKind,
+            Snapshot snapshot,
+            Budget budget,
+            NestedClassConsumer consumer) {
+        int scanned = 0;
+        int skipped = snapshot.skippedClassEntries();
+        long captured = 0;
+        List<String> warnings = new ArrayList<>();
+        if (archiveKind == ArchiveKind.NEOFORGE_MOD) {
+            skipped += snapshot.classEntries().size();
+            if (!snapshot.classEntries().isEmpty()) {
+                warnings.add("Nested NeoForge mod bytecode was not included in the legacy Forge source inventory.");
+            }
+        } else {
+            for (Map.Entry<String, byte[]> entry : snapshot.classEntries().entrySet()) {
+                byte[] classBytes = entry.getValue();
+                if (budget.nestedClassBytesCaptured + classBytes.length > MAX_TOTAL_NESTED_CLASS_BYTES) {
+                    skipped++;
+                    warnings.add(archivePath + "!/" + entry.getKey()
+                            + " skipped: aggregate nested class-byte capture limit reached.");
+                    continue;
+                }
+                boolean accepted;
+                try {
+                    accepted = consumer.scan(archivePath, entry.getKey(), classBytes);
+                } catch (RuntimeException exception) {
+                    accepted = false;
+                    warnings.add(archivePath + "!/" + entry.getKey()
+                            + " could not be scanned: " + conciseMessage(exception));
+                }
+                budget.nestedClassBytesCaptured += classBytes.length;
+                captured += classBytes.length;
+                if (accepted) {
+                    scanned++;
+                } else {
+                    skipped++;
+                    warnings.add(archivePath + "!/" + entry.getKey() + " was rejected by the bytecode scanner.");
+                }
+            }
+        }
+        if (!warnings.isEmpty()) {
+            budget.warnings.addAll(warnings);
+        }
+        budget.classScanSummaries.add(new ClassScanSummary(archivePath, archiveKind,
+                snapshot.discoveredClassEntries(), scanned, skipped, captured, warnings));
     }
 
     private static boolean hasZipSignature(byte[] bytes) {

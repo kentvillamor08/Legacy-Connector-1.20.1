@@ -51,6 +51,29 @@ final class Forge1201PreflightAnalyzerTest {
         assertTrue(first.jarInJarPaths().contains("META-INF/jarjar/metadata.json"));
         assertTrue(first.jarInJarPaths().contains("META-INF/jarjar/sample-library.jar"));
         assertEquals(1, first.classCount());
+        assertEquals(1, first.outerClassScannedCount());
+        assertEquals(1, first.nestedClassCount());
+        assertEquals(1, first.nestedClassScannedCount());
+        assertTrue(first.archiveGraph().classScanSummaries().stream().anyMatch(summary ->
+                summary.archivePath().equals("source/sample.jar!/META-INF/jarjar/sample-nested.jar")
+                        && summary.discoveredClassEntries() == 1
+                        && summary.scannedClassEntries() == 1
+                        && summary.skippedClassEntries() == 0));
+        assertTrue(first.methodCallSites().stream().anyMatch(call ->
+                call.callerClass().equals("nested/LibraryFeature")
+                        && call.targetOwner().equals("net/minecraft/world/entity/Entity")
+                        && call.targetName().equals("m_2147483647_")));
+        assertTrue(first.normalizedMemberReferences().stream().anyMatch(reference ->
+                reference.sourceSrgName().equals("m_2147483647_")
+                        && reference.mappingStatus() == Forge1201ApiUsageAnalyzer.SrgMappingStatus.UNMAPPED
+                        && reference.mojangName() == null));
+        var generatedMethodMapping = org.kylepitcock.legacyconnector.loader.mapping.SrgMojangTable.load()
+                .entrySet().stream().filter(entry -> entry.getKey().startsWith("m_"))
+                .sorted(java.util.Map.Entry.comparingByKey()).findFirst().orElseThrow();
+        assertTrue(first.normalizedMemberReferences().stream().anyMatch(reference ->
+                reference.sourceSrgName().equals(generatedMethodMapping.getKey())
+                        && reference.mojangName().equals(generatedMethodMapping.getValue())
+                        && reference.mappingStatus() == Forge1201ApiUsageAnalyzer.SrgMappingStatus.MAPPED));
         assertTrue(first.sourceSha256().matches("[0-9a-f]{64}"));
 
         assertEquals(Forge1201DependencyResolver.Status.HOST_BRIDGE, dependency(first, "minecraft").status());
@@ -94,10 +117,66 @@ final class Forge1201PreflightAnalyzerTest {
         assertEquals(Forge1201PreflightAnalyzer.toJson(first), Forge1201PreflightAnalyzer.toJson(second));
         assertTrue(Forge1201PreflightAnalyzer.toJson(first).contains("\"dynamicReferences\""));
         assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("Dynamic / bootstrap references:"));
+        assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("Nested class archive scans: 1"));
+        assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("Source SRG -> Minecraft 1.20.1 Mojang member names:"));
         assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("not a compatibility approval"));
         assertTrue(first.limitations().stream().anyMatch(value ->
                 value.contains("outer JAR") && value.contains("nested archive class bytecode")));
         assertTrue(first.limitations().stream().anyMatch(value -> value.contains("API compatibility are not verified")));
+    }
+
+    @Test
+    void reportsOversizedNestedClassEntriesAsExplicitlySkipped() throws IOException {
+        byte[] oversizedClass = new byte[(int) Forge1201ArchiveGraph.MAX_CLASS_ENTRY_BYTES + 1];
+        Path sourceJar = createForgeModJar("oversized-nested.jar", false,
+                nestedArchiveWithClassBytes(oversizedClass));
+
+        var result = Forge1201PreflightAnalyzer.analyze(sourceJar, List.of());
+
+        assertEquals(1, result.nestedClassCount());
+        assertEquals(0, result.nestedClassScannedCount());
+        var summary = result.archiveGraph().classScanSummaries().stream()
+                .filter(value -> value.archivePath().endsWith("META-INF/jarjar/sample-nested.jar"))
+                .findFirst().orElseThrow();
+        assertEquals(1, summary.discoveredClassEntries());
+        assertEquals(0, summary.scannedClassEntries());
+        assertEquals(1, summary.skippedClassEntries());
+        assertTrue(summary.warnings().stream().anyMatch(value -> value.contains("class payload exceeded")));
+    }
+
+    @Test
+    void normalizesOnlyMinecraftSrgMemberNamesAndKeepsUnknownsExplicit() {
+        var location = new Forge1201ApiUsageAnalyzer.ApiReferenceLocation(
+                "source/example.jar", "example/UsesMinecraft.class");
+        var mapped = Forge1201ApiUsageAnalyzer.normalizeSrgMemberReference(
+                Forge1201ApiUsageAnalyzer.ApiMemberKind.METHOD,
+                "net/minecraft/world/entity/Entity", "m_12345_", "()V", 2,
+                List.of(location), java.util.Map.of("m_12345_", "getExample"));
+        assertNotNull(mapped);
+        assertEquals("getExample", mapped.mojangName());
+        assertEquals(Forge1201ApiUsageAnalyzer.SrgMappingStatus.MAPPED, mapped.mappingStatus());
+        assertEquals(List.of(location), mapped.sourceLocations());
+
+        var unknown = Forge1201ApiUsageAnalyzer.normalizeSrgMemberReference(
+                Forge1201ApiUsageAnalyzer.ApiMemberKind.FIELD,
+                "net/minecraft/world/entity/Entity", "f_987654321_", "I", 1,
+                List.of(location), java.util.Map.of());
+        assertNotNull(unknown);
+        assertEquals(Forge1201ApiUsageAnalyzer.SrgMappingStatus.UNMAPPED, unknown.mappingStatus());
+        assertEquals("f_987654321_", unknown.sourceSrgName());
+        assertEquals(null, unknown.mojangName());
+
+        var thirdParty = Forge1201ApiUsageAnalyzer.normalizeSrgMemberReference(
+                Forge1201ApiUsageAnalyzer.ApiMemberKind.METHOD,
+                "com/example/OwnClass", "m_12345_", "()V", 1,
+                List.of(location), java.util.Map.of("m_12345_", "getExample"));
+        assertEquals(null, thirdParty);
+
+        var wrongMemberKind = Forge1201ApiUsageAnalyzer.normalizeSrgMemberReference(
+                Forge1201ApiUsageAnalyzer.ApiMemberKind.FIELD,
+                "net/minecraft/world/entity/Entity", "m_12345_", "I", 1,
+                List.of(location), java.util.Map.of("m_12345_", "getExample"));
+        assertEquals(null, wrongMemberKind);
     }
 
     @Test
@@ -136,6 +215,10 @@ final class Forge1201PreflightAnalyzerTest {
     }
 
     private Path createForgeModJar(String name, boolean duplicateId) throws IOException {
+        return createForgeModJar(name, duplicateId, nestedLibraryJar());
+    }
+
+    private Path createForgeModJar(String name, boolean duplicateId, byte[] nestedArchive) throws IOException {
         Path jar = tempDir.resolve(name);
         String metadata = """
                 modLoader="javafml"
@@ -219,6 +302,7 @@ final class Forge1201PreflightAnalyzerTest {
             put(zip, "data/shared/recipes/example.json", "{}".getBytes(StandardCharsets.UTF_8));
             put(zip, "META-INF/jarjar/metadata.json", "{}".getBytes(StandardCharsets.UTF_8));
             put(zip, "META-INF/jarjar/sample-library.jar", new byte[] {0, 1, 2});
+            put(zip, "META-INF/jarjar/sample-nested.jar", nestedArchive);
         }
         return jar;
     }
@@ -234,6 +318,39 @@ final class Forge1201PreflightAnalyzerTest {
         try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(jar))) {
             put(zip, "META-INF/neoforge.mods.toml", metadata.getBytes(StandardCharsets.UTF_8));
         }
+    }
+
+    private static byte[] nestedLibraryJar() throws IOException {
+        return nestedArchiveWithClassBytes(nestedLibraryClass());
+    }
+
+    private static byte[] nestedArchiveWithClassBytes(byte[] classBytes) throws IOException {
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(bytes)) {
+            put(zip, "nested/LibraryFeature.class", classBytes);
+        }
+        return bytes.toByteArray();
+    }
+
+    private static byte[] nestedLibraryClass() {
+        var generatedMethodMapping = org.kylepitcock.legacyconnector.loader.mapping.SrgMojangTable.load()
+                .entrySet().stream().filter(entry -> entry.getKey().startsWith("m_"))
+                .sorted(java.util.Map.Entry.comparingByKey()).findFirst().orElseThrow();
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "nested/LibraryFeature",
+                null, "java/lang/Object", null);
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "useMinecraft", "()V", null, null);
+        method.visitCode();
+        method.visitMethodInsn(Opcodes.INVOKESTATIC, "net/minecraft/world/entity/Entity",
+                generatedMethodMapping.getKey(), "()V", false);
+        method.visitMethodInsn(Opcodes.INVOKESTATIC, "net/minecraft/world/entity/Entity",
+                "m_2147483647_", "()V", false);
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
     }
 
     private static byte[] sampleModClass() {

@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Compatibility Analyzer
 
-**Status:** Slices 1 and 2 are implemented and validated. Slice 3 is in progress: the first Schema 1.3 / Analyzer 1.3.0 code batch now captures contextual invokedynamic/bootstrap/LDC/ConstantDynamic references for outer-JAR classes and includes synthetic regression tests. The first focused test run compiled successfully but exposed one stale test expectation for the updated limitation wording; that assertion has been corrected in commit `804c9c6c1e51969cc0168848cd0ebea3e551f354`. The corrected forced test gate is pending. Nested archive bytecode and source SRG-to-Mojang normalization remain next.
+**Status:** Slices 1 and 2 are implemented and validated. The first Slice 3 dynamic-reference batch passed the user's forced focused loader test gate at `4457199a4109d774b25a428e7c68e23b4ec3b4ce` (`BUILD SUCCESSFUL in 24s`, 12/12 tasks executed). A follow-on integration batch is prepared to scan safe source-nested class entries through the same ASM inventory and normalize Minecraft SRG member tokens through the generated SrgMojangTable; this batch awaits its own user-run forced test gate. Structural reference coverage remains under audit.
 
 **Report filename rule:** every analyzer output filename includes its slice number, e.g. `symbiote-1.1.3.jar-slice-2.json` and `symbiote-1.1.3.jar-slice-2.txt`. Repeated runs append a run number, e.g. `symbiote-1.1.3.jar-slice-2-run-2.json` and `.txt`. Use the root Gradle task's explicit `-PpreflightJson=<path>` and `-PpreflightText=<path>` options. Never overwrite the unsuffixed legacy root filenames or an earlier slice/run. The testbench archive index is `archive/preflight/README.md`.
   
@@ -377,3 +377,41 @@ Keep the Palladium + Alien Evolution worktree/branch untouched. Do not start or 
 - Non-fatal warnings: 18 Java deprecation/removal warnings and Gradle 9.0 compatibility/deprecation warnings.
 - The Slice 3 dynamic-reference implementation is committed, but its new forced test gate is pending. No Slice 3 test/build pass is claimed.
 - No Minecraft runtime or gameplay compatibility is established by the tests or static report artifacts.
+
+
+## CURRENT CONTINUATION UPDATE — 2026-11-14 — Slice 3 nested bytecode and SRG integration prepared
+
+### Confirmed user test gate before this batch
+
+The user pulled the stale test assertion fix through commit 4457199a4109d774b25a428e7c68e23b4ec3b4ce on feat/forge1201-preflight-analyzer and ran:
+
+```text
+:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks
+BUILD SUCCESSFUL in 24s
+12 actionable tasks: 12 executed
+```
+
+This confirms the dynamic-reference outer-JAR batch and corrected assertion. The user's transcript did not include a JUnit test count. The old PSReadLine warning is unrelated.
+
+### Prepared integration changes
+
+- Extend the existing bounded Forge1201ArchiveGraph with a source-nested class-entry consumer and deterministic per-archive class scan summaries.
+- Scan source-nested Forge mod and library/unrecognized archive classes using the same Forge1201ApiUsageAnalyzer.Inventory that scans the root JAR. Installed top-level provider bytecode and nested installed-provider bytecode remain excluded; native NeoForge nested mod bytecode is also excluded.
+- Add explicit class limits: 8 MiB individual class, 16 MiB captured class bytes per nested archive, 128 MiB aggregate nested class bytes submitted to the scanner, and 64 MiB outer class bytes.
+- Duplicate class entry names and unsafe paths are skipped with warnings. Oversized/aggregate-limit classes are summarized as skipped. A nested scan summary keeps the full archive path, archive classification, discovered/scanned/skipped counts, submitted bytes and warnings.
+- Keep the old report classCount meaning (outer classes) and add nestedClassCount, nested per-archive summaries and warnings.
+- Normalize SRG-looking member tokens only when the symbolic owner is net/minecraft/, using the existing generated SrgMojangTable.load(). Preserve raw SRG, mapped Mojang name or explicit UNMAPPED, descriptor, count, and archive/class locations. No mapping is treated as a target-version compatibility verdict.
+- Regression fixtures cover a nested class with both a table-backed method token and a deliberately unknown token, and a nested class exceeding the entry limit. Mapping utility tests also exclude third-party owners.
+- ClassRemapper structural callback completeness has not been fully audited. Headers, signatures, annotations, descriptors, exceptions, try/catch, type instructions, frames and local-variable contexts remain an explicit follow-on Slice 3 task. Duplicate-entry test coverage also remains to be added if a robust raw ZIP fixture is available.
+
+### Validation boundary
+
+- Integration source changes are prepared in four source/test blobs but are not yet committed or user-tested. Do not claim that the code compiles or that the new tests pass.
+- Existing confirmed green checkpoint remains 4457199a4109d774b25a428e7c68e23b4ec3b4ce.
+- Next: commit the reviewed Graph/ASM/Preflight/test/docs batch to the same Universal branch, then give the user a guarded fast-forward + forced :loader:clean :loader:test command. Do not generate a new Symbiote report until the integration forced test gate is green.
+- The next Symbiote output must use a new run suffix; do not overwrite Slice 2 run-3.
+- Keep the friend Palladium + Alien Evolution worktree/branch untouched.
+
+### New-chat reminder
+
+Read docs/CHATGPT-CONTINUATION-HANDOFF.md in the testbench repository first. Continue from the integration batch's user test gate; preserve the universal modpack-ready vision and branch isolation.

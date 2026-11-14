@@ -110,6 +110,7 @@ public final class Forge1201PreflightAnalyzer {
             String coreModClass,
             List<String> jarInJarPaths,
             int classCount,
+            int outerClassScannedCount,
             List<String> modEntrypoints,
             Map<String, Integer> packageReferences,
             List<ApiTypeFinding> apiTypes,
@@ -118,6 +119,10 @@ public final class Forge1201PreflightAnalyzer {
             List<ApiMethodCallSite> methodCallSites,
             List<ApiFieldCallSite> fieldCallSites,
             List<Forge1201ApiUsageAnalyzer.ApiDynamicReference> dynamicReferences,
+            int nestedClassCount,
+            int nestedClassScannedCount,
+            List<Forge1201ApiUsageAnalyzer.ApiSrgMemberReference> normalizedMemberReferences,
+            List<String> classScanWarnings,
             List<String> observedNativeModIds,
             List<String> limitations,
             Forge1201ArchiveGraph.Result archiveGraph) {
@@ -139,6 +144,8 @@ public final class Forge1201PreflightAnalyzer {
             methodCallSites = List.copyOf(methodCallSites);
             fieldCallSites = List.copyOf(fieldCallSites);
             dynamicReferences = List.copyOf(dynamicReferences);
+            normalizedMemberReferences = List.copyOf(normalizedMemberReferences);
+            classScanWarnings = List.copyOf(classScanWarnings);
             observedNativeModIds = List.copyOf(observedNativeModIds);
             limitations = List.copyOf(limitations);
         }
@@ -208,13 +215,22 @@ public final class Forge1201PreflightAnalyzer {
         List<ApiMethodCallSite> methodCallSites = new ArrayList<>();
         List<ApiFieldCallSite> fieldCallSites = new ArrayList<>();
         List<Forge1201ApiUsageAnalyzer.ApiDynamicReference> dynamicReferences = new ArrayList<>();
+        List<Forge1201ApiUsageAnalyzer.ApiSrgMemberReference> normalizedMemberReferences = new ArrayList<>();
+        List<String> classScanWarnings = new ArrayList<>();
         int classCount = 0;
+        int outerClassScannedCount = 0;
+        int nestedClassCount = 0;
+        int nestedClassScannedCount = 0;
         AnalysisStatus analysisStatus = AnalysisStatus.BYTECODE_INVENTORY_SKIPPED_METADATA_NOT_RECOGNIZED;
         ForgeMetadata forgeMetadata = null;
 
         Set<String> nativeIds = Forge1201DependencyResolver.findNativeModIds(modDirectories);
+        Forge1201ApiUsageAnalyzer.Inventory usageInventory = new Forge1201ApiUsageAnalyzer.Inventory();
+        Forge1201ArchiveGraph.NestedClassConsumer nestedClassConsumer =
+                jarInfo == null ? null : usageInventory::scanNestedClass;
         Forge1201ArchiveGraph.Result archiveGraph = Forge1201ArchiveGraph.analyze(
-                jar, jarInfo, modDirectories, TARGET_MINECRAFT_VERSION, TARGET_NEOFORGE_VERSION);
+                jar, jarInfo, modDirectories, TARGET_MINECRAFT_VERSION, TARGET_NEOFORGE_VERSION,
+                nestedClassConsumer);
         if (jarInfo != null) {
             forgeMetadata = new ForgeMetadata(
                     jarInfo.modLoader(), jarInfo.loaderVersion(),
@@ -247,8 +263,15 @@ public final class Forge1201PreflightAnalyzer {
                     .thenComparing(DependencyFinding::versionRange)
                     .thenComparing(DependencyFinding::mandatory));
 
-            Forge1201ApiUsageAnalyzer.Analysis usage = Forge1201ApiUsageAnalyzer.analyze(jar);
+            usageInventory.scanOuterJar(jar);
+            Forge1201ApiUsageAnalyzer.Analysis usage = usageInventory.finish(jarInfo);
             classCount = usage.classCount();
+            outerClassScannedCount = usageInventory.outerClassScannedCount();
+            nestedClassCount = archiveGraph.classScanSummaries().stream()
+                    .mapToInt(Forge1201ArchiveGraph.ClassScanSummary::discoveredClassEntries).sum();
+            nestedClassScannedCount = usageInventory.nestedClassScannedCount();
+            normalizedMemberReferences.addAll(usageInventory.normalizedSrgMemberReferences());
+            classScanWarnings.addAll(usageInventory.classScanWarnings());
             entrypoints.addAll(usage.modEntrypoints());
             entrypoints.sort(String::compareTo);
             usage.packageReferences().entrySet().stream().sorted(Map.Entry.comparingByKey())
@@ -311,8 +334,9 @@ public final class Forge1201PreflightAnalyzer {
         List<String> observedNativeIds = nativeIds.stream().sorted().toList();
         List<String> limitations = List.of(
                 "This is static preflight evidence only; it does not prove initialization, gameplay, client rendering, synchronization, or stability.",
-                "Slice 3 currently records contextual invokedynamic sites, bootstrap handles/arguments, LDC handles/types, and nested ConstantDynamic values in the outer JAR; nested archive class bytecode and source SRG-to-Mojang name normalization remain pending.",
-                "Nested archive traversal is bounded by depth, archive count, per-archive size, and total inflated-byte limits. Archives skipped by a limit or rejected as unsafe/corrupt remain explicit findings.",
+                "Slice 3 inventories bytecode in the outer source JAR and bounded, safe source-nested Forge/library archives. Installed provider JAR bytecode and embedded native NeoForge mod bytecode are intentionally excluded.",
+                "Source Minecraft SRG member names are normalized to 1.20.1 Mojang names where the generated mapping table has an entry; missing entries remain explicitly UNMAPPED. This source-name normalization is not a 1.21.1 target API or semantic compatibility verdict.",
+                "Nested archive traversal is bounded by depth, archive count, per-archive size, and total inflated-byte limits. Class capture is bounded to 8 MiB per class, 16 MiB per nested archive, 128 MiB aggregate nested class bytes submitted, and 64 MiB aggregate outer class bytes. Archives/classes skipped by a limit or rejected as unsafe/corrupt remain explicit findings.",
                 "Mixin discovery uses manifest declarations and resource path/content heuristics. Injection targets, handler descriptors, slices, refmaps, and dynamic plugins are not validated in Slice 3.",
                 "Reflection/resource string candidates remain heuristic and are not treated as confirmed bytecode references.",
                 "Installed provider discovery records top-level and nested archive paths, mod IDs, and declared versions. A provider ID/version match does not establish API or behavioral compatibility; installed version ranges and API compatibility are not verified.",
@@ -325,9 +349,11 @@ public final class Forge1201PreflightAnalyzer {
                 TARGET_MINECRAFT_VERSION, TARGET_NEOFORGE_VERSION, forgeMetadata, metadataStatus, analysisStatus,
                 metadataWarnings.stream().distinct().sorted().toList(), mods, duplicateModIds, dependencies,
                 archiveEntries.size(), archiveEntries, resourceNamespaces.stream().toList(), manifest,
-                mixinCandidates, coreModClass, jarInJarPaths.stream().toList(), classCount, entrypoints,
-                packageReferences, apiTypes, methodReferences, fieldReferences, methodCallSites, fieldCallSites,
-                dynamicReferences, observedNativeIds, limitations, archiveGraph);
+                mixinCandidates, coreModClass, jarInJarPaths.stream().toList(), classCount,
+                outerClassScannedCount, entrypoints, packageReferences, apiTypes, methodReferences,
+                fieldReferences, methodCallSites, fieldCallSites, dynamicReferences, nestedClassCount,
+                nestedClassScannedCount, normalizedMemberReferences, classScanWarnings,
+                observedNativeIds, limitations, archiveGraph);
     }
 
     public static String toJson(PreflightResult result) {
@@ -434,7 +460,14 @@ public final class Forge1201PreflightAnalyzer {
             out.append("\nArchive graph warnings:\n");
             graph.warnings().forEach(warning -> out.append("  - ").append(warning).append('\n'));
         }
-        out.append("\nBytecode: ").append(result.classCount()).append(" classes scanned\n")
+        int totalDiscoveredClasses = result.classCount() + result.nestedClassCount();
+        int totalScannedClasses = result.outerClassScannedCount() + result.nestedClassScannedCount();
+        out.append("\nBytecode: ").append(result.classCount()).append(" outer class entries / ")
+                .append(result.outerClassScannedCount()).append(" scanned; ")
+                .append(result.nestedClassCount()).append(" nested class entries / ")
+                .append(result.nestedClassScannedCount()).append(" scanned; ")
+                .append(totalDiscoveredClasses).append(" total discovered / ")
+                .append(totalScannedClasses).append(" total scanned\n")
                 .append("Mod entrypoints: ")
                 .append(result.modEntrypoints().isEmpty() ? "none detected" : String.join(", ", result.modEntrypoints()))
                 .append('\n')
@@ -455,6 +488,28 @@ public final class Forge1201PreflightAnalyzer {
         for (Forge1201ApiUsageAnalyzer.ApiDynamicReference reference : result.dynamicReferences()) {
             out.append("  ").append(reference.display()).append(" (x")
                     .append(reference.count()).append(") tag=").append(reference.handleTag()).append('\n');
+        }
+        out.append("\nNested class archive scans: ").append(graph.classScanSummaries().size()).append('\n');
+        for (Forge1201ArchiveGraph.ClassScanSummary summary : graph.classScanSummaries()) {
+            out.append("  ").append(summary.archivePath()).append(" [").append(summary.archiveKind()).append("] ")
+                    .append(summary.scannedClassEntries()).append('/').append(summary.discoveredClassEntries())
+                    .append(" scanned, ").append(summary.skippedClassEntries()).append(" skipped, ")
+                    .append(summary.submittedClassBytes()).append(" submitted bytes\n");
+            summary.warnings().forEach(warning -> out.append("    warning: ").append(warning).append('\n'));
+        }
+        out.append("\nSource SRG -> Minecraft 1.20.1 Mojang member names: ")
+                .append(result.normalizedMemberReferences().size()).append('\n');
+        for (Forge1201ApiUsageAnalyzer.ApiSrgMemberReference reference : result.normalizedMemberReferences()) {
+            out.append("  ").append(reference.kind()).append(' ').append(reference.owner()).append('#')
+                    .append(reference.sourceSrgName()).append(" -> ")
+                    .append(reference.mojangName() == null ? "UNMAPPED" : reference.mojangName())
+                    .append(reference.descriptor()).append(" [").append(reference.mappingStatus())
+                    .append(", count=").append(reference.count()).append("] locations=")
+                    .append(reference.sourceLocations()).append('\n');
+        }
+        if (!result.classScanWarnings().isEmpty()) {
+            out.append("\nOuter / bytecode scanner warnings:\n");
+            result.classScanWarnings().forEach(warning -> out.append("  - ").append(warning).append('\n'));
         }
         if (!result.metadataWarnings().isEmpty()) {
             out.append("\nMetadata warnings:\n");

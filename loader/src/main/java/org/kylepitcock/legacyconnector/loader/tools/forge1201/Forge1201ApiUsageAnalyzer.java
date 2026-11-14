@@ -1,10 +1,13 @@
 package org.kylepitcock.legacyconnector.loader.tools.forge1201;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +17,7 @@ import java.util.jar.JarFile;
 import java.util.jar.Manifest;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
+import org.kylepitcock.legacyconnector.loader.mapping.SrgMojangTable;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
@@ -31,6 +35,8 @@ import org.objectweb.asm.commons.Remapper;
 public final class Forge1201ApiUsageAnalyzer {
     private static final String FORGE_MOD_ANNOTATION = "Lnet/minecraftforge/fml/common/Mod;";
     private static final String NEOFORGE_MOD_ANNOTATION = "Lnet/neoforged/fml/common/Mod;";
+    public static final long MAX_CLASS_ENTRY_BYTES = 8L * 1024 * 1024;
+    public static final long MAX_OUTER_CLASS_BYTES = 64L * 1024 * 1024;
 
     private Forge1201ApiUsageAnalyzer() {}
 
@@ -136,6 +142,28 @@ public final class Forge1201ApiUsageAnalyzer {
             boolean interfaceOwner,
             int instructionOrdinal) {}
 
+    public enum ApiMemberKind { METHOD, FIELD }
+
+    public enum SrgMappingStatus { MAPPED, UNMAPPED }
+
+    public record ApiReferenceLocation(String archivePath, String classEntryPath) {}
+
+    /** Source SRG name and its source-version Mojang name; this is not a target-version match. */
+    public record ApiSrgMemberReference(
+            ApiMemberKind kind,
+            String owner,
+            String sourceSrgName,
+            String mojangName,
+            String descriptor,
+            int count,
+            SrgMappingStatus mappingStatus,
+            List<ApiReferenceLocation> sourceLocations) {
+        public ApiSrgMemberReference {
+            sourceLocations = List.copyOf(sourceLocations);
+        }
+    }
+
+
     private record CallSiteKey(
             String callerClass,
             String callerMethod,
@@ -209,6 +237,21 @@ public final class Forge1201ApiUsageAnalyzer {
         private final Map<CallSiteKey, Integer> callSites = new HashMap<>();
         private final Map<FieldCallSiteKey, Integer> fieldCallSites = new HashMap<>();
         private final Map<DynamicReferenceKey, Integer> dynamicReferences = new HashMap<>();
+        private final Map<MemberKey, Set<ApiReferenceLocation>> methodLocations = new HashMap<>();
+        private final Map<MemberKey, Set<ApiReferenceLocation>> fieldLocations = new HashMap<>();
+        private String currentArchivePath;
+        private String currentClassEntryPath;
+
+        void beginClass(String archivePath, String classEntryPath) {
+            currentArchivePath = archivePath;
+            currentClassEntryPath = classEntryPath;
+        }
+
+        private void recordLocation(Map<MemberKey, Set<ApiReferenceLocation>> locations, MemberKey key) {
+            if (currentArchivePath == null || currentClassEntryPath == null) return;
+            locations.computeIfAbsent(key, ignored -> new LinkedHashSet<>())
+                    .add(new ApiReferenceLocation(currentArchivePath, currentClassEntryPath));
+        }
 
         private void recordDynamic(
                 String archivePath,
@@ -337,14 +380,22 @@ public final class Forge1201ApiUsageAnalyzer {
             // ClassRemapper's member-name callback is also an authoritative reference to the owner.
             // Record it here rather than relying on the order in which ASM visits descriptors and instructions.
             recordClass(owner);
-            if (isGameApi(owner)) methods.merge(new MemberKey(owner, name, descriptor), 1, Integer::sum);
+            if (isGameApi(owner)) {
+                MemberKey key = new MemberKey(owner, name, descriptor);
+                methods.merge(key, 1, Integer::sum);
+                recordLocation(methodLocations, key);
+            }
             return name;
         }
 
         @Override
         public String mapFieldName(String owner, String name, String descriptor) {
             recordClass(owner);
-            if (isGameApi(owner)) fields.merge(new MemberKey(owner, name, descriptor), 1, Integer::sum);
+            if (isGameApi(owner)) {
+                MemberKey key = new MemberKey(owner, name, descriptor);
+                fields.merge(key, 1, Integer::sum);
+                recordLocation(fieldLocations, key);
+            }
             return name;
         }
 
@@ -455,6 +506,32 @@ public final class Forge1201ApiUsageAnalyzer {
             return toReferences(fields);
         }
 
+        List<ApiSrgMemberReference> srgMemberReferenceList(Map<String, String> mappings) {
+            List<ApiSrgMemberReference> result = new ArrayList<>();
+            methods.forEach((key, count) -> {
+                ApiSrgMemberReference normalized = normalizeSrgMemberReference(
+                        ApiMemberKind.METHOD, key.owner(), key.name(), key.descriptor(), count,
+                        methodLocations.getOrDefault(key, Set.of()).stream()
+                                .sorted(Comparator.comparing(ApiReferenceLocation::archivePath)
+                                        .thenComparing(ApiReferenceLocation::classEntryPath)).toList(),
+                        mappings);
+                if (normalized != null) result.add(normalized);
+            });
+            fields.forEach((key, count) -> {
+                ApiSrgMemberReference normalized = normalizeSrgMemberReference(
+                        ApiMemberKind.FIELD, key.owner(), key.name(), key.descriptor(), count,
+                        fieldLocations.getOrDefault(key, Set.of()).stream()
+                                .sorted(Comparator.comparing(ApiReferenceLocation::archivePath)
+                                        .thenComparing(ApiReferenceLocation::classEntryPath)).toList(),
+                        mappings);
+                if (normalized != null) result.add(normalized);
+            });
+            return result.stream().sorted(Comparator.comparing((ApiSrgMemberReference value) -> value.kind().name())
+                    .thenComparing(ApiSrgMemberReference::owner)
+                    .thenComparing(ApiSrgMemberReference::sourceSrgName)
+                    .thenComparing(ApiSrgMemberReference::descriptor)).toList();
+        }
+
         List<ApiDynamicReference> dynamicReferenceList() {
             return dynamicReferences.entrySet().stream()
                     .map(entry -> new ApiDynamicReference(
@@ -500,7 +577,9 @@ public final class Forge1201ApiUsageAnalyzer {
         if (metadata == null) {
             throw new IllegalArgumentException("The file is not recognized as a Forge 1.20.1 mod jar: " + jarPath);
         }
-        return analyzeClasses(jarPath, metadata, FORGE_MOD_ANNOTATION);
+        Inventory inventory = new Inventory(FORGE_MOD_ANNOTATION);
+        inventory.scanOuterJar(jarPath);
+        return inventory.finish(metadata);
     }
 
     /**
@@ -520,194 +599,322 @@ public final class Forge1201ApiUsageAnalyzer {
                                 + "META-INF/neoforge.mods.toml");
             }
         }
-        return analyzeClasses(jarPath, null, NEOFORGE_MOD_ANNOTATION);
+        Inventory inventory = new Inventory(NEOFORGE_MOD_ANNOTATION);
+        inventory.scanOuterJar(jarPath);
+        return inventory.finish(null);
     }
 
-    private static Analysis analyzeClasses(
-            Path jarPath, Forge1201JarInfo metadata, String modAnnotation) throws IOException {
-        ApiReferenceCollector references = new ApiReferenceCollector();
-        List<String> entrypoints = new ArrayList<>();
-        List<String> mixinConfigs = new ArrayList<>();
-        String coreModClass = null;
-        int classCount = 0;
+    /**
+     * Reusable one-run scanner. The outer archive and source-nested archive class entries are
+     * submitted to one ASM collector so aggregate references retain their original provenance.
+     */
+    public static final class Inventory {
+        private final String modAnnotation;
+        private final ApiReferenceCollector references = new ApiReferenceCollector();
+        private final List<String> entrypoints = new ArrayList<>();
+        private final List<String> mixinConfigs = new ArrayList<>();
+        private final List<String> scanWarnings = new ArrayList<>();
+        private String coreModClass;
+        private int outerClassCount;
+        private int outerClassScannedCount;
+        private int nestedClassScannedCount;
+        private long outerCapturedClassBytes;
 
-        String archivePath = "source/" + jarPath.getFileName();
-        try (ZipFile zip = new ZipFile(jarPath.toFile())) {
-            ZipEntry manifestEntry = zip.getEntry(JarFile.MANIFEST_NAME);
-            if (manifestEntry != null) {
-                try (var in = zip.getInputStream(manifestEntry)) {
-                    Manifest manifest = new Manifest(in);
-                    coreModClass = manifest.getMainAttributes().getValue("FMLCorePlugin");
-                    String configs = manifest.getMainAttributes().getValue("MixinConfigs");
-                    if (configs != null) {
-                        for (String config : configs.split(",")) {
-                            if (!config.isBlank()) mixinConfigs.add(config.trim());
+        public Inventory() {
+            this(FORGE_MOD_ANNOTATION);
+        }
+
+        public Inventory(String modAnnotation) {
+            this.modAnnotation = java.util.Objects.requireNonNull(modAnnotation, "modAnnotation");
+        }
+
+        /** Scans unique, bounded .class entries from the outer source JAR. */
+        public void scanOuterJar(Path jarPath) throws IOException {
+            String archivePath = "source/" + jarPath.getFileName();
+            try (ZipFile zip = new ZipFile(jarPath.toFile())) {
+                ZipEntry manifestEntry = zip.getEntry(JarFile.MANIFEST_NAME);
+                if (manifestEntry != null) {
+                    try (InputStream in = zip.getInputStream(manifestEntry)) {
+                        Manifest manifest = new Manifest(in);
+                        coreModClass = manifest.getMainAttributes().getValue("FMLCorePlugin");
+                        String configs = manifest.getMainAttributes().getValue("MixinConfigs");
+                        if (configs != null) {
+                            for (String config : configs.split(",")) {
+                                if (!config.isBlank()) mixinConfigs.add(config.trim());
+                            }
                         }
                     }
                 }
-            }
 
-            var entries = zip.entries();
-            while (entries.hasMoreElements()) {
-                ZipEntry entry = entries.nextElement();
-                if (entry.isDirectory() || !entry.getName().endsWith(".class")) continue;
-                classCount++;
-                try (var in = zip.getInputStream(entry)) {
-                    ClassReader reader = new ClassReader(in);
-                    String classEntryPath = entry.getName();
-                    reader.accept(new ClassRemapper(new ClassVisitor(Opcodes.ASM9) {
-                        private String className;
+                Map<String, ZipEntry> classEntries = new TreeMap<>();
+                Set<String> duplicateNames = new HashSet<>();
+                int discovered = 0;
+                var entries = zip.entries();
+                while (entries.hasMoreElements()) {
+                    ZipEntry entry = entries.nextElement();
+                    if (entry.isDirectory() || !entry.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".class")) {
+                        continue;
+                    }
+                    discovered++;
+                    String name = entry.getName();
+                    if (!isSafeClassEntryPath(name)) {
+                        scanWarnings.add(archivePath + "!/" + name + " skipped: unsafe class-entry path.");
+                        continue;
+                    }
+                    if (duplicateNames.contains(name)) continue;
+                    if (classEntries.putIfAbsent(name, entry) != null) {
+                        classEntries.remove(name);
+                        duplicateNames.add(name);
+                        scanWarnings.add(archivePath + "!/" + name
+                                + " is duplicated within the outer archive; all entries with this name were skipped.");
+                    }
+                }
 
-                        @Override
-                        public void visit(int version, int access, String name, String signature,
-                                          String superName, String[] interfaces) {
-                            className = name;
-                        }
-
-                        @Override
-                        public MethodVisitor visitMethod(int access, String name, String descriptor,
-                                                         String signature, String[] exceptions) {
-                            // Preserve the containing mod method for each direct Forge/optional API call.
-                            // This is separate from the global member inventory, which only knows that
-                            // a symbolic reference exists somewhere in the class.
-                            String callerClass = className;
-                            String callerMethod = name;
-                            String callerDescriptor = descriptor;
-                            return new MethodVisitor(Opcodes.ASM9) {
-                                private int instructionOrdinal;
-
-                                private int nextInstruction() {
-                                    return instructionOrdinal++;
-                                }
-
-                                @Override
-                                public void visitInsn(int opcode) {
-                                    nextInstruction();
-                                }
-
-                                @Override
-                                public void visitIntInsn(int opcode, int operand) {
-                                    nextInstruction();
-                                }
-
-                                @Override
-                                public void visitVarInsn(int opcode, int var) {
-                                    nextInstruction();
-                                }
-
-                                @Override
-                                public void visitTypeInsn(int opcode, String type) {
-                                    nextInstruction();
-                                }
-
-                                @Override
-                                public void visitMethodInsn(int opcode, String owner, String targetName,
-                                                            String targetDescriptor, boolean isInterface) {
-                                    nextInstruction();
-                                    references.recordCallSite(
-                                            callerClass, callerMethod, callerDescriptor,
-                                            opcode, owner, targetName, targetDescriptor);
-                                }
-
-                                @Override
-                                public void visitFieldInsn(int opcode, String owner, String targetName,
-                                                           String targetDescriptor) {
-                                    nextInstruction();
-                                    references.recordFieldCallSite(
-                                            callerClass, callerMethod, callerDescriptor,
-                                            opcode, owner, targetName, targetDescriptor);
-                                }
-
-                                @Override
-                                public void visitInvokeDynamicInsn(String targetName, String targetDescriptor,
-                                                                   org.objectweb.asm.Handle bootstrapMethodHandle,
-                                                                   Object... bootstrapMethodArguments) {
-                                    int ordinal = nextInstruction();
-                                    references.recordDynamic(archivePath, classEntryPath,
-                                            callerClass, callerMethod, callerDescriptor,
-                                            ApiDynamicReferenceKind.INVOKEDYNAMIC_SITE, "instruction",
-                                            null, targetName, targetDescriptor, -1, false, ordinal);
-                                    references.recordHandle(archivePath, classEntryPath,
-                                            callerClass, callerMethod, callerDescriptor,
-                                            "invokedynamic-bootstrap", bootstrapMethodHandle, ordinal);
-                                    for (int i = 0; i < bootstrapMethodArguments.length; i++) {
-                                        references.recordDynamicValue(archivePath, classEntryPath,
-                                                callerClass, callerMethod, callerDescriptor,
-                                                "invokedynamic-argument-" + i,
-                                                bootstrapMethodArguments[i], ordinal, 0);
-                                    }
-                                }
-
-                                @Override
-                                public void visitJumpInsn(int opcode, org.objectweb.asm.Label label) {
-                                    nextInstruction();
-                                }
-
-                                @Override
-                                public void visitLdcInsn(Object value) {
-                                    int ordinal = nextInstruction();
-                                    references.recordDynamicValue(archivePath, classEntryPath,
-                                            callerClass, callerMethod, callerDescriptor,
-                                            "ldc", value, ordinal, 0);
-                                }
-
-                                @Override
-                                public void visitIincInsn(int var, int increment) {
-                                    nextInstruction();
-                                }
-
-                                @Override
-                                public void visitTableSwitchInsn(int min, int max,
-                                                                  org.objectweb.asm.Label defaultLabel,
-                                                                  org.objectweb.asm.Label... labels) {
-                                    nextInstruction();
-                                }
-
-                                @Override
-                                public void visitLookupSwitchInsn(org.objectweb.asm.Label defaultLabel,
-                                                                  int[] keys, org.objectweb.asm.Label[] labels) {
-                                    nextInstruction();
-                                }
-
-                                @Override
-                                public void visitMultiANewArrayInsn(String descriptor, int dimensions) {
-                                    nextInstruction();
-                                }
-                            };
-                        }
-
-                        @Override
-                        public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
-                            if (!modAnnotation.equals(descriptor)) return null;
-                            return new AnnotationVisitor(Opcodes.ASM9) {
-                                @Override
-                                public void visit(String name, Object value) {
-                                    if (name.equals("value") || name.equals("modid")) {
-                                        entrypoints.add(className + " (" + value + ")");
-                                    }
-                                }
-                            };
-                        }
-                    }, references), 0);
-                } catch (RuntimeException malformedClass) {
-                    throw new IOException("Cannot analyze class " + entry.getName() + " in " + jarPath, malformedClass);
+                outerClassCount += discovered;
+                int successfullyScannedClassEntries = 0;
+                for (Map.Entry<String, ZipEntry> candidate : classEntries.entrySet()) {
+                    ZipEntry entry = candidate.getValue();
+                    String entryPath = candidate.getKey();
+                    if (entry.getSize() > MAX_CLASS_ENTRY_BYTES) {
+                        scanWarnings.add(archivePath + "!/" + entryPath + " skipped: class payload exceeds "
+                                + MAX_CLASS_ENTRY_BYTES + " bytes.");
+                        continue;
+                    }
+                    if (outerCapturedClassBytes >= MAX_OUTER_CLASS_BYTES) {
+                        scanWarnings.add(archivePath + "!/" + entryPath
+                                + " skipped: aggregate outer class-byte capture limit reached.");
+                        continue;
+                    }
+                    byte[] bytes;
+                    try (InputStream in = zip.getInputStream(entry)) {
+                        bytes = readBounded(in, Math.min(MAX_CLASS_ENTRY_BYTES,
+                                MAX_OUTER_CLASS_BYTES - outerCapturedClassBytes));
+                    } catch (IOException tooLarge) {
+                        scanWarnings.add(archivePath + "!/" + entryPath + " skipped: "
+                                + conciseMessage(tooLarge));
+                        continue;
+                    }
+                    outerCapturedClassBytes += bytes.length;
+                    if (!scanClassBytes(archivePath, entryPath, bytes, true)) {
+                        throw new IOException("Cannot analyze class " + entryPath + " in " + jarPath);
+                    }
+                    successfullyScannedClassEntries++;
+                }
+                outerClassScannedCount += successfullyScannedClassEntries;
+                if (discovered > successfullyScannedClassEntries) {
+                    // Individual skips are listed above; this line only supplies a concise archive-level cue.
+                    scanWarnings.add(archivePath + ": outer class inventory is incomplete; see per-entry warnings.");
                 }
             }
         }
 
-        return new Analysis(
-                metadata,
-                classCount,
-                entrypoints.stream().distinct().sorted().toList(),
-                mixinConfigs.stream().distinct().sorted().toList(),
-                coreModClass,
-                references.packageCounts(),
-                references.classList(),
-                references.methodCallSiteList(),
-                references.fieldCallSiteList(),
-                references.methodList(),
-                references.fieldList(),
-                references.dynamicReferenceList());
+        /** Receives one already-bounded nested class entry from Forge1201ArchiveGraph. */
+        public boolean scanNestedClass(String archivePath, String classEntryPath, byte[] classBytes) {
+            if (classBytes == null || classBytes.length > MAX_CLASS_ENTRY_BYTES) {
+                scanWarnings.add(archivePath + "!/" + classEntryPath + " skipped: invalid or oversized class payload.");
+                return false;
+            }
+            if (!isSafeClassEntryPath(classEntryPath)) {
+                scanWarnings.add(archivePath + "!/" + classEntryPath + " skipped: unsafe class-entry path.");
+                return false;
+            }
+            if (!scanClassBytes(archivePath, classEntryPath, classBytes, false)) return false;
+            nestedClassScannedCount++;
+            return true;
+        }
+
+        private boolean scanClassBytes(
+                String archivePath, String classEntryPath, byte[] classBytes, boolean collectEntrypoint) {
+            references.beginClass(archivePath, classEntryPath);
+            try {
+                ClassReader reader = new ClassReader(classBytes);
+                reader.accept(new ClassRemapper(new ClassVisitor(Opcodes.ASM9) {
+                    private String className;
+
+                    @Override
+                    public void visit(int version, int access, String name, String signature,
+                                      String superName, String[] interfaces) {
+                        className = name;
+                    }
+
+                    @Override
+                    public MethodVisitor visitMethod(int access, String name, String descriptor,
+                                                     String signature, String[] exceptions) {
+                        String callerClass = className;
+                        String callerMethod = name;
+                        String callerDescriptor = descriptor;
+                        return new MethodVisitor(Opcodes.ASM9) {
+                            private int instructionOrdinal;
+
+                            private int nextInstruction() {
+                                return instructionOrdinal++;
+                            }
+
+                            @Override public void visitInsn(int opcode) { nextInstruction(); }
+                            @Override public void visitIntInsn(int opcode, int operand) { nextInstruction(); }
+                            @Override public void visitVarInsn(int opcode, int var) { nextInstruction(); }
+                            @Override public void visitTypeInsn(int opcode, String type) { nextInstruction(); }
+
+                            @Override
+                            public void visitMethodInsn(int opcode, String owner, String targetName,
+                                                        String targetDescriptor, boolean isInterface) {
+                                nextInstruction();
+                                references.recordCallSite(callerClass, callerMethod, callerDescriptor,
+                                        opcode, owner, targetName, targetDescriptor);
+                            }
+
+                            @Override
+                            public void visitFieldInsn(int opcode, String owner, String targetName,
+                                                       String targetDescriptor) {
+                                nextInstruction();
+                                references.recordFieldCallSite(callerClass, callerMethod, callerDescriptor,
+                                        opcode, owner, targetName, targetDescriptor);
+                            }
+
+                            @Override
+                            public void visitInvokeDynamicInsn(String targetName, String targetDescriptor,
+                                                               org.objectweb.asm.Handle bootstrapMethodHandle,
+                                                               Object... bootstrapMethodArguments) {
+                                int ordinal = nextInstruction();
+                                references.recordDynamic(archivePath, classEntryPath,
+                                        callerClass, callerMethod, callerDescriptor,
+                                        ApiDynamicReferenceKind.INVOKEDYNAMIC_SITE, "instruction",
+                                        null, targetName, targetDescriptor, -1, false, ordinal);
+                                references.recordHandle(archivePath, classEntryPath,
+                                        callerClass, callerMethod, callerDescriptor,
+                                        "invokedynamic-bootstrap", bootstrapMethodHandle, ordinal);
+                                for (int i = 0; i < bootstrapMethodArguments.length; i++) {
+                                    references.recordDynamicValue(archivePath, classEntryPath,
+                                            callerClass, callerMethod, callerDescriptor,
+                                            "invokedynamic-argument-" + i,
+                                            bootstrapMethodArguments[i], ordinal, 0);
+                                }
+                            }
+
+                            @Override public void visitJumpInsn(int opcode, org.objectweb.asm.Label label) {
+                                nextInstruction();
+                            }
+
+                            @Override
+                            public void visitLdcInsn(Object value) {
+                                int ordinal = nextInstruction();
+                                references.recordDynamicValue(archivePath, classEntryPath,
+                                        callerClass, callerMethod, callerDescriptor, "ldc", value, ordinal, 0);
+                            }
+
+                            @Override public void visitIincInsn(int var, int increment) { nextInstruction(); }
+
+                            @Override
+                            public void visitTableSwitchInsn(int min, int max,
+                                                              org.objectweb.asm.Label defaultLabel,
+                                                              org.objectweb.asm.Label... labels) {
+                                nextInstruction();
+                            }
+
+                            @Override
+                            public void visitLookupSwitchInsn(org.objectweb.asm.Label defaultLabel,
+                                                              int[] keys, org.objectweb.asm.Label[] labels) {
+                                nextInstruction();
+                            }
+
+                            @Override
+                            public void visitMultiANewArrayInsn(String descriptor, int dimensions) {
+                                nextInstruction();
+                            }
+                        };
+                    }
+
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
+                        if (!collectEntrypoint || !modAnnotation.equals(descriptor)) return null;
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public void visit(String name, Object value) {
+                                if (name.equals("value") || name.equals("modid")) {
+                                    entrypoints.add(className + " (" + value + ")");
+                                }
+                            }
+                        };
+                    }
+                }, references), 0);
+                return true;
+            } catch (RuntimeException malformedClass) {
+                scanWarnings.add(archivePath + "!/" + classEntryPath
+                        + " could not be parsed as bytecode: " + conciseMessage(malformedClass));
+                return false;
+            }
+        }
+
+        public int outerClassCount() { return outerClassCount; }
+        public int outerClassScannedCount() { return outerClassScannedCount; }
+        public int nestedClassScannedCount() { return nestedClassScannedCount; }
+        public List<String> classScanWarnings() {
+            return scanWarnings.stream().distinct().sorted().toList();
+        }
+        public List<ApiSrgMemberReference> normalizedSrgMemberReferences() {
+            return references.srgMemberReferenceList(SrgMojangTable.load());
+        }
+
+        public Analysis finish(Forge1201JarInfo metadata) {
+            return new Analysis(
+                    metadata,
+                    outerClassCount,
+                    entrypoints.stream().distinct().sorted().toList(),
+                    mixinConfigs.stream().distinct().sorted().toList(),
+                    coreModClass,
+                    references.packageCounts(),
+                    references.classList(),
+                    references.methodCallSiteList(),
+                    references.fieldCallSiteList(),
+                    references.methodList(),
+                    references.fieldList(),
+                    references.dynamicReferenceList());
+        }
+    }
+
+    static ApiSrgMemberReference normalizeSrgMemberReference(
+            ApiMemberKind kind,
+            String owner,
+            String sourceName,
+            String descriptor,
+            int count,
+            List<ApiReferenceLocation> locations,
+            Map<String, String> mappings) {
+        if (owner == null || !owner.startsWith("net/minecraft/") || sourceName == null) return null;
+        boolean correctSrgKind = kind == ApiMemberKind.METHOD
+                ? sourceName.matches("^m_\\d+_$") : sourceName.matches("^f_\\d+_$");
+        if (!correctSrgKind) return null;
+        String mojangName = mappings.get(sourceName);
+        return new ApiSrgMemberReference(kind, owner, sourceName, mojangName, descriptor, count,
+                mojangName == null ? SrgMappingStatus.UNMAPPED : SrgMappingStatus.MAPPED,
+                locations == null ? List.of() : locations);
+    }
+
+    private static boolean isSafeClassEntryPath(String path) {
+        if (path == null || path.isBlank() || path.startsWith("/") || path.startsWith("\\")
+                || path.contains("\\") || path.matches("^[A-Za-z]:.*")) return false;
+        for (String segment : path.split("/", -1)) {
+            if (segment.isEmpty() || segment.equals(".") || segment.equals("..")) return false;
+        }
+        return true;
+    }
+
+    private static byte[] readBounded(InputStream in, long limit) throws IOException {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[8192];
+        long total = 0;
+        int read;
+        while ((read = in.read(buffer)) != -1) {
+            total += read;
+            if (total > limit) throw new IOException("class entry exceeds " + limit + " bytes");
+            output.write(buffer, 0, read);
+        }
+        return output.toByteArray();
+    }
+
+    private static String conciseMessage(Throwable throwable) {
+        String message = throwable.getMessage();
+        return message == null || message.isBlank() ? throwable.getClass().getSimpleName() : message;
     }
 
     private static String opcodeName(int opcode) {
