@@ -1,4 +1,4 @@
-**Status:** Slice 1 and Slice 2 are implemented and validated. Slice 3 nested archive bytecode scanning, SRG normalization, ClassRemapper structural/annotation coverage, duplicate raw-ZIP entry handling, and deep ConstantDynamic depth-limit tests all passed the user's latest forced clean loader test gate at `b0d2b7b68915137aed44ef9153f4dfa304fa5819` (`BUILD SUCCESSFUL in 31s`, 14/14 tasks executed). The next step is to generate and inspect the first real Symbiote Schema 1.3 report; it has not yet been generated.
+**Status:** Slices 1–3 are implemented and the Slice 3 forced loader test gate passed at `b0d2b7b68915137aed44ef9153f4dfa304fa5819`. The first real Symbiote Schema 1.3 / Analyzer 1.3.0 report has now been generated and inspected at report-generation checkout `340805e8a1bb93bf1994645981c3246fd46298ea`. It scanned all 278 source-JAR class entries, classified 443 API types, recorded 1,156 dynamic references, and mapped all 1,076 normalized source SRG member references. The report identifies concrete manual-adapter and type-replacement work; it is static evidence only. The next gate is the consolidated clean build, followed by Slice 4 Mixin analysis and separate runtime validation.
 
 **Status:** Slices 1 and 2 are implemented and validated. The first Slice 3 dynamic-reference batch passed the user's forced focused loader test gate at `4457199a4109d774b25a428e7c68e23b4ec3b4ce` (`BUILD SUCCESSFUL in 24s`, 12/12 tasks executed). The nested-bytecode/SRG integration was committed as a494d20a3be797abd3de563fa3672df69e2276da; its stale limitation assertion was corrected in 3c6febb075c32391b6879b0f3ef00c5856e80d51; and test runtime mapping-resource wiring was added in 0c7c55b72033c986d94f1cba5d836dfce26e95a0. The test/runtime wiring checkpoint is 0c7c55b72033c986d94f1cba5d836dfce26e95a0; the branch may include a later documentation-only commit. Use the exact remote tip in the testbench handoff for the guarded pull. Structural reference coverage remains under audit.
 
@@ -569,3 +569,64 @@ If generation fails after creating either output, do not overwrite that path on 
 Update `archive/preflight/README.md` with report schema/analyzer versions, input SHA, source commit, totals and output Git blob SHAs. Then run the consolidated clean build. Slice 4 Mixin semantic analysis and actual NeoForge launch/gameplay verification remain future gates.
 
 Keep Palladium + Alien Evolution paused and isolated. Preserve the universal, reusable, modpack-ready compatibility platform goal.
+
+## CURRENT CONTINUATION UPDATE — 2026-11-14 — Symbiote Schema 1.3 report generated and inspected
+
+### Report generation and provenance
+
+The user fast-forwarded branch `feat/forge1201-preflight-analyzer` from the tested implementation checkpoint `b0d2b7b68915137aed44ef9153fdfa304fa5819` to documentation-only tip `340805e8a1bb93bf1994645981c3246fd46298ea`, with the expected branch, clean-worktree, and remote-SHA guards passing. The user then ran the root `preflight1201` task against the original Symbiote source JAR and installed NeoForge mods directory:
+
+```text
+BUILD SUCCESSFUL in 10s
+12 actionable tasks: 1 executed, 11 up-to-date
+```
+
+The resulting JSON parsed successfully. Schema/analyzer are `1.3 / 1.3.0`; source SHA-256 is the expected `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c`; target is Minecraft `1.21.1` / NeoForge `21.1.258`. The exact root report blobs were inspected and archived under `archive/preflight/slice-3/` in the testbench. This report is generated from the implementation already covered by the forced test gate; only documentation commits separate `b0d2b7b...` from report checkout `340805e...`.
+
+### Real report findings
+
+- Source JAR: 515 entries; 278 outer class entries discovered and 278 scanned; 0 source-nested archive class entries and 0 class-scan warnings. The source JAR has no Jar-in-Jar paths. The 11 archive-graph records are the installed-mod inventory (7 top-level installed archives, 3 nested archives under KubeJS, and the Symbiote source root); installed provider JAR bytecode is intentionally not part of the source-mod bytecode scan. Do not misread zero nested-class entries as failure to scan the 278 source classes or as a count of Java inner classes.
+- Archive graph: 9 provider records (8 installed NeoForge providers plus Symbiote), 17 dependency edges, and 5 target Minecraft range findings (4 `MATCH`, 1 `OUTSIDE_RANGE`). Symbiote's declared Minecraft range `[1.20.1,1.21)` excludes target `1.21.1`; metadata-range translation/review is required. One archive-graph warning records this.
+- One metadata warning remains: `mods.toml` line 10 starts a multiline string that the scalar metadata inspector does not parse.
+- API type classification: 443 types total — 322 `NOT_FORGE_API`, 78 `PACKAGE_RELOCATION_CANDIDATE`, 28 `MANUAL_ADAPTER_REQUIRED`, and 15 `EXPLICIT_TYPE_REPLACEMENT`.
+- The explicit replacements include Forge `ForgeConfigSpec` to NeoForge `ModConfigSpec`, `IForgeMenuType` to `IMenuTypeExtension`, the Legacy Connector compatibility package for the Forge SimpleChannel/network family, and `RegistryObject` to `Supplier`.
+- The 28 manual-adapter types cluster around config-screen registration, layered GUI/overlay APIs, tick and damage-event semantic changes, side separation and FML loading context, menu opening, event-subscriber registration, and registries. A package relocation candidate is not structural target verification.
+- Member inventory: 1,110 method references, 352 field references, 5,369 method call-sites, 1,196 field call-sites.
+- Dynamic/bootstrap inventory: 1,156 records (813 `INVOKEDYNAMIC_SITE`, 282 `METHOD_TYPE`, 56 `CLASS_LITERAL`, 5 `METHOD_HANDLE`).
+- All 1,076 normalized source SRG member references are `MAPPED` to Minecraft 1.20.1 Mojang names; none remain unmapped.
+- No Mixin config candidates, no Jar-in-Jar source paths, and no coremod class were discovered. Mixin target/handler/slice/refmap/plugin validation remains explicitly outside Slice 3.
+
+The JSON and text reports agree on the parsed schema/source metadata, archive/provider/dependency counts, class totals, API/member/call-site totals, dynamic-reference count, normalized SRG count, and warning counts. The report's limitations remain binding: provider bytecode, target class/member compatibility, Mixin semantics, translated-resource parity, and runtime/gameplay behavior are not proven.
+
+### Exact next action — consolidated clean build
+
+At the user's Universal checkout, first verify the exact branch `feat/forge1201-preflight-analyzer`, HEAD `340805e8a1bb93bf1994645981c3246fd46298ea`, and a clean worktree. Then run the previously established full build gate:
+
+```powershell
+$repo = 'F:\Program\intellij-idea-portable\Legacy-Connector-1.20.1'
+$expectedHead = '340805e8a1bb93bf1994645981c3246fd46298ea'
+
+if ((git -C $repo branch --show-current).Trim() -ne 'feat/forge1201-preflight-analyzer') {
+    throw 'Wrong Universal branch.'
+}
+if ((git -C $repo rev-parse HEAD).Trim() -ne $expectedHead) {
+    throw 'Unexpected Universal HEAD.'
+}
+$changes = @(git -C $repo status --porcelain)
+if ($changes.Count -gt 0) {
+    $changes
+    throw 'Universal worktree is not clean.'
+}
+
+Push-Location $repo
+.\gradlew.bat :clean :loader:clean :testmods:clean :build :loader:build :testmods:assemble --no-daemon --console=plain
+$buildExit = $LASTEXITCODE
+Pop-Location
+
+if ($buildExit -ne 0) {
+    throw 'Slice 3 consolidated clean build failed.'
+}
+```
+
+The focused Slice 3 loader tests already passed; the consolidated build is the remaining build/assembly gate. After it passes, move to Slice 4 Mixin analysis as planned. A Minecraft client/server launch and feature-level gameplay test remain separate runtime gates. Keep Palladium + Alien Evolution paused and isolated.
+
