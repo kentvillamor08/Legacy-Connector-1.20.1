@@ -1,4 +1,4 @@
-**Status:** Slices 1–3 are implemented and the Slice 3 forced loader test gate passed at `b0d2b7b68915137aed44ef9153f4dfa304fa5819`. The first real Symbiote Schema 1.3 / Analyzer 1.3.0 report has now been generated and inspected at report-generation checkout `340805e8a1bb93bf1994645981c3246fd46298ea`. It scanned all 278 source-JAR class entries, classified 443 API types, recorded 1,156 dynamic references, and mapped all 1,076 normalized source SRG member references. The report identifies concrete manual-adapter and type-replacement work; it is static evidence only. The next gate is the consolidated clean build, followed by Slice 4 Mixin analysis and separate runtime validation.
+**Status:** Slices 1–3 are implemented, the focused Slice 3 forced loader test gate passed at `b0d2b7b68915137aed44ef9153fdfa304fa5819`, the real Symbiote Schema 1.3 / Analyzer 1.3.0 report is generated/inspected, and the user-confirmed consolidated clean build passed at Universal source/docs tip `3e1291494b6c10cc58b2c54be8978df972e6cd68` (`BUILD SUCCESSFUL in 1m 23s`, 33 actionable tasks: 24 executed, 9 from cache). Slice 4 Mixin analysis is now the next milestone; its design is documented in [`docs/FORGE1201-PREFLIGHT-SLICE-4-MIXIN-DESIGN.md`](FORGE1201-PREFLIGHT-SLICE-4-MIXIN-DESIGN.md). No Slice 4 source implementation is claimed yet.
 
 **Status:** Slices 1 and 2 are implemented and validated. The first Slice 3 dynamic-reference batch passed the user's forced focused loader test gate at `4457199a4109d774b25a428e7c68e23b4ec3b4ce` (`BUILD SUCCESSFUL in 24s`, 12/12 tasks executed). The nested-bytecode/SRG integration was committed as a494d20a3be797abd3de563fa3672df69e2276da; its stale limitation assertion was corrected in 3c6febb075c32391b6879b0f3ef00c5856e80d51; and test runtime mapping-resource wiring was added in 0c7c55b72033c986d94f1cba5d836dfce26e95a0. The test/runtime wiring checkpoint is 0c7c55b72033c986d94f1cba5d836dfce26e95a0; the branch may include a later documentation-only commit. Use the exact remote tip in the testbench handoff for the guarded pull. Structural reference coverage remains under audit.
 
@@ -629,4 +629,63 @@ if ($buildExit -ne 0) {
 ```
 
 The focused Slice 3 loader tests already passed; the consolidated build is the remaining build/assembly gate. After it passes, move to Slice 4 Mixin analysis as planned. A Minecraft client/server launch and feature-level gameplay test remain separate runtime gates. Keep Palladium + Alien Evolution paused and isolated.
+
+## CURRENT CONTINUATION UPDATE — 2026-11-14 — Slice 3 consolidated clean build passed; Slice 4 Mixin design prepared
+
+### User-confirmed consolidated build
+
+After pulling the documentation checkpoint, the user ran:
+
+```text
+:clean :loader:clean :testmods:clean :build :loader:build :testmods:assemble --no-daemon --console=plain
+BUILD SUCCESSFUL in 1m 23s
+33 actionable tasks: 24 executed, 9 from cache
+```
+
+The successful log showed:
+- `:loader:clean`, loader compile/package/assemble/build, root clean/build, test-mod clean/compile/legacy packaging/assemble all completed.
+- `SRG -> Mojang 1.20.1: 64225 members`.
+- Beta 1.7.3 mappings: 9,243 rows.
+- Generated shim index: 5,258 classes.
+- Legacy API stubs: 1,848.
+- Legacy 1.7.10 test mod reobfuscation: 16 classes.
+- `:loader:test` and root `:test` were `FROM-CACHE` in this consolidated build. The separate forced Slice 3 loader test gate had already passed at `b0d2b7b68915137aed44ef9153fdfa304fa5819` with 14/14 tasks executed.
+- Gradle emitted the non-fatal deprecated-feature / Gradle 9 compatibility warning. No build failure occurred.
+- The startup PSReadLine 2.0.0 warning is an IntelliJ PowerShell terminal warning, not a Gradle or project build error.
+
+This completes Slice 3's planned focused test and consolidated build gates. It does not prove a NeoForge runtime launch or gameplay compatibility.
+
+### Slice 4 Mixin design checkpoint
+
+Created `docs/FORGE1201-PREFLIGHT-SLICE-4-MIXIN-DESIGN.md` at commit `f3b61703be8a8f3481e105491e42b8720fd6338a`. The design is based on source inspection of:
+- `loader/src/main/java/org/kylepitcock/legacyconnector/loader/tools/Mixin1201Triage.java`
+- `loader/src/main/java/org/kylepitcock/legacyconnector/loader/tools/forge1201/Forge1201PreflightAnalyzer.java`
+- `loader/src/main/java/org/kylepitcock/legacyconnector/loader/tools/forge1201/Forge1201TargetApiVerifier.java`
+- `loader/src/main/java/org/kylepitcock/legacyconnector/loader/tools/forge1201/Forge1201JarInspector.java`
+
+Concrete existing gaps documented:
+- CLI/text-only output and mutable static target/rename maps.
+- Target index stores member names without descriptors.
+- Config candidates that are malformed, missing, or whose mixin class is missing can be silently ignored.
+- `@Mixin` target extraction reads only invisible annotations.
+- Selector handling does not comprehensively verify descriptors, slices, `@At` details, or handler signatures.
+- Refmaps are not parsed; plugin classes are not checked; plugin behavior must never be executed by static analysis.
+- The Forge metadata inspector does not currently expose Mixin declarations; if supported declaration forms are added, the partial TOML parser must report unsupported/ambiguous forms explicitly.
+
+The new design defines a per-invocation state-free analyzer API, immutable provenance-rich result records, bounded safe config/refmap/archive parsing, exact target descriptor/hierarchy checks, explicit unresolved/plugin-dependent/runtime states, synthetic ASM/ZIP regression fixtures, and a no-classloading/no-plugin-execution boundary. It also requires reusing/refactoring the existing target verifier and archive traversal instead of cloning those systems.
+
+### Exact next action
+
+Begin Slice 4 implementation from the design document:
+1. Inspect/refactor a reusable target class/member index that can expose exact descriptors and hierarchy completeness from `Forge1201TargetApiVerifier`.
+2. Introduce the state-free `Forge1201MixinAnalyzer` result API and config-level findings first; preserve `Mixin1201Triage` as a delegating CLI wrapper.
+3. Add synthetic JSON/ZIP/ASM tests for declared/missing/malformed configs and mixin class/target resolution before adding the more complex selector checks.
+4. Add descriptor-aware Shadow/Overwrite/Accessor/Invoker and injector/`@At`/`@Slice` checks with unsupported/dynamic cases explicitly unresolved.
+5. Add bounded refmap/plugin resource checks without ever loading or executing plugin code.
+6. Wire the result into `Forge1201PreflightAnalyzer.PreflightResult` and Schema 1.4 only after isolated analyzer tests are green. Update design/plan versioning and report schema together.
+7. Run the forced loader test gate, then the consolidated clean build. Runtime client/server launch remains separate.
+
+The current user local branch is at `3e1291494b6c10cc58b2c54be8978df972e6cd68`; resolve the latest remote branch SHA before the next pull because the Slice 4 design and subsequent documentation updates are documentation-only commits after that local checkpoint. The testbench continuation handoff remains the single source for the exact pull guard.
+
+Keep Palladium + Alien Evolution paused and isolated. Preserve the universal, reusable, modpack-ready compatibility platform goal.
 
