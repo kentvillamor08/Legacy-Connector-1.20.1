@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
 import java.util.zip.ZipEntry;
+import java.util.zip.CRC32;
 import java.util.zip.ZipOutputStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -218,6 +219,51 @@ final class Forge1201PreflightAnalyzerTest {
                 .filter(reference -> reference.instructionOrdinal() == -1)
                 .anyMatch(reference -> reference.display().contains("#<class-context>")
                         && reference.display().contains("non-code context")));
+    }
+
+    @Test
+    void reportsDuplicateNestedClassEntryNamesAsAmbiguousAndSkipsAllCopies() throws IOException {
+        byte[] classBytes = recordComponentReferenceClass();
+        byte[] nestedArchive = rawZipWithDuplicateStoredEntry("fixture/Duplicate.class", classBytes);
+        Path sourceJar = createForgeModJar("duplicate-class-entry.jar", false, nestedArchive);
+
+        var result = Forge1201PreflightAnalyzer.analyze(sourceJar, List.of());
+
+        assertEquals(2, result.nestedClassCount());
+        assertEquals(0, result.nestedClassScannedCount());
+        var summary = result.archiveGraph().classScanSummaries().stream()
+                .filter(value -> value.archivePath().endsWith("META-INF/jarjar/sample-nested.jar"))
+                .findFirst().orElseThrow();
+        assertEquals(2, summary.discoveredClassEntries());
+        assertEquals(0, summary.scannedClassEntries());
+        assertEquals(2, summary.skippedClassEntries());
+        assertTrue(summary.warnings().stream().anyMatch(value ->
+                value.contains("fixture/Duplicate.class")
+                        && value.contains("duplicated within the archive")));
+        assertTrue(result.dynamicReferences().stream().noneMatch(reference ->
+                reference.classEntryPath().equals("fixture/Duplicate.class")));
+    }
+
+    @Test
+    void recordsDeepConstantDynamicNestingAndExplicitlyStopsAtTheDepthLimit() {
+        var inventory = new Forge1201ApiUsageAnalyzer.Inventory();
+        assertTrue(inventory.scanNestedClass("source/dynamic-fixture.jar!/nested.jar",
+                "fixture/DeepDynamic.class", deeplyNestedConstantDynamicClass(17)));
+
+        var result = inventory.finish(null);
+        var dynamicRows = result.dynamicReferences();
+        assertEquals(17, dynamicRows.stream().filter(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CONSTANT_DYNAMIC).count());
+        assertEquals(1, dynamicRows.stream().filter(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.VALUE_DEPTH_LIMIT).count());
+        assertTrue(dynamicRows.stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.VALUE_DEPTH_LIMIT
+                        && reference.context().contains("constant-argument-0")
+                        && reference.archivePath().equals("source/dynamic-fixture.jar!/nested.jar")
+                        && reference.classEntryPath().equals("fixture/DeepDynamic.class")));
+        assertTrue(dynamicRows.stream().filter(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CONSTANT_DYNAMIC)
+                .allMatch(reference -> reference.instructionOrdinal() == 0));
     }
 
     @Test
@@ -565,6 +611,106 @@ final class Forge1201PreflightAnalyzerTest {
         component.visitEnd();
         writer.visitEnd();
         return writer.toByteArray();
+    }
+
+    private static byte[] deeplyNestedConstantDynamicClass(int levels) {
+        org.objectweb.asm.Handle bootstrap = new org.objectweb.asm.Handle(
+                Opcodes.H_INVOKESTATIC,
+                "net/minecraft/world/entity/Entity",
+                "bootstrap",
+                "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/Class;Ljava/lang/Object;)Ljava/lang/Object;",
+                false);
+        Object value = org.objectweb.asm.Type.getType("Lnet/minecraft/world/item/ItemStack;");
+        for (int level = levels - 1; level >= 0; level--) {
+            value = new org.objectweb.asm.ConstantDynamic(
+                    "nestedConstant" + level,
+                    "Lnet/minecraft/world/entity/Entity;",
+                    bootstrap,
+                    value);
+        }
+
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "fixture/DeepDynamic", null, "java/lang/Object", null);
+        MethodVisitor method = writer.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "load", "()V", null, null);
+        method.visitCode();
+        method.visitLdcInsn(value);
+        method.visitInsn(Opcodes.POP);
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(1, 0);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] rawZipWithDuplicateStoredEntry(String entryName, byte[] entryBytes) {
+        ByteArrayOutputStream zip = new ByteArrayOutputStream();
+        byte[] name = entryName.getBytes(StandardCharsets.UTF_8);
+        CRC32 crc = new CRC32();
+        crc.update(entryBytes);
+        int checksum = (int) crc.getValue();
+        int[] localOffsets = new int[2];
+
+        for (int index = 0; index < 2; index++) {
+            localOffsets[index] = zip.size();
+            writeLittleEndianInt(zip, 0x04034b50);
+            writeLittleEndianShort(zip, 20);
+            writeLittleEndianShort(zip, 0);
+            writeLittleEndianShort(zip, 0);
+            writeLittleEndianShort(zip, 0);
+            writeLittleEndianShort(zip, 0);
+            writeLittleEndianInt(zip, checksum);
+            writeLittleEndianInt(zip, entryBytes.length);
+            writeLittleEndianInt(zip, entryBytes.length);
+            writeLittleEndianShort(zip, name.length);
+            writeLittleEndianShort(zip, 0);
+            zip.writeBytes(name);
+            zip.writeBytes(entryBytes);
+        }
+
+        int centralDirectoryOffset = zip.size();
+        for (int index = 0; index < 2; index++) {
+            writeLittleEndianInt(zip, 0x02014b50);
+            writeLittleEndianShort(zip, 20);
+            writeLittleEndianShort(zip, 20);
+            writeLittleEndianShort(zip, 0);
+            writeLittleEndianShort(zip, 0);
+            writeLittleEndianShort(zip, 0);
+            writeLittleEndianShort(zip, 0);
+            writeLittleEndianInt(zip, checksum);
+            writeLittleEndianInt(zip, entryBytes.length);
+            writeLittleEndianInt(zip, entryBytes.length);
+            writeLittleEndianShort(zip, name.length);
+            writeLittleEndianShort(zip, 0);
+            writeLittleEndianShort(zip, 0);
+            writeLittleEndianShort(zip, 0);
+            writeLittleEndianShort(zip, 0);
+            writeLittleEndianInt(zip, 0);
+            writeLittleEndianInt(zip, localOffsets[index]);
+            zip.writeBytes(name);
+        }
+        int centralDirectorySize = zip.size() - centralDirectoryOffset;
+        writeLittleEndianInt(zip, 0x06054b50);
+        writeLittleEndianShort(zip, 0);
+        writeLittleEndianShort(zip, 0);
+        writeLittleEndianShort(zip, 2);
+        writeLittleEndianShort(zip, 2);
+        writeLittleEndianInt(zip, centralDirectorySize);
+        writeLittleEndianInt(zip, centralDirectoryOffset);
+        writeLittleEndianShort(zip, 0);
+        return zip.toByteArray();
+    }
+
+    private static void writeLittleEndianShort(ByteArrayOutputStream output, int value) {
+        output.write(value & 0xff);
+        output.write((value >>> 8) & 0xff);
+    }
+
+    private static void writeLittleEndianInt(ByteArrayOutputStream output, int value) {
+        output.write(value & 0xff);
+        output.write((value >>> 8) & 0xff);
+        output.write((value >>> 16) & 0xff);
+        output.write((value >>> 24) & 0xff);
     }
 
     private static byte[] sampleModClass() {
