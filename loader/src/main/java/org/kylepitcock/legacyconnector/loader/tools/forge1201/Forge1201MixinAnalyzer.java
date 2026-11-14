@@ -206,6 +206,7 @@ public final class Forge1201MixinAnalyzer {
             String prefix,
             List<String> aliases,
             String explicitValue,
+            String constraints,
             List<String> targetMemberNameCandidates,
             boolean remap,
             String operation,
@@ -454,9 +455,10 @@ public final class Forge1201MixinAnalyzer {
                         }
 
                         List<ParsedTarget> parsedTargets = readMixinTargets(mixin);
+                        boolean mixinRemap = parsedTargetsRemap(mixin);
                         memberFindings.addAll(readMemberAnnotations(
                                 archivePath, configPath, section, mixin.name.replace('/', '.'),
-                                parsedTargets, mixin, pluginDependent));
+                                parsedTargets, mixin, pluginDependent, mixinRemap));
                         boolean hasMixinAnnotation = hasMixinAnnotation(mixin);
                         List<String> classWarnings = new ArrayList<>();
                         if (!hasMixinAnnotation) {
@@ -471,7 +473,7 @@ public final class Forge1201MixinAnalyzer {
                         for (ParsedTarget target : parsedTargets) {
                             targetFindings.add(resolveTarget(
                                     archivePath, configPath, mixin.name.replace('/', '.'),
-                                    target, parsedTargetsRemap(mixin), pluginDependent,
+                                    target, mixinRemap, pluginDependent,
                                     classMappings, mappingVersion, targetIndex));
                         }
                     }
@@ -590,7 +592,8 @@ public final class Forge1201MixinAnalyzer {
             String mixinClassName,
             List<ParsedTarget> parsedTargets,
             ClassNode mixin,
-            boolean pluginDependent) {
+            boolean pluginDependent,
+            boolean mixinRemap) {
         List<String> sourceTargets = parsedTargets.stream()
                 .map(ParsedTarget::selector).distinct().sorted().toList();
         List<MemberAnnotationFinding> findings = new ArrayList<>();
@@ -605,7 +608,7 @@ public final class Forge1201MixinAnalyzer {
                         findings.add(memberAnnotationFinding(
                                 archivePath, configPath, section, mixinClassName, sourceTargets,
                                 kind, MemberElementKind.FIELD, field.name, field.desc,
-                                annotation, pluginDependent));
+                                annotation, pluginDependent, mixinRemap));
                     }
                 }
             }
@@ -621,7 +624,7 @@ public final class Forge1201MixinAnalyzer {
                         findings.add(memberAnnotationFinding(
                                 archivePath, configPath, section, mixinClassName, sourceTargets,
                                 kind, MemberElementKind.METHOD, method.name, method.desc,
-                                annotation, pluginDependent));
+                                annotation, pluginDependent, mixinRemap));
                     }
                 }
             }
@@ -650,13 +653,15 @@ public final class Forge1201MixinAnalyzer {
             String sourceName,
             String sourceDescriptor,
             AnnotationNode annotation,
-            boolean pluginDependent) {
+            boolean pluginDependent,
+            boolean mixinRemap) {
         List<String> warnings = new ArrayList<>();
         List<String> aliases = stringArrayAnnotationValue(annotation, "aliases");
         LinkedHashSet<String> targetNames = new LinkedHashSet<>();
         String prefix = null;
         String explicitValue = stringAnnotationValue(annotation, "value");
-        boolean remap = booleanAnnotationValue(annotation, "remap", true);
+        String constraints = stringAnnotationValue(annotation, "constraints");
+        boolean remap = booleanAnnotationValue(annotation, "remap", mixinRemap);
         String operation = elementKind.name();
 
         boolean validPlacement = kind == MemberAnnotationKind.SHADOW
@@ -672,15 +677,24 @@ public final class Forge1201MixinAnalyzer {
 
         switch (kind) {
             case SHADOW -> {
-                prefix = stringAnnotationValue(annotation, "prefix");
-                if (prefix == null) prefix = "shadow$";
-                String targetName = sourceName;
-                if (!prefix.isEmpty() && sourceName.startsWith(prefix)) {
-                    targetName = sourceName.substring(prefix.length());
-                } else if (!prefix.isEmpty()) {
-                    warnings.add("Source member name does not start with the declared/default shadow prefix; the unstripped name is retained as a candidate.");
+                String declaredPrefix = stringAnnotationValue(annotation, "prefix");
+                if (elementKind == MemberElementKind.METHOD) {
+                    prefix = declaredPrefix == null ? "shadow$" : declaredPrefix;
+                    String targetName = sourceName;
+                    if (!prefix.isEmpty() && sourceName.startsWith(prefix)) {
+                        targetName = sourceName.substring(prefix.length());
+                    } else if (!prefix.isEmpty()) {
+                        warnings.add("Source method name does not start with the declared/default shadow prefix; the unstripped name is retained as a candidate.");
+                    }
+                    addSelectorCandidate(targetNames, targetName);
+                } else {
+                    // Shadow prefixes are method-only. An explicit field prefix is an error condition;
+                    // the default annotation value is not materialized when it was not written.
+                    if (declaredPrefix != null) {
+                        warnings.add("A @Shadow prefix was explicitly supplied on a field; prefixes only apply to shadow methods and were not stripped.");
+                    }
+                    addSelectorCandidate(targetNames, sourceName);
                 }
-                addSelectorCandidate(targetNames, targetName);
                 aliases.forEach(alias -> addSelectorCandidate(targetNames, alias));
                 operation = elementKind == MemberElementKind.FIELD ? "FIELD" : "METHOD";
             }
@@ -750,7 +764,7 @@ public final class Forge1201MixinAnalyzer {
         return new MemberAnnotationFinding(
                 archivePath, configPath, section, mixinClassName, sourceTargets,
                 kind, elementKind, sourceName, sourceDescriptor, prefix, aliases, explicitValue,
-                List.copyOf(targetNames), remap, operation, status, evidence, warnings);
+                constraints, List.copyOf(targetNames), remap, operation, status, evidence, warnings);
     }
 
     private static boolean isValidMemberDescriptor(MemberElementKind kind, String descriptor) {
