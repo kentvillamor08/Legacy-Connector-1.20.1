@@ -34,7 +34,7 @@ import org.objectweb.asm.tree.MethodNode;
  * resources and mixin class entries, reads visible/invisible @Mixin and member annotations, and
  * inventories source-side handler and selector data for core injectors. It checks mapped class
  * targets through the shared target index but never loads or executes mod classes or Mixin plugins.
- * Nested archive resources, detailed @At/@Slice semantics, and semantic refmap remapping remain
+ * Nested archive resources, detailed @At/@Constant/@Slice semantics, and semantic refmap remapping remain
  * later increments. Unified preflight consumes this result API.</p>
  */
 public final class Forge1201MixinAnalyzer {
