@@ -126,6 +126,61 @@ final class Forge1201PreflightAnalyzerTest {
     }
 
     @Test
+    void classRemapperCapturesStructuralReferencesAndNestedAnnotationValues() {
+        var inventory = new Forge1201ApiUsageAnalyzer.Inventory();
+        assertTrue(inventory.scanNestedClass("source/fixture.jar!/nested.jar",
+                "fixture/StructuralReferences.class", structuralReferenceClass()));
+        assertTrue(inventory.scanNestedClass("source/fixture.jar!/nested.jar",
+                "fixture/RecordReferences.class", recordComponentReferenceClass()));
+
+        var result = inventory.finish(null);
+        List<String> references = result.referencedApiClasses();
+
+        // Class headers, implemented interfaces, generic signatures and descriptors.
+        assertTrue(references.contains("net/minecraft/world/entity/Entity"));
+        assertTrue(references.contains("net/minecraft/world/entity/Entity$Feature"));
+        assertTrue(references.contains("net/minecraft/world/item/ItemStack"));
+        assertTrue(references.contains("net/minecraft/resources/ResourceLocation"));
+        assertTrue(references.contains("net/minecraft/client/Minecraft"));
+        assertTrue(references.contains("net/minecraft/world/entity/Entity$RemovalReason"));
+
+        // Class, field, method, parameter, type and record-component annotation descriptors.
+        assertTrue(references.contains("net/minecraft/client/ClientMarker"));
+        assertTrue(references.contains("net/minecraft/client/FieldMarker"));
+        assertTrue(references.contains("net/minecraft/client/FieldTypeMarker"));
+        assertTrue(references.contains("net/minecraft/client/MethodMarker"));
+        assertTrue(references.contains("net/minecraft/client/ParameterMarker"));
+        assertTrue(references.contains("net/minecraft/client/ReturnTypeMarker"));
+        assertTrue(references.contains("net/minecraft/client/RecordMarker"));
+        assertTrue(references.contains("net/minecraft/client/RecordTypeMarker"));
+        assertTrue(references.contains("net/minecraft/client/NestedClientMarker"));
+
+        // Annotation class literals are separately inventoried with annotation provenance,
+        // including nested annotations and arrays (instructionOrdinal = -1 means non-code context).
+        assertTrue(result.dynamicReferences().stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CLASS_LITERAL
+                        && reference.owner().equals("net/minecraft/world/item/ItemStack")
+                        && reference.context().startsWith("class-annotation:")
+                        && reference.instructionOrdinal() == -1));
+        assertTrue(result.dynamicReferences().stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CLASS_LITERAL
+                        && reference.owner().equals("net/minecraft/client/Minecraft")
+                        && reference.context().contains("nested@")));
+        assertTrue(result.dynamicReferences().stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CLASS_LITERAL
+                        && reference.context().startsWith("field-annotation:")));
+        assertTrue(result.dynamicReferences().stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CLASS_LITERAL
+                        && reference.context().startsWith("method-annotation:")));
+        assertTrue(result.dynamicReferences().stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CLASS_LITERAL
+                        && reference.context().startsWith("parameter-annotation:")));
+        assertTrue(result.dynamicReferences().stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CLASS_LITERAL
+                        && reference.context().startsWith("record-component-annotation:")));
+    }
+
+    @Test
     void reportsOversizedNestedClassEntriesAsExplicitlySkipped() throws IOException {
         byte[] oversizedClass = new byte[(int) Forge1201ArchiveGraph.MAX_CLASS_ENTRY_BYTES + 1];
         Path sourceJar = createForgeModJar("oversized-nested.jar", false,
@@ -349,6 +404,98 @@ final class Forge1201PreflightAnalyzerTest {
         method.visitInsn(Opcodes.RETURN);
         method.visitMaxs(0, 0);
         method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] structuralReferenceClass() {
+        String entity = "net/minecraft/world/entity/Entity";
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, "fixture/StructuralReferences",
+                "L" + entity + ";L" + entity + "$Feature;", entity,
+                new String[] {entity + "$Feature"});
+
+        AnnotationVisitor classAnnotation = writer.visitAnnotation(
+                "Lnet/minecraft/client/ClientMarker;", true);
+        classAnnotation.visit("type", org.objectweb.asm.Type.getType("Lnet/minecraft/world/item/ItemStack;"));
+        AnnotationVisitor nested = classAnnotation.visitAnnotation(
+                "nested", "Lnet/minecraft/client/NestedClientMarker;");
+        nested.visit("nestedType", org.objectweb.asm.Type.getType("Lnet/minecraft/client/Minecraft;"));
+        nested.visitEnd();
+        AnnotationVisitor types = classAnnotation.visitArray("types");
+        types.visit(null, org.objectweb.asm.Type.getType("Lnet/minecraft/resources/ResourceLocation;"));
+        types.visitEnd();
+        classAnnotation.visitEnum("reason", "Lnet/minecraft/world/entity/Entity$RemovalReason;", "DISCARDED");
+        classAnnotation.visitEnd();
+        writer.visitTypeAnnotation(
+                org.objectweb.asm.TypeReference.newSuperTypeReference(-1).getValue(),
+                null, "Lnet/minecraft/client/ClassTypeMarker;", true).visitEnd();
+
+        var field = writer.visitField(Opcodes.ACC_PRIVATE, "entity", "L" + entity + ";",
+                "Ljava/util/List<L" + entity + ";>;", null);
+        AnnotationVisitor fieldAnnotation = field.visitAnnotation("Lnet/minecraft/client/FieldMarker;", true);
+        fieldAnnotation.visit("type", org.objectweb.asm.Type.getType("Lnet/minecraft/world/item/ItemStack;"));
+        fieldAnnotation.visitEnd();
+        field.visitTypeAnnotation(org.objectweb.asm.TypeReference.newTypeReference(
+                org.objectweb.asm.TypeReference.FIELD).getValue(),
+                null, "Lnet/minecraft/client/FieldTypeMarker;", true).visitEnd();
+        field.visitEnd();
+
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, "resolve",
+                "(L" + entity + ";)L" + entity + ";",
+                "(Ljava/util/List<L" + entity + ";>;)L" + entity + ";",
+                new String[] {entity + "$RemovalReason"});
+        AnnotationVisitor methodAnnotation = method.visitAnnotation("Lnet/minecraft/client/MethodMarker;", true);
+        methodAnnotation.visit("type", org.objectweb.asm.Type.getType("Lnet/minecraft/client/Minecraft;"));
+        methodAnnotation.visitEnd();
+        AnnotationVisitor parameterAnnotation = method.visitParameterAnnotation(
+                0, "Lnet/minecraft/client/ParameterMarker;", true);
+        parameterAnnotation.visit("type", org.objectweb.asm.Type.getType("Lnet/minecraft/resources/ResourceLocation;"));
+        parameterAnnotation.visitEnd();
+        method.visitTypeAnnotation(org.objectweb.asm.TypeReference.newTypeReference(
+                org.objectweb.asm.TypeReference.METHOD_RETURN).getValue(),
+                null, "Lnet/minecraft/client/ReturnTypeMarker;", true).visitEnd();
+
+        org.objectweb.asm.Label start = new org.objectweb.asm.Label();
+        org.objectweb.asm.Label end = new org.objectweb.asm.Label();
+        org.objectweb.asm.Label handler = new org.objectweb.asm.Label();
+        method.visitTryCatchBlock(start, end, handler, entity + "$RemovalReason");
+        method.visitCode();
+        method.visitLabel(start);
+        method.visitTypeInsn(Opcodes.NEW, entity);
+        method.visitInsn(Opcodes.POP);
+        method.visitMultiANewArrayInsn("[[Lnet/minecraft/world/item/ItemStack;", 2);
+        method.visitInsn(Opcodes.POP);
+        method.visitInsn(Opcodes.ACONST_NULL);
+        method.visitLabel(end);
+        method.visitInsn(Opcodes.ARETURN);
+        method.visitLabel(handler);
+        method.visitFrame(Opcodes.F_FULL, 1, new Object[] {entity}, 1,
+                new Object[] {entity + "$RemovalReason"});
+        method.visitInsn(Opcodes.POP);
+        method.visitInsn(Opcodes.ACONST_NULL);
+        method.visitInsn(Opcodes.ARETURN);
+        method.visitLocalVariable("entity", "L" + entity + ";",
+                "Ljava/util/List<L" + entity + ";>;", start, end, 1);
+        method.visitMaxs(2, 2);
+        method.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] recordComponentReferenceClass() {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL | Opcodes.ACC_RECORD,
+                "fixture/RecordReferences", null, "java/lang/Record", null);
+        var component = writer.visitRecordComponent(
+                "entity", "Lnet/minecraft/world/entity/Entity;", null);
+        AnnotationVisitor annotation = component.visitAnnotation("Lnet/minecraft/client/RecordMarker;", true);
+        annotation.visit("type", org.objectweb.asm.Type.getType("Lnet/minecraft/world/item/ItemStack;"));
+        annotation.visitEnd();
+        component.visitTypeAnnotation(org.objectweb.asm.TypeReference.newTypeReference(
+                org.objectweb.asm.TypeReference.FIELD).getValue(),
+                null, "Lnet/minecraft/client/RecordTypeMarker;", true).visitEnd();
+        component.visitEnd();
         writer.visitEnd();
         return writer.toByteArray();
     }
