@@ -869,9 +869,9 @@ public final class Forge1201MixinAnalyzer {
         if (badDescriptor) status = InjectorSelectorStatus.INVALID_DESCRIPTOR;
         else if (invalidQuantifier || (name != null && name.isBlank())) status = InjectorSelectorStatus.INVALID_SELECTOR;
         else if (tail != null && !tail.isBlank()) status = InjectorSelectorStatus.UNSUPPORTED_EXTENSION;
+        else if (!"DEFAULT".equals(quantifier)) status = InjectorSelectorStatus.WILDCARD;
         else if (name == null || name.isEmpty()) status = owner == null
                 ? InjectorSelectorStatus.INVALID_SELECTOR : InjectorSelectorStatus.OWNER_ONLY;
-        else if (!"DEFAULT".equals(quantifier)) status = InjectorSelectorStatus.WILDCARD;
         else if (descriptor != null) status = InjectorSelectorStatus.METHOD_DESCRIPTOR;
         else status = InjectorSelectorStatus.METHOD_NAME_ONLY;
 
@@ -930,7 +930,8 @@ public final class Forge1201MixinAnalyzer {
         }
         int min = integerAnnotationValue(desc, "min", 0);
         int max = integerAnnotationValue(desc, "max", Integer.MAX_VALUE);
-        if (min < 0 || max < 1 || min > max) invalid = true;
+        // Mixin treats negative min values as ignored and max values below 1 as unbounded.
+        if (max >= 1 && min > max) invalid = true;
         String raw = "@Desc(owner=" + (owner == null ? "<mixin-target>" : owner)
                 + ", value=" + name + ", descriptor=" + descriptor + ", min=" + min + ", max=" + max + ")";
         InjectorSelectorStatus status = invalid ? InjectorSelectorStatus.INVALID_SELECTOR
@@ -951,10 +952,13 @@ public final class Forge1201MixinAnalyzer {
         try {
             if (descriptor == null || !descriptor.startsWith("(")) return false;
             Type method = Type.getMethodType(descriptor);
-            for (Type argument : method.getArgumentTypes()) {
+            Type[] arguments = method.getArgumentTypes();
+            for (Type argument : arguments) {
                 if (argument.getSort() == Type.VOID || argument.getSort() == Type.METHOD) return false;
             }
-            return method.getReturnType().getSort() != Type.METHOD;
+            Type returnType = method.getReturnType();
+            return returnType.getSort() != Type.METHOD
+                    && Type.getMethodDescriptor(returnType, arguments).equals(descriptor);
         } catch (RuntimeException e) {
             return false;
         }
