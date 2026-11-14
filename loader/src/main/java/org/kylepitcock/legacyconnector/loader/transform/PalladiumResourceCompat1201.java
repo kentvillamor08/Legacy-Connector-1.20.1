@@ -273,12 +273,12 @@ final class PalladiumResourceCompat1201 {
         return rewrite(resources, ALIEN_EVO_POWER_UI, new String[][] {
                 {
                         "nickTextBox.tick();",
-                        "/* EditBox input is ticked by the 1.21.1 screen; no manual tick() call. */",
+                        "/* Nickname EditBox input is ticked by the 1.21.1 screen; no manual tick() call. */",
                         "1"
                 },
                 {
                         "hexTextBox.tick();",
-                        "/* EditBox input is ticked by the 1.21.1 screen; no manual tick() call. */",
+                        "/* HEX EditBox input is ticked by the 1.21.1 screen; no manual tick() call. */",
                         "1"
                 },
                 {
