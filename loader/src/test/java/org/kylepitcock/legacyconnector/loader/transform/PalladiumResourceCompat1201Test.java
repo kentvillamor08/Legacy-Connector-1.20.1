@@ -848,7 +848,7 @@ class PalladiumResourceCompat1201Test {
     }
 
     @Test
-    void migratesTemporaryCrystalBlockServerTicksToKubeJs7BlockEntityEvents() {
+    void movesTemporaryCrystalBlockEventHandlersIntoKubeJsServerDataScripts() {
         Map<String, byte[]> resources = new HashMap<>();
         put(resources, PalladiumResourceCompat1201.ALIEN_EVO_BLOCKS, """
                 event.create('alienevo:crystal_block')
@@ -867,22 +867,29 @@ class PalladiumResourceCompat1201Test {
                     });
                 """);
 
-        assertEquals(1, PalladiumResourceCompat1201.apply(resources));
+        assertEquals(2, PalladiumResourceCompat1201.apply(resources));
 
-        String migrated = get(resources, PalladiumResourceCompat1201.ALIEN_EVO_BLOCKS);
-        assertEquals(2, occurrences(migrated, "blockEntity.serverTicking();"));
-        assertEquals(2, occurrences(migrated, "blockEntity.tickFrequency(2500);"));
-        assertEquals(2, occurrences(migrated, "blockEntity.tickOffset(250);"));
-        assertTrue(migrated.contains(
+        String startupScript = get(resources, PalladiumResourceCompat1201.ALIEN_EVO_BLOCKS);
+        assertEquals(2, occurrences(startupScript, "blockEntity.serverTicking();"));
+        assertEquals(2, occurrences(startupScript, "blockEntity.tickFrequency(2500);"));
+        assertEquals(2, occurrences(startupScript, "blockEntity.tickOffset(250);"));
+        assertFalse(startupScript.contains("blockEntity.serverTick("));
+        assertFalse(startupScript.contains("BlockEvents.blockEntityTick"));
+
+        String serverScript = get(resources, PalladiumResourceCompat1201.ALIEN_EVO_SERVER_CRYSTAL_TICKS);
+        assertTrue(serverScript.startsWith(
+                "// Legacy Connector: Diamondhead temporary crystal expiry (SERVER script)"));
+        assertTrue(serverScript.contains(
                 "BlockEvents.blockEntityTick('alienevo:crystal_block', event => {"));
-        assertTrue(migrated.contains(
+        assertTrue(serverScript.contains(
                 "BlockEvents.blockEntityTick('alienevo:smooth_crystal_block', event => {"));
-        assertEquals(2, occurrences(migrated, "event.level.destroyBlock(event.block.pos, false);"));
-        assertFalse(migrated.contains("blockEntity.serverTick("));
+        assertEquals(2, occurrences(serverScript, "event.level.destroyBlock(event.block.pos, false);"));
 
         assertEquals(0, PalladiumResourceCompat1201.apply(resources));
-        assertEquals(migrated, get(resources, PalladiumResourceCompat1201.ALIEN_EVO_BLOCKS));
+        assertEquals(startupScript, get(resources, PalladiumResourceCompat1201.ALIEN_EVO_BLOCKS));
+        assertEquals(serverScript, get(resources, PalladiumResourceCompat1201.ALIEN_EVO_SERVER_CRYSTAL_TICKS));
     }
+
 
     @Test
     void guardsAfOmniAoeFireAgainstPalladiumMarkersAndNonLivingEntities() {
