@@ -138,7 +138,7 @@ final class Forge1201MixinAnalyzerTest {
                 Map.of(),
                 "no-member-mapping-supplied");
 
-        assertEquals(7, result.memberAnnotations().size());
+        assertEquals(10, result.memberAnnotations().size());
         assertTrue(result.memberAnnotations().stream().allMatch(finding ->
                 finding.configPath().equals(configPath)
                         && finding.mixinClassName().equals("com.example.mixins.MemberMixin")
@@ -199,12 +199,32 @@ final class Forge1201MixinAnalyzerTest {
         assertEquals("METHOD", invoker.operation());
         assertEquals(List.of("heal"), invoker.targetMemberNameCandidates());
 
+        var constructorInvoker = result.memberAnnotations().stream()
+                .filter(finding -> finding.sourceMemberName().equals("newEntity"))
+                .findFirst().orElseThrow();
+        assertEquals("CONSTRUCTOR", constructorInvoker.operation());
+        assertEquals(List.of("<init>"), constructorInvoker.targetMemberNameCandidates());
+
         var unresolvedAccessor = result.memberAnnotations().stream()
                 .filter(finding -> finding.sourceMemberName().equals("fetchHealth"))
                 .findFirst().orElseThrow();
         assertTrue(unresolvedAccessor.targetMemberNameCandidates().isEmpty());
         assertEquals(Forge1201MixinAnalyzer.MemberResolutionStatus.INVALID_MEMBER_SELECTOR,
                 unresolvedAccessor.status());
+
+        var lowerCaseAccessor = result.memberAnnotations().stream()
+                .filter(finding -> finding.sourceMemberName().equals("gethealth"))
+                .findFirst().orElseThrow();
+        assertTrue(lowerCaseAccessor.targetMemberNameCandidates().isEmpty());
+        assertEquals(Forge1201MixinAnalyzer.MemberResolutionStatus.INVALID_MEMBER_SELECTOR,
+                lowerCaseAccessor.status());
+
+        var unsupportedAccessor = result.memberAnnotations().stream()
+                .filter(finding -> finding.sourceMemberName().equals("getHealthWithArgs"))
+                .findFirst().orElseThrow();
+        assertEquals("UNSUPPORTED_SHAPE", unsupportedAccessor.operation());
+        assertEquals(Forge1201MixinAnalyzer.MemberResolutionStatus.INVALID_ANNOTATION_VALUE,
+                unsupportedAccessor.status());
     }
 
 
@@ -437,7 +457,11 @@ final class Forge1201MixinAnalyzerTest {
         addAnnotatedMethod(writer, "getHealth", "()D", ACCESSOR_DESC, null, null, null, null);
         addAnnotatedMethod(writer, "setHealth", "(D)V", ACCESSOR_DESC, "health", null, null, null);
         addAnnotatedMethod(writer, "callHeal", "(I)V", INVOKER_DESC, null, null, null, null);
+        addAnnotatedMethod(writer, "newEntity", "(I)Lcom/example/Target;", INVOKER_DESC,
+                "<init>", null, null, null);
         addAnnotatedMethod(writer, "fetchHealth", "()D", ACCESSOR_DESC, null, null, null, null);
+        addAnnotatedMethod(writer, "gethealth", "()D", ACCESSOR_DESC, null, null, null, null);
+        addAnnotatedMethod(writer, "getHealthWithArgs", "(II)V", ACCESSOR_DESC, null, null, null, null);
 
         writer.visitEnd();
         return writer.toByteArray();
