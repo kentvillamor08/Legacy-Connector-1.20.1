@@ -482,3 +482,37 @@ After a green gate: review/finish duplicate raw-ZIP-entry and deep nested Consta
 Keep Palladium + Alien Evolution paused and isolated from this Universal branch. Preserve the goal of a reusable, modpack-ready Forge 1.20.1-to-NeoForge 1.21.1 compatibility platform, not one-off mod-specific hacks.
 
 The final annotation provenance assertion commit `ba52f6ae643b2720655450551c480ebfa2edf094` is part of the same untested ClassRemapper batch. The exact pull target is the latest branch SHA recorded by the testbench handoff after this plan update.
+
+## CURRENT CONTINUATION UPDATE — 2026-11-14 — duplicate ZIP and ConstantDynamic boundary tests added
+
+### Latest user-confirmed green gate
+
+The user fast-forwarded the Universal checkout to `c330c332126ad43d5b487ad8101129b2e96d2be7` and ran `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks`. Result: `BUILD SUCCESSFUL in 1m 7s`, 14 actionable tasks / 14 executed. This validates the ClassRemapper structural-reference and annotation-value batch. The console excerpt did not print a JUnit count. PSReadLine 2.0.0 warning is unrelated.
+
+### Additional tests committed after that green gate (not yet run)
+
+- `reportsDuplicateNestedClassEntryNamesAsAmbiguousAndSkipsAllCopies()` uses a hand-built raw ZIP with two local file records and matching central-directory records for the same `.class` name. `ZipOutputStream` is deliberately avoided because it rejects duplicate names on write. The assertions require discovered=2, scanned=0, skipped=2, a path-specific duplicate warning, and no references from the ambiguous bytecode.
+- `recordsDeepConstantDynamicNestingAndExplicitlyStopsAtTheDepthLimit()` creates 17 nested `ConstantDynamic` nodes and expects 17 regular constant rows (depths 0-16), exactly one `VALUE_DEPTH_LIMIT` row for depth 17, and the full nested archive/class path plus the complete repeated `constant-argument-0` context chain.
+- The existing deterministic fixture continues to cover ordinary ConstantDynamic bootstrap handles and argument recursion.
+- Edge-case test commit: `b8eb18ea8cbe19bca2ac897a933f24ad795799ea`; exact recursion-depth assertion follow-up: `ba8428932da023f9c527a6b6eb0d6056626a88bb`.
+- Design audit update: `419c46f5a2d964d8e374d3b4219069d5008e51f7` was the prior structural-audit note; a new duplicate/deep-ConstantDynamic test note has now been committed.
+
+Latest expected branch head after the new design update must be resolved from GitHub before the user pulls. User's last confirmed local HEAD is `c330c332126ad43d5b487ad8101129b2e96d2be7`. First verify the clean worktree and exact branch/path, resolve the current remote SHA with `git ls-remote`, fast-forward only, verify the pulled SHA, then run:
+
+    Push-Location $repo
+    .\gradlew.bat :loader:clean :loader:test --no-daemon --console=plain --rerun-tasks
+    $testExit = $LASTEXITCODE
+    Pop-Location
+    if ($testExit -ne 0) { throw "Slice 3 duplicate ZIP / ConstantDynamic depth test gate failed." }
+
+Do not generate the Symbiote Schema 1.3 report until this newest forced gate passes.
+
+### After the next green gate
+
+1. Review the duplicate raw-ZIP and depth-17 evidence and confirm no skipped/ambiguous archive findings disappeared from per-archive summaries.
+2. Inspect the testbench `archive/preflight/README.md` for the next unused run suffix.
+3. Generate Symbiote Schema 1.3 JSON/text using new unique filenames, preserving Slice 2 run-3.
+4. Parse and review outer/nested scan counts, provenance, annotation/dynamic reference rows, mapped/unmapped SRG rows and warnings.
+5. Run the consolidated clean build. Actual NeoForge runtime launch/gameplay remains unverified.
+
+Keep Palladium + Alien Evolution paused and isolated. Maintain the universal, reusable, modpack-ready connector vision.
