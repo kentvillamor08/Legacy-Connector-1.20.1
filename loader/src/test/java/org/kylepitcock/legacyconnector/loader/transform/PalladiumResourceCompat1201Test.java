@@ -384,6 +384,12 @@ class PalladiumResourceCompat1201Test {
         assertTrue(level.contains("maxAllAliens(username, target.server)"));
         assertTrue(level.contains("giveAlienControl(username, target.server)"));
 
+        // This fixture intentionally contains only the scoreboard portion of stat_ability.js.
+        // The Attribute_Mod enum migration must leave unrelated partial script fixtures alone.
+        String statAbility = get(resources, PalladiumResourceCompat1201.ALIEN_EVO_STAT_ABILITY);
+        assertEquals(2, occurrences(statAbility, "entity.server.scoreboard"));
+        assertFalse(statAbility.contains("legacyConnectorAttributeOperation"));
+
         String detransform = get(resources, "addon/alienevo/kubejs_scripts/detransform.js");
         assertTrue(detransform.contains("forNameOnly(String(playerUsername))"));
         assertTrue(detransform.contains("playerTimerScore.get()"));
