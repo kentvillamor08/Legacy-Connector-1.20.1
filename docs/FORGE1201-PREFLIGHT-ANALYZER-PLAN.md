@@ -1,4 +1,4 @@
-**Status:** Slice 1 and 2 are implemented and validated. Slice 3 nested source-archive bytecode scanning and SRG-to-Mojang normalization passed the user's forced clean loader test gate at 43f6db7726c3e023b331d714cbc3ccb6452e7564 (BUILD SUCCESSFUL, 14/14 tasks executed). A follow-up ClassRemapper annotation/context audit and synthetic fixture matrix are now committed on feat/forge1201-preflight-analyzer; those newest commits are pending the next user-run forced loader test gate. Do not generate the Symbiote Schema 1.3 report until that newest gate passes.
+**Status:** Slice 1 and Slice 2 are implemented and validated. Slice 3 nested archive bytecode scanning, SRG normalization, ClassRemapper structural/annotation coverage, duplicate raw-ZIP entry handling, and deep ConstantDynamic depth-limit tests all passed the user's latest forced clean loader test gate at `b0d2b7b68915137aed44ef9153f4dfa304fa5819` (`BUILD SUCCESSFUL in 31s`, 14/14 tasks executed). The next step is to generate and inspect the first real Symbiote Schema 1.3 report; it has not yet been generated.
 
 **Status:** Slices 1 and 2 are implemented and validated. The first Slice 3 dynamic-reference batch passed the user's forced focused loader test gate at `4457199a4109d774b25a428e7c68e23b4ec3b4ce` (`BUILD SUCCESSFUL in 24s`, 12/12 tasks executed). The nested-bytecode/SRG integration was committed as a494d20a3be797abd3de563fa3672df69e2276da; its stale limitation assertion was corrected in 3c6febb075c32391b6879b0f3ef00c5856e80d51; and test runtime mapping-resource wiring was added in 0c7c55b72033c986d94f1cba5d836dfce26e95a0. The test/runtime wiring checkpoint is 0c7c55b72033c986d94f1cba5d836dfce26e95a0; the branch may include a later documentation-only commit. Use the exact remote tip in the testbench handoff for the guarded pull. Structural reference coverage remains under audit.
 
@@ -516,3 +516,56 @@ Do not generate the Symbiote Schema 1.3 report until this newest forced gate pas
 5. Run the consolidated clean build. Actual NeoForge runtime launch/gameplay remains unverified.
 
 Keep Palladium + Alien Evolution paused and isolated. Maintain the universal, reusable, modpack-ready connector vision.
+## CURRENT CONTINUATION UPDATE — 2026-11-14 — Slice 3 edge-case test gate passed; real report next
+
+### User-confirmed validation
+
+The user fast-forwarded the Universal branch `feat/forge1201-preflight-analyzer` to `b0d2b7b68915137aed44ef9153f4dfa304fa5819` and ran `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks`.
+
+    BUILD SUCCESSFUL in 31s
+    14 actionable tasks: 14 executed
+
+The test run included generated SRG-to-Mojang mappings (64,225 member entries). No JUnit test count was visible in the transcript. This is a complete green focused Slice 3 loader test gate for the implemented structural/annotation, duplicate ZIP, and ConstantDynamic depth regressions. It is not runtime/gameplay validation.
+
+### First real Symbiote Schema 1.3 report — filename reserved, not yet generated
+
+Testbench root listing and `archive/preflight/README.md` were checked. The next unused canonical first-run filenames are:
+
+- `symbiote-1.1.3.jar-slice-3.json`
+- `symbiote-1.1.3.jar-slice-3.txt`
+
+Do not overwrite Slice 2 `symbiote-1.1.3.jar-slice-2-run-3.json` / `.txt` or legacy unsuffixed aliases.
+
+Source: `C:\Users\Administrator\legacy-connector-testbench\symbiote-1.1.3.jar`
+Expected SHA-256: `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c`
+Installed mods directory to preserve comparable provider evidence, provided it exists: `E:\Games\PolyMC\instances\Neoforge tester\.minecraft\mods`.
+Schema/analyzer version: `1.3` / `1.3.0`; target Minecraft / NeoForge: `1.21.1` / `21.1.258`.
+
+### Exact next action — generate and validate the real report
+
+The root `preflight1201` Gradle task accepts `-PpreflightJar`, `-PpreflightModsDirs`, `-PpreflightJson`, and `-PpreflightText`. The source JAR is already in the testbench repository root. On the user's Windows system, set:
+
+    $repo = 'F:\Program\intellij-idea-portable\Legacy-Connector-1.20.1'
+    $testbench = 'C:\Users\Administrator\legacy-connector-testbench'
+    $sourceJar = Join-Path $testbench 'symbiote-1.1.3.jar'
+    $modsDir = 'E:\Games\PolyMC\instances\Neoforge tester\.minecraft\mods'
+    $json = Join-Path $testbench 'symbiote-1.1.3.jar-slice-3.json'
+    $text = Join-Path $testbench 'symbiote-1.1.3.jar-slice-3.txt'
+
+Before running, verify source and mods paths exist, neither output path already exists, and source SHA-256 equals the expected value above. Then run:
+
+    Push-Location $repo
+    .\gradlew.bat preflight1201 --no-daemon --console=plain -PpreflightJar="$sourceJar" -PpreflightModsDirs="$modsDir" -PpreflightJson="$json" -PpreflightText="$text"
+    $reportExit = $LASTEXITCODE
+    Pop-Location
+    if ($reportExit -ne 0) { throw "Symbiote Slice 3 report generation failed." }
+
+After generation, verify both files exist and are nonempty; parse the JSON with `ConvertFrom-Json`; check `schemaVersion` is `1.3`, `analyzerVersion` is `1.3.0`, and `sourceSha256` matches the original. Report outer/nested class counts, dynamic-reference count, normalized SRG row count, per-archive summaries and warnings. Share the command output and upload the two files into the testbench root so they can be inspected before the archive README is updated.
+
+If generation fails after creating either output, do not overwrite that path on a retry; report the failure and use a fresh run suffix such as `symbiote-1.1.3.jar-slice-3-run-2.json` / `.txt` after we diagnose it.
+
+### After report inspection
+
+Update `archive/preflight/README.md` with report schema/analyzer versions, input SHA, source commit, totals and output Git blob SHAs. Then run the consolidated clean build. Slice 4 Mixin semantic analysis and actual NeoForge launch/gameplay verification remain future gates.
+
+Keep Palladium + Alien Evolution paused and isolated. Preserve the universal, reusable, modpack-ready compatibility platform goal.
