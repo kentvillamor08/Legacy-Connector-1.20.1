@@ -21,7 +21,9 @@ import org.kylepitcock.legacyconnector.loader.mapping.SrgMojangTable;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
+import org.objectweb.asm.FieldVisitor;
 import org.objectweb.asm.MethodVisitor;
+import org.objectweb.asm.RecordComponentVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.commons.ClassRemapper;
 import org.objectweb.asm.commons.Remapper;
@@ -731,10 +733,101 @@ public final class Forge1201ApiUsageAnalyzer {
                 reader.accept(new ClassRemapper(new ClassVisitor(Opcodes.ASM9) {
                     private String className;
 
+                    private AnnotationVisitor recordingAnnotation(
+                            String context, String callerClass, String callerMethod, String callerDescriptor) {
+                        return new AnnotationVisitor(Opcodes.ASM9) {
+                            @Override
+                            public void visit(String name, Object value) {
+                                references.recordDynamicValue(archivePath, classEntryPath,
+                                        callerClass, callerMethod, callerDescriptor,
+                                        context + "/" + (name == null ? "<value>" : name), value, -1, 0);
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitAnnotation(String name, String descriptor) {
+                                return recordingAnnotation(context + "/" + name + "@" + descriptor,
+                                        callerClass, callerMethod, callerDescriptor);
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitArray(String name) {
+                                return recordingAnnotation(context + "/" + (name == null ? "<array>" : name),
+                                        callerClass, callerMethod, callerDescriptor);
+                            }
+                        };
+                    }
+
                     @Override
                     public void visit(int version, int access, String name, String signature,
                                       String superName, String[] interfaces) {
                         className = name;
+                    }
+
+                    @Override
+                    public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
+                        AnnotationVisitor values = recordingAnnotation(
+                                "class-annotation:" + descriptor, className, null, null);
+                        if (!collectEntrypoint || !modAnnotation.equals(descriptor)) return values;
+                        return new AnnotationVisitor(Opcodes.ASM9, values) {
+                            @Override
+                            public void visit(String name, Object value) {
+                                if ("value".equals(name) || "modid".equals(name)) {
+                                    entrypoints.add(className + " (" + value + ")");
+                                }
+                                super.visit(name, value);
+                            }
+                        };
+                    }
+
+                    @Override
+                    public AnnotationVisitor visitTypeAnnotation(
+                            int typeRef, org.objectweb.asm.TypePath typePath,
+                            String descriptor, boolean visible) {
+                        return recordingAnnotation(
+                                "class-type-annotation:" + descriptor, className, null, null);
+                    }
+
+                    @Override
+                    public FieldVisitor visitField(int access, String name, String descriptor,
+                                                   String signature, Object value) {
+                        return new FieldVisitor(Opcodes.ASM9) {
+                            @Override
+                            public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                                return recordingAnnotation("field-annotation:" + name + ":" + annotationDescriptor,
+                                        className, null, null);
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitTypeAnnotation(
+                                    int typeRef, org.objectweb.asm.TypePath typePath,
+                                    String annotationDescriptor, boolean visible) {
+                                return recordingAnnotation(
+                                        "field-type-annotation:" + name + ":" + annotationDescriptor,
+                                        className, null, null);
+                            }
+                        };
+                    }
+
+                    @Override
+                    public RecordComponentVisitor visitRecordComponent(
+                            String name, String descriptor, String signature) {
+                        return new RecordComponentVisitor(Opcodes.ASM9) {
+                            @Override
+                            public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                                return recordingAnnotation(
+                                        "record-component-annotation:" + name + ":" + annotationDescriptor,
+                                        className, null, null);
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitTypeAnnotation(
+                                    int typeRef, org.objectweb.asm.TypePath typePath,
+                                    String annotationDescriptor, boolean visible) {
+                                return recordingAnnotation(
+                                        "record-component-type-annotation:" + name + ":" + annotationDescriptor,
+                                        className, null, null);
+                            }
+                        };
                     }
 
                     @Override
@@ -744,6 +837,58 @@ public final class Forge1201ApiUsageAnalyzer {
                         String callerMethod = name;
                         String callerDescriptor = descriptor;
                         return new MethodVisitor(Opcodes.ASM9) {
+                            @Override
+                            public AnnotationVisitor visitAnnotation(String annotationDescriptor, boolean visible) {
+                                return recordingAnnotation("method-annotation:" + annotationDescriptor,
+                                        callerClass, callerMethod, callerDescriptor);
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitTypeAnnotation(
+                                    int typeRef, org.objectweb.asm.TypePath typePath,
+                                    String annotationDescriptor, boolean visible) {
+                                return recordingAnnotation("method-type-annotation:" + annotationDescriptor,
+                                        callerClass, callerMethod, callerDescriptor);
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitParameterAnnotation(
+                                    int parameter, String annotationDescriptor, boolean visible) {
+                                return recordingAnnotation("parameter-annotation:" + parameter + ":"
+                                        + annotationDescriptor, callerClass, callerMethod, callerDescriptor);
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitInsnAnnotation(
+                                    int typeRef, org.objectweb.asm.TypePath typePath,
+                                    String annotationDescriptor, boolean visible) {
+                                return recordingAnnotation("instruction-annotation:" + annotationDescriptor,
+                                        callerClass, callerMethod, callerDescriptor);
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitTryCatchAnnotation(
+                                    int typeRef, org.objectweb.asm.TypePath typePath,
+                                    String annotationDescriptor, boolean visible) {
+                                return recordingAnnotation("try-catch-annotation:" + annotationDescriptor,
+                                        callerClass, callerMethod, callerDescriptor);
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitLocalVariableAnnotation(
+                                    int typeRef, org.objectweb.asm.TypePath typePath,
+                                    org.objectweb.asm.Label[] start, org.objectweb.asm.Label[] end,
+                                    int[] index, String annotationDescriptor, boolean visible) {
+                                return recordingAnnotation("local-variable-annotation:" + annotationDescriptor,
+                                        callerClass, callerMethod, callerDescriptor);
+                            }
+
+                            @Override
+                            public AnnotationVisitor visitAnnotationDefault() {
+                                return recordingAnnotation("annotation-default",
+                                        callerClass, callerMethod, callerDescriptor);
+                            }
+
                             private int instructionOrdinal;
 
                             private int nextInstruction() {
@@ -824,18 +969,6 @@ public final class Forge1201ApiUsageAnalyzer {
                         };
                     }
 
-                    @Override
-                    public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
-                        if (!collectEntrypoint || !modAnnotation.equals(descriptor)) return null;
-                        return new AnnotationVisitor(Opcodes.ASM9) {
-                            @Override
-                            public void visit(String name, Object value) {
-                                if (name.equals("value") || name.equals("modid")) {
-                                    entrypoints.add(className + " (" + value + ")");
-                                }
-                            }
-                        };
-                    }
                 }, references), 0);
                 return true;
             } catch (RuntimeException malformedClass) {
