@@ -673,8 +673,9 @@ public final class Forge1201MixinAnalyzer {
         if (!validPlacement) {
             warnings.add(kind + " is expected on a method, but was found on a field.");
         }
-        if (!aliases.isEmpty() && (sourceAccess & Opcodes.ACC_PRIVATE) == 0) {
-            warnings.add("Mixin aliases are only supported for private members; this source member is not private.");
+        if (kind == MemberAnnotationKind.SHADOW && !aliases.isEmpty()
+                && (sourceAccess & Opcodes.ACC_PRIVATE) == 0) {
+            warnings.add("Shadow aliases are only supported for private members; this source member is not private.");
             invalidAnnotationValue = true;
         }
         if ((kind == MemberAnnotationKind.ACCESSOR || kind == MemberAnnotationKind.INVOKER)
