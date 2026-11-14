@@ -214,7 +214,7 @@ public final class Forge1201MixinAnalyzer {
         }
     }
 
-    public record ConfigDeclaration(String path, DiscoverySource source) {    public record ConfigDeclaration(String path, DiscoverySource source) {
+    public record ConfigDeclaration(String path, DiscoverySource source) {
         public ConfigDeclaration {
             if (path == null || path.isBlank()) throw new IllegalArgumentException("Config path is required");
             if (source == null) throw new IllegalArgumentException("Config discovery source is required");
