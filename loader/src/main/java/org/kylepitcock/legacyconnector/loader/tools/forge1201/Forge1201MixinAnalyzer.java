@@ -89,7 +89,8 @@ public final class Forge1201MixinAnalyzer {
         INVALID_PATH,
         DUPLICATE_ENTRY,
         LIMIT_EXCEEDED,
-        INVALID_JSON
+        INVALID_JSON,
+        ARCHIVE_INDEX_INCOMPLETE
     }
 
     public enum PluginStatus {
@@ -97,7 +98,8 @@ public final class Forge1201MixinAnalyzer {
         PRESENT_NOT_EXECUTED,
         MISSING_FROM_SOURCE_ARCHIVE,
         INVALID_CLASS_NAME,
-        DUPLICATE_ENTRY
+        DUPLICATE_ENTRY,
+        ARCHIVE_INDEX_INCOMPLETE
     }
 
     public record ConfigDeclaration(String path, DiscoverySource source) {
@@ -232,6 +234,7 @@ public final class Forge1201MixinAnalyzer {
             List<ConfigFinding> configFindings = new ArrayList<>();
             List<MixinClassFinding> classFindings = new ArrayList<>();
             List<TargetFinding> targetFindings = new ArrayList<>();
+            boolean archiveEntryIndexIncomplete = count > MAX_ARCHIVE_ENTRIES;
             long totalConfigBytes = 0;
             long totalClassBytes = 0;
             int processedConfigs = 0;
@@ -249,8 +252,13 @@ public final class Forge1201MixinAnalyzer {
                 }
                 IndexedEntry configEntry = entries.get(configPath);
                 if (configEntry == null) {
+                    ConfigStatus missingStatus = archiveEntryIndexIncomplete
+                            ? ConfigStatus.CONFIG_LIMIT_EXCEEDED : ConfigStatus.CONFIG_MISSING;
+                    String missingEvidence = archiveEntryIndexIncomplete
+                            ? "Archive entry inventory was truncated; config presence cannot be established."
+                            : "Discovered config resource is absent from the source archive.";
                     configFindings.add(configFailure(archivePath, configPath, sources,
-                            ConfigStatus.CONFIG_MISSING, "Discovered config resource is absent from the source archive."));
+                            missingStatus, missingEvidence));
                     continue;
                 }
                 if (configEntry.occurrences() != 1) {
@@ -290,8 +298,9 @@ public final class Forge1201MixinAnalyzer {
                 }
                 configWarnings.addAll(parsed.warnings());
 
-                PluginStatus pluginStatus = inspectPlugin(parsed.pluginClass(), entries);
-                ResourceStatus refmapStatus = inspectRefmap(parsed.refmapPath(), entries, zip);
+                PluginStatus pluginStatus = inspectPlugin(parsed.pluginClass(), entries, archiveEntryIndexIncomplete);
+                ResourceStatus refmapStatus = inspectRefmap(
+                        parsed.refmapPath(), entries, zip, archiveEntryIndexIncomplete);
                 configFindings.add(new ConfigFinding(
                         archivePath, configPath, sources, ConfigStatus.PARSED,
                         parsed.packageName(), parsed.required(), parsed.minimumVersion(),
@@ -320,10 +329,14 @@ public final class Forge1201MixinAnalyzer {
                         }
                         IndexedEntry classEntry = entries.get(classEntryPath);
                         if (classEntry == null) {
+                            MixinClassStatus missingStatus = archiveEntryIndexIncomplete
+                                    ? MixinClassStatus.CLASS_LIMIT_EXCEEDED : MixinClassStatus.MISSING;
+                            String evidence = archiveEntryIndexIncomplete
+                                    ? "Archive entry inventory was truncated; mixin class presence cannot be established."
+                                    : "Mixin class named by the config is absent from the source archive.";
                             classFindings.add(new MixinClassFinding(
                                     archivePath, configPath, section, mixinName, classEntryPath,
-                                    MixinClassStatus.MISSING, false,
-                                    List.of("Mixin class named by the config is absent from the source archive.")));
+                                    missingStatus, false, List.of(evidence)));
                             continue;
                         }
                         if (classEntry.occurrences() != 1) {
@@ -378,6 +391,8 @@ public final class Forge1201MixinAnalyzer {
                         List<String> classWarnings = new ArrayList<>();
                         if (!hasMixinAnnotation) {
                             classWarnings.add("Resolved class has no visible or invisible @Mixin annotation.");
+                        } else if (parsedTargets.isEmpty()) {
+                            classWarnings.add("The @Mixin annotation has no statically readable class or string targets.");
                         }
                         classFindings.add(new MixinClassFinding(
                                 archivePath, configPath, section, mixin.name.replace('/', '.'),
@@ -456,23 +471,26 @@ public final class Forge1201MixinAnalyzer {
                 List.copyOf(warnings));
     }
 
-    private static PluginStatus inspectPlugin(String pluginClass, Map<String, IndexedEntry> entries) {
+    private static PluginStatus inspectPlugin(
+            String pluginClass, Map<String, IndexedEntry> entries, boolean archiveIndexIncomplete) {
         if (pluginClass == null || pluginClass.isBlank()) return PluginStatus.NOT_DECLARED;
         String path = classResourcePath(pluginClass);
         if (path == null) return PluginStatus.INVALID_CLASS_NAME;
         IndexedEntry entry = entries.get(path);
-        if (entry == null) return PluginStatus.MISSING_FROM_SOURCE_ARCHIVE;
+        if (entry == null) return archiveIndexIncomplete
+                ? PluginStatus.ARCHIVE_INDEX_INCOMPLETE : PluginStatus.MISSING_FROM_SOURCE_ARCHIVE;
         if (entry.occurrences() != 1) return PluginStatus.DUPLICATE_ENTRY;
         // Static analysis intentionally does not load, instantiate, or execute the plugin.
         return PluginStatus.PRESENT_NOT_EXECUTED;
     }
 
     private static ResourceStatus inspectRefmap(
-            String refmapPath, Map<String, IndexedEntry> entries, ZipFile zip) {
+            String refmapPath, Map<String, IndexedEntry> entries, ZipFile zip, boolean archiveIndexIncomplete) {
         if (refmapPath == null || refmapPath.isBlank()) return ResourceStatus.NOT_DECLARED;
         if (!isSafeArchivePath(refmapPath)) return ResourceStatus.INVALID_PATH;
         IndexedEntry entry = entries.get(refmapPath);
-        if (entry == null) return ResourceStatus.MISSING;
+        if (entry == null) return archiveIndexIncomplete
+                ? ResourceStatus.ARCHIVE_INDEX_INCOMPLETE : ResourceStatus.MISSING;
         if (entry.occurrences() != 1) return ResourceStatus.DUPLICATE_ENTRY;
         try {
             byte[] bytes = readBounded(zip, entry.entry(), MAX_CONFIG_BYTES);
@@ -487,10 +505,7 @@ public final class Forge1201MixinAnalyzer {
 
     private static List<ParsedTarget> readMixinTargets(ClassNode mixin) {
         List<ParsedTarget> targets = new ArrayList<>();
-        for (List<AnnotationNode> annotations : List.of(
-                mixin.visibleAnnotations == null ? List.of() : mixin.visibleAnnotations,
-                mixin.invisibleAnnotations == null ? List.of() : mixin.invisibleAnnotations)) {
-            if (annotations == null) continue;
+        for (List<AnnotationNode> annotations : annotationLists(mixin)) {
             for (AnnotationNode annotation : annotations) {
                 if (!MIXIN_ANNOTATION.equals(annotation.desc) || annotation.values == null) continue;
                 for (int i = 0; i + 1 < annotation.values.size(); i += 2) {
@@ -512,6 +527,13 @@ public final class Forge1201MixinAnalyzer {
                 .sorted(Comparator.comparing(ParsedTarget::selector).thenComparing(ParsedTarget::form)).toList();
     }
 
+    private static List<List<AnnotationNode>> annotationLists(ClassNode mixin) {
+        List<List<AnnotationNode>> result = new ArrayList<>(2);
+        if (mixin.visibleAnnotations != null) result.add(mixin.visibleAnnotations);
+        if (mixin.invisibleAnnotations != null) result.add(mixin.invisibleAnnotations);
+        return result;
+    }
+
     private static boolean hasMixinAnnotation(ClassNode mixin) {
         return hasAnnotation(mixin.visibleAnnotations) || hasAnnotation(mixin.invisibleAnnotations);
     }
@@ -521,10 +543,7 @@ public final class Forge1201MixinAnalyzer {
     }
 
     private static boolean parsedTargetsRemap(ClassNode mixin) {
-        for (List<AnnotationNode> annotations : List.of(
-                mixin.visibleAnnotations == null ? List.of() : mixin.visibleAnnotations,
-                mixin.invisibleAnnotations == null ? List.of() : mixin.invisibleAnnotations)) {
-            if (annotations == null) continue;
+        for (List<AnnotationNode> annotations : annotationLists(mixin)) {
             for (AnnotationNode annotation : annotations) {
                 if (!MIXIN_ANNOTATION.equals(annotation.desc) || annotation.values == null) continue;
                 for (int i = 0; i + 1 < annotation.values.size(); i += 2) {
