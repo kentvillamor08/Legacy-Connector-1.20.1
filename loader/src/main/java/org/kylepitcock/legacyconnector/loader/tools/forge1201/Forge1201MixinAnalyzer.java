@@ -31,7 +31,7 @@ import org.objectweb.asm.tree.ClassNode;
  * config resources and mixin class entries, reads both visible and invisible @Mixin annotations,
  * and checks mapped target class presence through the shared target index. It never loads or
  * executes mod classes or Mixin plugins. Nested archive resources, member annotations, injection
- * selectors, refmap content, and unified preflight integration are later increments.</p>
+ * selectors, and semantic refmap remapping remain later increments. Unified preflight integration now consumes this result API.</p>
  */
 public final class Forge1201MixinAnalyzer {
     public static final int MAX_ARCHIVE_ENTRIES = 100_000;
