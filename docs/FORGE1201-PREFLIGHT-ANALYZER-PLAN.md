@@ -1,4 +1,4 @@
-**Status:** Slices 1–3 are implemented and validated, including the real Symbiote Schema 1.3 / Analyzer 1.3.0 report and the user-confirmed consolidated clean build. Slice 4 Mixin analysis is in progress: the shared target verifier now exposes a reusable per-run, descriptor-aware target index, and focused synthetic ASM tests have been added. Those new tests still require the user's forced loader test run; the Mixin analyzer/result model, config/refmap/selector analysis, and preflight integration remain unimplemented.
+**Status:** Slices 1–3 are implemented and validated. Slice 4 is in progress: the shared TargetIndex API and its synthetic ASM tests passed the user's forced loader test gate at `246002c6fcc1af371bb11a716483dd1df23a2dbe` (`BUILD SUCCESSFUL in 1m 40s`, 14/14 tasks executed). A first bounded outer-JAR `Forge1201MixinAnalyzer` API and synthetic tests have since been committed. The new analyzer tests remain pending; member/injector analysis and unified preflight integration are not implemented yet.
 
 **Status:** Slices 1 and 2 are implemented and validated. The first Slice 3 dynamic-reference batch passed the user's forced focused loader test gate at `4457199a4109d774b25a428e7c68e23b4ec3b4ce` (`BUILD SUCCESSFUL in 24s`, 12/12 tasks executed). The nested-bytecode/SRG integration was committed as a494d20a3be797abd3de563fa3672df69e2276da; its stale limitation assertion was corrected in 3c6febb075c32391b6879b0f3ef00c5856e80d51; and test runtime mapping-resource wiring was added in 0c7c55b72033c986d94f1cba5d836dfce26e95a0. The test/runtime wiring checkpoint is 0c7c55b72033c986d94f1cba5d836dfce26e95a0; the branch may include a later documentation-only commit. Use the exact remote tip in the testbench handoff for the guarded pull. Structural reference coverage remains under audit.
 
@@ -119,8 +119,16 @@ Provide both:
 
 - Source commit `e3aa921d01d8ee134de3a71d3aa1016d249dbaf1` exposes `Forge1201TargetApiVerifier.TargetIndex`, backed by the existing target verifier's per-instance cache and exact descriptor-aware inherited lookup.
 - Test commit `69a93e13183466e51a6bab8023eecb0bb906e5e9` adds synthetic ASM tests for exact method/field descriptors, inherited lookup, missing classes, incomplete hierarchies, and independent index instances.
-- These tests are authored but not yet run. First pull the latest feature-branch commits and run the forced loader test gate.
-- Next implementation after that gate: add the state-free `Forge1201MixinAnalyzer` result API and bounded config/mixin-class discovery, then incrementally add target annotations, member annotations, injectors, `@At`/slices, refmaps/plugins, nested archive provenance, and unified preflight reporting. Do not duplicate target hierarchy logic or create another unbounded ZIP walker.
+- The user subsequently ran the forced loader test gate at `246002c6fcc1af371bb11a716483dd1df23a2dbe`: `BUILD SUCCESSFUL in 1m 40s`, 14 actionable tasks, all 14 executed. The TargetIndex implementation and its tests are validated.
+- The first `Forge1201MixinAnalyzer` outer-JAR config/target-discovery API and synthetic test class are now committed after that run. Those newer tests must be pulled and run before further expansion. See the Slice 4 design document's implementation checkpoint for exact scope and limitations.
+
+### Slice 4 implementation checkpoint — bounded Mixin analyzer foundation (2026-11-14)
+
+- The user-confirmed TargetIndex forced loader test gate passed at commit `246002c6fcc1af371bb11a716483dd1df23a2dbe`: `BUILD SUCCESSFUL in 1m 40s`, 14 actionable tasks, all 14 executed.
+- Analyzer commit `df4d8531b1b1a739119ca3be8bbf982c04f42bd0` adds `Forge1201MixinAnalyzer`, a state-free per-call API for bounded outer-JAR config parsing, mixin-class resolution, visible/invisible `@Mixin` targets, explicit class mapping states, target class checks through shared `TargetIndex`, and non-executing plugin/refmap resource checks.
+- Follow-up source commits: `d0248dd544e028f55abb2bf41ac2d1a43f51c9ad` (mapping/class/plugin state corrections) and `c81b8a2556819f85332b7b527f09635fff9f1422` (archive inventory truncation states and annotation iteration).
+- Test commit `d852da1ffd64d59dca1e9b4f3148077e244d4cfd` adds synthetic ZIP/ASM tests. These new tests are pending the next user forced test run.
+- Scope limits: outer JAR only; configs are supplied explicitly; Minecraft target checks need a named mapping input; plugin presence is checked in the source JAR only; nested source archives, Forge metadata discovery, member annotations/injectors, `@At`/`@Slice`, semantic refmap validation, and preflight JSON/text integration remain future work.
 
 ### Slice 5 — shared migration/bridge/shim coverage
 
