@@ -20,6 +20,7 @@ import java.util.TreeMap;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
@@ -189,6 +190,7 @@ public final class Forge1201MixinAnalyzer {
         MEMBER_REMAP_DISABLED_UNVERIFIED,
         PLUGIN_DEPENDENT,
         INVALID_ANNOTATION_PLACEMENT,
+        INVALID_ANNOTATION_VALUE,
         INVALID_MEMBER_DESCRIPTOR,
         INVALID_MEMBER_SELECTOR
     }
@@ -608,7 +610,7 @@ public final class Forge1201MixinAnalyzer {
                         findings.add(memberAnnotationFinding(
                                 archivePath, configPath, section, mixinClassName, sourceTargets,
                                 kind, MemberElementKind.FIELD, field.name, field.desc,
-                                annotation, pluginDependent, mixinRemap));
+                                field.access, annotation, pluginDependent, mixinRemap));
                     }
                 }
             }
@@ -624,7 +626,7 @@ public final class Forge1201MixinAnalyzer {
                         findings.add(memberAnnotationFinding(
                                 archivePath, configPath, section, mixinClassName, sourceTargets,
                                 kind, MemberElementKind.METHOD, method.name, method.desc,
-                                annotation, pluginDependent, mixinRemap));
+                                method.access, annotation, pluginDependent, mixinRemap));
                     }
                 }
             }
@@ -652,6 +654,7 @@ public final class Forge1201MixinAnalyzer {
             MemberElementKind elementKind,
             String sourceName,
             String sourceDescriptor,
+            int sourceAccess,
             AnnotationNode annotation,
             boolean pluginDependent,
             boolean mixinRemap) {
@@ -669,8 +672,13 @@ public final class Forge1201MixinAnalyzer {
         if (!validPlacement) {
             warnings.add(kind + " is expected on a method, but was found on a field.");
         }
+        if (!aliases.isEmpty() && (sourceAccess & Opcodes.ACC_PRIVATE) == 0) {
+            warnings.add("Mixin aliases are only supported for private members; this source member is not private.");
+            invalidAnnotationValue = true;
+        }
 
         boolean validDescriptor = isValidMemberDescriptor(elementKind, sourceDescriptor);
+        boolean invalidAnnotationValue = false;
         if (!validDescriptor) {
             warnings.add("Member descriptor is not a valid JVM " + elementKind.name().toLowerCase() + " descriptor.");
         }
@@ -692,6 +700,7 @@ public final class Forge1201MixinAnalyzer {
                     // the default annotation value is not materialized when it was not written.
                     if (declaredPrefix != null) {
                         warnings.add("A @Shadow prefix was explicitly supplied on a field; prefixes only apply to shadow methods and were not stripped.");
+                        invalidAnnotationValue = true;
                     }
                     addSelectorCandidate(targetNames, sourceName);
                 }
@@ -705,6 +714,7 @@ public final class Forge1201MixinAnalyzer {
             }
             case ACCESSOR -> {
                 operation = accessorOperation(sourceDescriptor, warnings);
+                if (operation.equals("UNSUPPORTED_SHAPE")) invalidAnnotationValue = true;
                 if (explicitValue != null && !explicitValue.isBlank()) {
                     addSelectorCandidate(targetNames, explicitValue);
                 } else {
@@ -736,6 +746,8 @@ public final class Forge1201MixinAnalyzer {
             status = MemberResolutionStatus.INVALID_ANNOTATION_PLACEMENT;
         } else if (!validDescriptor) {
             status = MemberResolutionStatus.INVALID_MEMBER_DESCRIPTOR;
+        } else if (invalidAnnotationValue) {
+            status = MemberResolutionStatus.INVALID_ANNOTATION_VALUE;
         } else if (targetNames.isEmpty()) {
             status = MemberResolutionStatus.INVALID_MEMBER_SELECTOR;
         } else if (pluginDependent) {
@@ -749,6 +761,8 @@ public final class Forge1201MixinAnalyzer {
         String evidence = switch (status) {
             case INVALID_ANNOTATION_PLACEMENT ->
                     "The annotation was captured on an element kind that is not supported for this Mixin annotation.";
+            case INVALID_ANNOTATION_VALUE ->
+                    "The annotation contains a value or member modifier combination that violates a known Mixin contract; details are listed in warnings.";
             case INVALID_MEMBER_DESCRIPTOR ->
                     "The annotation was captured, but the source member descriptor is malformed and cannot be compared.";
             case INVALID_MEMBER_SELECTOR ->
