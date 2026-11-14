@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Compatibility Analyzer
 
-**Status:** Slice 1 and Slice 2 are implemented; Slice 2 Schema 1.2 / Analyzer 1.2.0 passed the forced loader test gate, its corrected Symbiote run-3 real-JAR report was generated and reviewed, and the consolidated clean build passed at code checkout `aa5f5d32ba865e7f056851b1dfd39c12fb8fcffc` on 2026-11-14. Next: Slice 3 nested bytecode and complete reference analysis.
+**Status:** Slices 1 and 2 are implemented and validated. Slice 3 is in progress: the first Schema 1.3 / Analyzer 1.3.0 code batch now captures contextual invokedynamic/bootstrap/LDC/ConstantDynamic references for outer-JAR classes and includes synthetic regression tests. The new focused test gate has not yet been run; nested archive bytecode and source SRG-to-Mojang normalization remain next.
 
 **Report filename rule:** every analyzer output filename includes its slice number, e.g. `symbiote-1.1.3.jar-slice-2.json` and `symbiote-1.1.3.jar-slice-2.txt`. Repeated runs append a run number, e.g. `symbiote-1.1.3.jar-slice-2-run-2.json` and `.txt`. Use the root Gradle task's explicit `-PpreflightJson=<path>` and `-PpreflightText=<path>` options. Never overwrite the unsuffixed legacy root filenames or an earlier slice/run. The testbench archive index is `archive/preflight/README.md`.
   
@@ -98,6 +98,8 @@ Provide both:
 - Test missing/corrupt nested archives and path traversal entries.
 
 ### Slice 3 — complete bytecode reference coverage
+
+**Detailed design:** see [`docs/FORGE1201-PREFLIGHT-SLICE-3-DESIGN.md`](FORGE1201-PREFLIGHT-SLICE-3-DESIGN.md). It records the scanner/archive/mapping architecture, bounded processing rules, report contract, and regression matrix.
 
 - Extend the existing ASM inventory to scan nested mod/library bytecode separately from parent classes.
 - Record types in class headers, signatures, annotations, descriptors, exceptions, instructions, invokedynamic bootstrap handles/arguments, method handles, and constant-dynamic values.
@@ -247,60 +249,86 @@ Synthetic coverage added:
 - Minecraft target mismatch, exact/numeric/union ranges, and unparseable qualified versions.
 - Missing declared JAR, corrupt archive, traversal path, duplicate archive content, maximum depth, per-archive size, and archive-count limits.
 
-### Exact next action — begin Slice 3 implementation
+### Slice 3 implementation checkpoint — outer-JAR dynamic/bootstrap references
 
-**Completed:** the corrected Slice 2 implementation, focused tests, corrected real-JAR report, and consolidated clean build have all passed their respective gates.
+**Status:** Initial code batch committed; focused tests pending. This is a partial Slice 3 milestone, not complete nested-bytecode coverage.
 
-**Consolidated build result — user-confirmed 2026-11-14:**
-- Universal worktree: `F:\Program\intellij-idea-portable\Legacy-Connector-1.20.1`.
-- Branch: `feat/forge1201-preflight-analyzer`.
-- Expected local checkout: `aa5f5d32ba865e7f056851b1dfd39c12fb8fcffc`. The user ran the explicit branch, HEAD, and clean-worktree checks; they did not throw. The initial repository-path comparison alone threw because Git printed the same Windows path with forward slashes (`F:/...`) while the guard expected backslashes. This was a string-format false positive; the prompt showed the intended Universal directory and the remaining guards passed.
-- Command: `:clean :loader:clean :testmods:clean :build :loader:build :testmods:assemble --no-daemon --console=plain`.
-- Result: `BUILD SUCCESSFUL in 2m 28s`; 33 actionable tasks, 25 executed and 8 from cache.
-- The build completed `:loader:build`, root `:build`, and `:testmods:assemble`. It generated the 1.20.1 SRG-to-Mojang mapping table (64,225 members) and indexed 5,258 shim classes. The 1.7.3 mapping generator also reported 9,243 rows.
-- In this consolidated run, `:loader:test` and root `:test` were `FROM-CACHE`; they were not freshly executed here. The earlier forced loader test gate at code commit `4ece76833d1614738bc626fe64dbde31e42b8941` passed with `--rerun-tasks` (BUILD SUCCESSFUL in 40s, 12/12 tasks executed), so test validation is separately covered.
-- Java emitted 18 non-fatal deprecation/removal warnings. Gradle reported deprecated features that will be incompatible with Gradle 9.0. No build failure resulted.
-- This validates compile/build assembly at the tested source checkout, not Minecraft startup or runtime/gameplay behavior.
+**Source implementation commits on `feat/forge1201-preflight-analyzer`:**
+- `2c2a8f1bbe0805adbffadc6418c446b5c41ea227` — adds contextual dynamic-reference records and ASM collection for invokedynamic, bootstrap handles/arguments, LDC Type/Handle constants, and recursive ConstantDynamic values.
+- `cd8e701f6c55cff0d48361fe6a4c66916a1754c4` — exposes dynamic-reference findings in preflight JSON/text and bumps the report to Schema 1.3 / Analyzer 1.3.0.
+- `69daf6f4de554c4e57d76824bca1372ee3c15160` — adds synthetic bytecode fixture coverage.
+- `1e7618b9ac226537403cce706f5a55fd4be6f506` — preserves the method-handle interface bit and fixes archive-entry path capture to use a per-class effectively-final value.
+- `7c362404d5813efae7fc841d85d176bf7fef1723` — expands assertions for LDC method handles and serialized report output.
+- `44fa6838ef7624ac0116759a31918caaf88673f1` — fixes the invokedynamic-site record call for the expanded reference model.
+- `7260837c2d0027e7a4aa23f4844b2e581a7080fe` — balances the synthetic class fixture's operand stack.
+- `95e18d3b6b163b3fbb3242e0e758c2763c95ffce` — reports the defensive recursive dynamic-constant depth limit explicitly.
 
-**Corrected repository-path guard for future Windows PowerShell commands:** Git may print a Windows working-tree path using forward slashes. Normalize separators and compare case-insensitively instead of comparing Git's output literally to the backslash path:
+**Current behavior in this batch:**
+1. Existing aggregate method/field references and direct call-site findings are retained.
+2. New contextual findings preserve archive path, class entry path, caller class/method/descriptor, context, target owner/name/descriptor, handle tag, interface-owner flag, count, and zero-based instruction ordinal.
+3. `INVOKEDYNAMIC` instructions record the site, bootstrap handle, and recursively inspected bootstrap arguments.
+4. `LDC` captures API method handles, field handles, class literals, and method-type constants.
+5. `ConstantDynamic` captures its symbolic constant, bootstrap handle, and recursively inspected arguments. A defensive recursion-depth overflow is an explicit finding.
+6. Instruction ordinal is deliberately not called a byte offset; ASM's visitor API does not supply exact byte offsets for each event.
+7. Text and JSON reports share the same result model. The new dynamic-reference section is deterministic.
+
+**Explicitly still incomplete:**
+- This first batch scans only the outer source JAR. Nested archive classes are not yet fed into ASM.
+- Source SRG member names are not yet normalized through the generated `SrgMojangTable`.
+- Class headers, signatures, annotations, descriptors, exceptions and many other symbolic references continue to rely on the existing `ClassRemapper` aggregate callbacks; the remaining Slice 3 audit must add contextual evidence and tests where current callbacks are insufficient.
+- Reflection/resource string candidates remain deferred heuristics.
+- The Schema 1.3 report has not yet been generated against Symbiote; do not overwrite Slice 2 run-3.
+
+### Exact next action — pull and test the first Slice 3 batch
+
+The user's last confirmed local Universal checkout was `aa5f5d32ba865e7f056851b1dfd39c12fb8fcffc`. The remote branch now has the Slice 3 source commits above plus this plan update. First fast-forward the **Universal** worktree only, then run the focused loader tests with `--rerun-tasks`. The command must stop on wrong path, branch, HEAD, dirty worktree, failed pull, or unexpected pulled HEAD.
+
+After the forced loader tests pass, report the exact result. Do not generate the new real-JAR Schema 1.3 report yet: first continue Slice 3 integration with nested archive classes and the existing SRG-to-Mojang table, then run tests and produce one new unique Symbiote report filename.
+
 ```powershell
+$repo = 'F:\Program\intellij-idea-portable\Legacy-Connector-1.20.1'
+$branch = 'feat/forge1201-preflight-analyzer'
+$expectedLocalHead = 'aa5f5d32ba865e7f056851b1dfd39c12fb8fcffc'
+
 $actualRepo = [System.IO.Path]::GetFullPath((git -C $repo rev-parse --show-toplevel).Trim().Replace('/', '\')).TrimEnd('\')
 $expectedRepo = [System.IO.Path]::GetFullPath($repo).TrimEnd('\')
 if (-not [string]::Equals($actualRepo, $expectedRepo, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "Unexpected repository path: $actualRepo"
 }
+$actualBranch = (git -C $repo branch --show-current).Trim()
+if ($actualBranch -ne $branch) { throw "Wrong branch: expected $branch, found $actualBranch" }
+$actualHead = (git -C $repo rev-parse HEAD).Trim()
+if ($actualHead -ne $expectedLocalHead) { throw "Unexpected local HEAD: expected $expectedLocalHead, found $actualHead" }
+$changes = @(git -C $repo status --porcelain)
+if ($changes.Count -gt 0) { $changes; throw "Worktree is not clean. Stop and inspect local changes." }
+
+$remoteLines = @(git -C $repo ls-remote origin "refs/heads/$branch")
+if ($LASTEXITCODE -ne 0 -or $remoteLines.Count -ne 1) { throw "Could not resolve the exact remote branch tip." }
+$expectedRemoteHead = ($remoteLines[0] -split '\s+')[0]
+if ($expectedRemoteHead -notmatch '^[0-9a-f]{40}$') { throw "Invalid remote branch SHA: $expectedRemoteHead" }
+
+git -C $repo pull --ff-only origin $branch
+if ($LASTEXITCODE -ne 0) { throw "Fast-forward pull failed." }
+$pulledHead = (git -C $repo rev-parse HEAD).Trim()
+if ($pulledHead -ne $expectedRemoteHead) { throw "Unexpected pulled HEAD: $pulledHead" }
+
+Push-Location $repo
+.\gradlew.bat :loader:clean :loader:test --no-daemon --console=plain --rerun-tasks
+$testExit = $LASTEXITCODE
+Pop-Location
+if ($testExit -ne 0) { throw "Slice 3 focused loader test gate failed." }
 ```
-Keep the exact branch, HEAD, and clean-worktree guards as well. For long command sequences, make the guard fail closed before invoking Gradle.
 
-**Next: implement Slice 3 — complete bytecode reference coverage.** Resume from the implementation sequence in this plan:
-1. Recursively scan bytecode from discovered nested archives, preserving archive path/provenance and bounded resource use.
-2. Expand reference inventory beyond the existing ordinary class/method/field references to include descriptors, inheritance/interface relationships, annotations, signatures, exception types, class literals, method handles, invokedynamic/constant-dynamic bootstrap references, and other bytecode forms where supported by ASM.
-3. Normalize Forge 1.20.1 runtime SRG member names to 1.20.1 Mojang names using the generated mapping data before any 1.20.1-to-1.21.1 migration analysis. Keep name normalization distinct from semantic API migration and Forge-to-NeoForge adapter decisions.
-4. Preserve deterministic output, archive provenance, conservative unknown findings, and bounded limits. Add synthetic regression fixtures for nested classes and every newly supported reference kind, including method-handle/invokedynamic cases.
-5. Update JSON/text schema deliberately if the report contract changes; keep old fields backward-compatible where practical and document all changes.
-6. Run focused loader tests, generate the next uniquely named real-JAR report (new run suffix; never overwrite run-3), and inspect the output before proceeding to Slice 4 mixin analysis.
-
-Do not re-run the already-passed consolidated build just to clear the path-format false positive. Keep the Palladium + Alien Evolution worktree/branch isolated. Do not merge into master or claim runtime compatibility from static preflight output.
-
+Keep the Palladium + Alien Evolution worktree/branch untouched. Do not start or merge into master. No runtime compatibility claim is implied by the new static references.
 
 ## Validation boundary
 
 **Confirmed on 2026-11-14:**
 
 - Focused loader test at code commit `4ece76833d1614738bc626fe64dbde31e42b8941`: `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks` — `BUILD SUCCESSFUL in 40s`; 12 actionable tasks, all 12 executed.
-- Corrected real-JAR report: Schema 1.2 / Analyzer 1.2.0; Symbiote run-3 JSON/text generated, uploaded, and inspected. See the Slice 2 checkpoint for exact blob SHAs and findings.
-- Consolidated build at the local report/build checkout `aa5f5d32ba865e7f056851b1dfd39c12fb8fcffc`: `:clean :loader:clean :testmods:clean :build :loader:build :testmods:assemble --no-daemon --console=plain` — `BUILD SUCCESSFUL in 2m 28s`; 33 actionable tasks, 25 executed, 8 from cache. The two commits after code checkpoint `4ece768...` through `aa5f5d...` changed only the analyzer plan document; no production or test source changed after the forced test gate.
-- During the build, `:loader:test` and root `:test` were FROM-CACHE. The forced test gate above is the source for the claim that loader tests were freshly executed.
+- Corrected Slice 2 real-JAR report: Schema 1.2 / Analyzer 1.2.0; Symbiote run-3 JSON/text generated, uploaded, and inspected. See the Slice 2 checkpoint for exact blob SHAs and findings.
+- Consolidated build at local code checkout `aa5f5d32ba865e7f056851b1dfd39c12fb8fcffc`: `:clean :loader:clean :testmods:clean :build :loader:build :testmods:assemble --no-daemon --console=plain` — `BUILD SUCCESSFUL in 2m 28s`; 33 actionable tasks, 25 executed and 8 from cache. The commits between the forced-test code checkpoint `4ece768...` and this checkout changed only documentation; no production/test source changed after the forced test gate.
+- In the consolidated run, `:loader:test` and root `:test` were FROM-CACHE. The forced test gate above is the source for the claim that loader tests were freshly executed.
 - Non-fatal warnings: 18 Java deprecation/removal warnings and Gradle 9.0 compatibility/deprecation warnings.
+- The Slice 3 dynamic-reference implementation is committed, but its new forced test gate is pending. No Slice 3 test/build pass is claimed.
 - No Minecraft runtime or gameplay compatibility is established by the tests or static report artifacts.
-
-
-
-**Current code-bearing validation on 2026-11-14:**
-
-- At source code commit 4ece76833d1614738bc626fe64dbde31e42b8941, the user-confirmed command :loader:clean :loader:test --no-daemon --console=plain --rerun-tasks passed: BUILD SUCCESSFUL in 40s; 12 actionable tasks, all 12 executed.
-- The branch tip immediately after that validation was aa5f5d32ba865e7f056851b1dfd39c12fb8fcffc, exactly two commits ahead. GitHub compare confirms those two commits changed only this analyzer plan document; no production or test source changed after the passing test gate.
-- The corrected Schema 1.2 / Analyzer 1.2.0 Symbiote run-3 JSON/text artifacts have been generated, uploaded, and parsed/reviewed as documented above.
-- The consolidated clean build for the current Slice 2 code is still pending. Do not treat the older full-build result at source HEAD 9e1a1e14b597dd8ae690e9ae8c350809567dd1fc as validation of the later Slice 2 code: that build predates the subsequent implementation changes.
-- No Minecraft runtime or gameplay compatibility is established by these tests or static report artifacts.
-
