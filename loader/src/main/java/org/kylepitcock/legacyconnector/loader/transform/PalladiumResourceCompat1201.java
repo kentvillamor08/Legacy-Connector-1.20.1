@@ -968,6 +968,13 @@ final class PalladiumResourceCompat1201 {
         int migratedDefaults = occurrences(script, migratedDefault);
         boolean helperPresent = script.contains("function legacyConnectorAttributeOperation(operation) {");
 
+        // Focused compatibility tests may include only the scoreboard portion of
+        // stat_ability.js. If this script excerpt has no Attribute_Mod operation
+        // markers at all, the operation migration is not relevant to this resource.
+        if (legacyReads == 0 && migratedReads == 0
+                && legacyDefaults == 0 && migratedDefaults == 0 && !helperPresent) {
+            return 0;
+        }
         if (legacyReads == 0 && migratedReads == 2
                 && legacyDefaults == 0 && migratedDefaults == 1 && helperPresent) {
             return 0;
