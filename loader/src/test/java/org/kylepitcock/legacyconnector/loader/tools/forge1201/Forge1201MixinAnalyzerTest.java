@@ -138,7 +138,7 @@ final class Forge1201MixinAnalyzerTest {
                 Map.of(),
                 "no-member-mapping-supplied");
 
-        assertEquals(10, result.memberAnnotations().size());
+        assertEquals(11, result.memberAnnotations().size());
         assertTrue(result.memberAnnotations().stream().allMatch(finding ->
                 finding.configPath().equals(configPath)
                         && finding.mixinClassName().equals("com.example.mixins.MemberMixin")
@@ -225,6 +225,13 @@ final class Forge1201MixinAnalyzerTest {
         assertEquals("UNSUPPORTED_SHAPE", unsupportedAccessor.operation());
         assertEquals(Forge1201MixinAnalyzer.MemberResolutionStatus.INVALID_ANNOTATION_VALUE,
                 unsupportedAccessor.status());
+
+        var concreteAccessor = result.memberAnnotations().stream()
+                .filter(finding -> finding.sourceMemberName().equals("readHealthConcrete"))
+                .findFirst().orElseThrow();
+        assertEquals(Forge1201MixinAnalyzer.MemberResolutionStatus.INVALID_ANNOTATION_VALUE,
+                concreteAccessor.status());
+        assertTrue(concreteAccessor.warnings().stream().anyMatch(warning -> warning.contains("must be abstract")));
     }
 
 
@@ -465,7 +472,7 @@ final class Forge1201MixinAnalyzerTest {
 
     private static byte[] memberMixinClass(String internalName, String targetInternalName) {
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
-        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, internalName, null, "java/lang/Object", null);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT, internalName, null, "java/lang/Object", null);
 
         AnnotationVisitor mixin = writer.visitAnnotation(MIXIN_DESC, true);
         AnnotationVisitor targets = mixin.visitArray("value");
@@ -494,6 +501,8 @@ final class Forge1201MixinAnalyzerTest {
         addAnnotatedMethod(writer, "fetchHealth", "()D", ACCESSOR_DESC, null, null, null, null);
         addAnnotatedMethod(writer, "gethealth", "()D", ACCESSOR_DESC, null, null, null, null);
         addAnnotatedMethod(writer, "getHealthWithArgs", "(II)V", ACCESSOR_DESC, null, null, null, null);
+        addAnnotatedMethod(writer, "readHealthConcrete", "()D", ACCESSOR_DESC,
+                "health", null, null, null, false);
 
         writer.visitEnd();
         return writer.toByteArray();
@@ -508,7 +517,24 @@ final class Forge1201MixinAnalyzerTest {
             String prefix,
             String[] aliases,
             Boolean remap) {
+        boolean abstractMethod = ACCESSOR_DESC.equals(annotationDescriptor)
+                || INVOKER_DESC.equals(annotationDescriptor);
+        addAnnotatedMethod(writer, name, descriptor, annotationDescriptor,
+                value, prefix, aliases, remap, abstractMethod);
+    }
+
+    private static void addAnnotatedMethod(
+            ClassWriter writer,
+            String name,
+            String descriptor,
+            String annotationDescriptor,
+            String value,
+            String prefix,
+            String[] aliases,
+            Boolean remap,
+            boolean abstractMethod) {
         int access = aliases != null && aliases.length > 0 ? Opcodes.ACC_PRIVATE : Opcodes.ACC_PUBLIC;
+        if (abstractMethod) access |= Opcodes.ACC_ABSTRACT;
         MethodVisitor method = writer.visitMethod(access, name, descriptor, null, null);
         AnnotationVisitor annotation = method.visitAnnotation(annotationDescriptor, false);
         if (value != null) annotation.visit("value", value);
@@ -523,6 +549,11 @@ final class Forge1201MixinAnalyzerTest {
             annotation.visit("constraints", "@env(DEFAULT)");
         }
         annotation.visitEnd();
+
+        if (abstractMethod) {
+            method.visitEnd();
+            return;
+        }
 
         method.visitCode();
         switch (Type.getReturnType(descriptor).getSort()) {
