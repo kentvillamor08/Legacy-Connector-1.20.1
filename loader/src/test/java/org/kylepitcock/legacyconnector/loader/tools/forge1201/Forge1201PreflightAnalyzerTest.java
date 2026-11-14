@@ -48,6 +48,23 @@ final class Forge1201PreflightAnalyzerTest {
                         && candidate.discoveredBy().contains("manifest")));
         assertTrue(first.mixinConfigCandidates().stream().anyMatch(candidate ->
                 candidate.path().equals("config/feature.json")));
+        assertEquals("1.4", first.schemaVersion());
+        assertEquals("1.4.0", first.analyzerVersion());
+        assertEquals(Forge1201MixinAnalyzer.TargetIndexStatus.UNAVAILABLE_NO_TARGET_CLASSPATH,
+                first.mixinAnalysis().targetIndexStatus());
+        var manifestConfig = first.mixinAnalysis().configs().stream()
+                .filter(finding -> finding.configPath().equals("mixins.alpha.json")).findFirst().orElseThrow();
+        assertEquals(Forge1201MixinAnalyzer.ConfigStatus.PARSED, manifestConfig.status());
+        assertEquals(List.of(
+                Forge1201MixinAnalyzer.DiscoverySource.MANIFEST,
+                Forge1201MixinAnalyzer.DiscoverySource.RESOURCE_HEURISTIC),
+                manifestConfig.discoverySources());
+        var heuristicConfig = first.mixinAnalysis().configs().stream()
+                .filter(finding -> finding.configPath().equals("config/feature.json")).findFirst().orElseThrow();
+        assertEquals(List.of(Forge1201MixinAnalyzer.DiscoverySource.RESOURCE_HEURISTIC),
+                heuristicConfig.discoverySources());
+        assertTrue(first.mixinAnalysis().mixinClasses().stream().allMatch(finding ->
+                finding.status() == Forge1201MixinAnalyzer.MixinClassStatus.MISSING));
         assertEquals(List.of("alpha", "shared"), first.resourceNamespaces());
         assertTrue(first.jarInJarPaths().contains("META-INF/jarjar/metadata.json"));
         assertTrue(first.jarInJarPaths().contains("META-INF/jarjar/sample-library.jar"));
@@ -124,6 +141,42 @@ final class Forge1201PreflightAnalyzerTest {
         assertTrue(first.limitations().stream().anyMatch(value ->
                 value.contains("outer source JAR") && value.contains("source-nested Forge/library archives")));
         assertTrue(first.limitations().stream().anyMatch(value -> value.contains("API compatibility are not verified")));
+    }
+
+    @Test
+    void resolvesMappedForgeMixinTargetsFromSuppliedCompileClasspathResources() throws IOException {
+        Path sourceJar = tempDir.resolve("mixin-target.jar");
+        Manifest manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        manifest.getMainAttributes().putValue("MixinConfigs", "mixins.integration.json");
+        ByteArrayOutputStream manifestBytes = new ByteArrayOutputStream();
+        manifest.write(manifestBytes);
+
+        try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(sourceJar))) {
+            put(zip, "META-INF/MANIFEST.MF", manifestBytes.toByteArray());
+            put(zip, "mixins.integration.json",
+                    """
+                    {"package":"sample.mixin","mixins":["ModListMixin"]}
+                    """.getBytes(StandardCharsets.UTF_8));
+            put(zip, "sample/mixin/ModListMixin.class",
+                    mixinTargetClass("sample/mixin/ModListMixin", "net.minecraftforge.fml.ModList"));
+        }
+
+        Path targetClasses = Files.createDirectories(
+                tempDir.resolve("target-compile-classpath/net/neoforged/fml"));
+        Files.write(targetClasses.resolve("ModList.class"), plainTargetClass("net/neoforged/fml/ModList"));
+        Path targetClasspathRoot = tempDir.resolve("target-compile-classpath");
+
+        var result = Forge1201PreflightAnalyzer.analyze(sourceJar, List.of(), List.of(targetClasspathRoot));
+
+        assertEquals(Forge1201MixinAnalyzer.TargetIndexStatus.AVAILABLE,
+                result.mixinAnalysis().targetIndexStatus());
+        assertEquals(1, result.mixinAnalysis().targets().size());
+        var target = result.mixinAnalysis().targets().getFirst();
+        assertEquals("net/neoforged/fml/ModList", target.targetInternalName());
+        assertEquals(Forge1201MixinAnalyzer.TargetStatus.TARGET_CLASS_PRESENT, target.status());
+        assertTrue(Forge1201PreflightAnalyzer.toJson(result).contains("\"mixinAnalysis\""));
+        assertTrue(Forge1201PreflightAnalyzer.toText(result).contains("Mixin analysis (1 configs, 1 mixin classes, 1 target selectors)"));
     }
 
     @Test
@@ -473,6 +526,26 @@ final class Forge1201PreflightAnalyzerTest {
             put(zip, "nested/LibraryFeature.class", classBytes);
         }
         return bytes.toByteArray();
+    }
+
+    private static byte[] plainTargetClass(String internalName) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, internalName, null, "java/lang/Object", null);
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] mixinTargetClass(String internalName, String targetName) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, internalName, null, "java/lang/Object", null);
+        AnnotationVisitor annotation = writer.visitAnnotation(
+                "Lorg/spongepowered/asm/mixin/Mixin;", true);
+        AnnotationVisitor targets = annotation.visitArray("targets");
+        targets.visit(null, targetName);
+        targets.visitEnd();
+        annotation.visitEnd();
+        writer.visitEnd();
+        return writer.toByteArray();
     }
 
     private static byte[] nestedLibraryClass() {
