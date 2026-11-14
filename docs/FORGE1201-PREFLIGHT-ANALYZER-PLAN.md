@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Compatibility Analyzer
 
-**Status:** Slice 1 implemented and reviewed; Slice 2 implementation committed and focused loader tests passed at `e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb`; real-JAR smoke validation and consolidated build remain pending  
+**Status:** Slice 1 implemented and archived; Slice 2 implementation committed, focused loader tests passed, and the real Symbiote 1.1.3 Schema 1.1 / Analyzer 1.1.0 JSON+text report generated and inspected; consolidated build and dependency-graph corrections remain pending  
 **Working branch:** `feat/forge1201-preflight-analyzer`  
 **Baseline:** `dde40275b9b3bd48ff811afa4c863e475e8a0cdf`  
 **Target:** Forge 1.20.1-only mod JARs on NeoForge 1.21.1 / 21.1.x  
@@ -179,7 +179,11 @@ Both report files are present and internally consistent; however, the Gradle con
 **Last code-bearing Slice 2 checkpoint:** `fdb4e111fab45b0f41c7f15cad26cefbbcf92f13` (the later branch commits in this checkpoint are documentation-only boundary/continuation updates).  
 **Working branch:** `feat/forge1201-preflight-analyzer`  
 **Implementation scope:** bounded nested archive inspection, provider provenance, dependency graph, target-range evaluation.  
-**Validation status:** user-confirmed `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks` passed at source HEAD `e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb` on 2026-11-14. The output reports `BUILD SUCCESSFUL` and 12 actionable tasks, all 12 executed. Compilation, the new archive-graph regression tests, and `genBetaMappings` completed. The real-JAR smoke test and consolidated clean build remain pending; do not mark Slice 2 complete yet.
+**Validation status:** user-confirmed `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks` passed at source HEAD `e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb` on 2026-11-14. The output reports `BUILD SUCCESSFUL` and 12 actionable tasks, all 12 executed. Compilation, archive-graph regression tests, and `genBetaMappings` completed.
+
+**Real-JAR smoke report:** the latest root testbench uploads `symbiote-1.1.3.jar.json` and `.txt` are the Slice 2 run (Schema 1.1 / Analyzer 1.1.0), not a further report to generate. The JSON was fetched directly by Git blob SHA and parsed successfully; the text report matches it. Both identify source SHA-256 `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c`, target Minecraft 1.21.1 / NeoForge 21.1.258, and report 11 archives, 9 providers, 17 dependency edges, 5 target range findings, and one metadata warning. Symbiote's `[1.20.1,1.21)` range is correctly OUTSIDE_RANGE for 1.21.1. The root files are byte-identical Git blobs to the archived Slice 2 files. The exact successful Gradle console transcript was not supplied, so record the artifacts as generated and inspected, but do not claim a captured report-task exit code.
+
+**Slice 2 is not fully accepted yet:** dependency-graph host-provider findings need correction/review, and the consolidated clean build remains pending.
 
 Files changed:
 - `loader/src/main/java/org/kylepitcock/legacyconnector/loader/tools/forge1201/Forge1201ArchiveGraph.java` — new bounded archive graph analyzer.
@@ -214,36 +218,28 @@ Synthetic coverage added:
 - Minecraft target mismatch, exact/numeric/union ranges, and unparseable qualified versions.
 - Missing declared JAR, corrupt archive, traversal path, duplicate archive content, maximum depth, per-archive size, and archive-count limits.
 
-The test suite is not yet confirmed. Potential test or implementation defects must be corrected from the actual Gradle output; do not treat a successful GitHub write or source inspection as a passing compile.
+The focused loader tests are confirmed passing as recorded above. Treat the real-JAR JSON/text artifacts as reviewed evidence, but do not infer runtime compatibility or a consolidated build pass.
 
-### Exact next action — run the Slice 2 real-JAR smoke test
+### Exact next action — correct Slice 2 dependency graph host-provider findings, then run the consolidated clean build
 
-**Already completed:** the Universal worktree is synced to source HEAD `e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb`, and `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks` passed on 2026-11-14 (12 tasks executed).
+**Already completed:** the focused loader tests passed at source HEAD `e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb`. The latest root testbench JSON/text are the actual Slice 2 report and have been parsed/reviewed. They are archived immutably at `archive/preflight/slice-2/`. Do not regenerate or overwrite them.
 
-Next, regenerate the Symbiote 1.1.3 preflight report using the original input JAR (expected SHA-256 `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c`) and the same installed NeoForge mods directory used for the Slice 1 report. Use the root `preflight1201` task:
+**Review findings requiring a code/test correction before accepting Slice 2:**
+1. The graph reports the `neoforge` dependency as `REQUIRED_MISSING` for installed NeoForge mods including Architectury, AzureLib, GeckoLib, KubeJS, and nested Better Advanced Tooltips. The selected host is NeoForge 21.1.258. The resolver must treat the target NeoForge loader as a host provider and evaluate its version against each declared range rather than searching only in the installed mod archive list. Add synthetic tests for satisfying and unsatisfying NeoForge host ranges.
+2. KubeJS dependency edges for `emi`, `jei`, and `roughlyenoughitems` are recorded with `mandatory=true`. Inspect actual KubeJS metadata and compare its `mandatory` values with the parser; do not change optional/required semantics without evidence.
+3. GeckoLib's `geckoanimfix` edge is also `mandatory=true`; verify its metadata before deciding whether it is truly required.
+4. Qualified versions such as Rhino `2101.2.8-build.91` and Better Advanced Tooltips `2101.1.0-build.1` remain `UNPARSEABLE`. Keep the uncertainty explicit; do not treat them as verified matches.
 
+After implementing the fixes, run the forced loader test gate in the Universal worktree on the intended branch, then generate a new report under a new output directory such as `build/reports/preflight1201/slice-2/run-2`. Never overwrite the archived Slice 1 or Slice 2 reports. When reviewing the rerun, preserve the same original Symbiote SHA-256 `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c` and the saved source/mods paths recorded in the continuation handoff.
+
+If the corrected report is consistent and tests pass, run the consolidated clean build:
 ```powershell
 $repo = 'F:\\Program\\intellij-idea-portable\\Legacy-Connector-1.20.1'
 $branch = 'feat/forge1201-preflight-analyzer'
 $actual = (git -C $repo branch --show-current).Trim()
 if ($actual -ne $branch) { throw "Wrong branch: expected $branch, found $actual" }
-if ((git -C $repo rev-parse HEAD).Trim() -ne 'e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb') { throw "Unexpected source HEAD." }
-Push-Location $repo
-.\\gradlew.bat preflight1201 -PpreflightJar="PATH_TO_ORIGINAL_SYMBIOTE_JAR" -PpreflightModsDirs="PATH_TO_INSTALLED_NEOFORGE_MODS" --no-daemon --console=plain
-$reportExit = $LASTEXITCODE
-Pop-Location
-if ($reportExit -ne 0) { throw "Slice 2 Symbiote preflight report failed." }
-```
-
-Replace the two path placeholders with the exact paths from the earlier Slice 1 report run. The task writes JSON and text under `build/reports/preflight1201/` by default. Verify the source JAR SHA-256 before accepting the report. Inspect the archive graph for nested archive provenance, provider paths/versions, dependency edges and statuses, plus the explicit target Minecraft range result for `[1.20.1,1.21)` versus target `1.21.1`. Preserve the output JSON/text for review.
-
-If the report is correct, run the consolidated clean build:
-```powershell
-$repo = 'F:\\Program\\intellij-idea-portable\\Legacy-Connector-1.20.1'
-$branch = 'feat/forge1201-preflight-analyzer'
-$actual = (git -C $repo branch --show-current).Trim()
-if ($actual -ne $branch) { throw "Wrong branch: expected $branch, found $actual" }
-if ((git -C $repo rev-parse HEAD).Trim() -ne 'e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb') { throw "Unexpected source HEAD." }
+$head = (git -C $repo rev-parse HEAD).Trim()
+if ($head -notin @('e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb','aef59d654310abc48ae241c994840c2551908204')) { throw "Unexpected source HEAD: $head" }
 Push-Location $repo
 .\\gradlew.bat :clean :loader:clean :testmods:clean :build :loader:build :testmods:assemble --no-daemon --console=plain
 $buildExit = $LASTEXITCODE
@@ -251,7 +247,7 @@ Pop-Location
 if ($buildExit -ne 0) { throw "Universal consolidated build failed." }
 ```
 
-Do not touch `fix/forge1201-palladium-runtime-adapters`, the Palladium worktree, or `master`. Do not claim runtime compatibility from preflight output.
+Keep the Palladium + Alien Evolution worktree/branch isolated. Do not merge into `master`. Do not claim runtime compatibility from preflight output.
 
 ## Validation boundary
 
