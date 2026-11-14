@@ -23,6 +23,8 @@ final class PalladiumResourceCompat1201 {
             "assets/alienevo/kubejs_scripts/power_ui.js";
     static final String ALIEN_EVO_BLOCKS =
             "addon/alienevo/kubejs_scripts/blocks.js";
+    static final String ALIEN_EVO_SERVER_CRYSTAL_TICKS =
+            "data/alienevo/kubejs_scripts/legacyconnector/crystal_block_expiry.js";
     static final String AFOMNI_AOE_DAMAGE =
             "addon/afomni/kubejs_scripts/aoe_damage.js";
     static final String ALIEN_EVO_DIAMOND_CREATION =
@@ -293,42 +295,60 @@ final class PalladiumResourceCompat1201 {
     }
 
     /**
-     * KubeJS 1.20.1 used BlockEntityInfo.serverTick(frequency, offset, callback).
-     * KubeJS 7 splits ticker setup from the targeted BlockEvents callback.
-     * Preserve the original 2500/250 cadence for both temporary crystal blocks.
+     * KubeJS 1.20.1 allowed the server ticker callback to be attached while
+     * registering the block during STARTUP. KubeJS 7 separates ticker setup
+     * from the BlockEvents listener: the block builder remains in the addon
+     * STARTUP resource, while the event listener must be loaded as a SERVER
+     * script from data/<namespace>/kubejs_scripts.
+     *
+     * Preserve the original 2500/250 cadence and no-drop destruction behavior.
      */
     private static int rewriteAlienEvoTemporaryCrystalBlockTicks(Map<String, byte[]> resources) {
         byte[] original = resources.get(ALIEN_EVO_BLOCKS);
         if (original == null) return 0;
 
         String script = new String(original, StandardCharsets.UTF_8);
-        String lineEnding = script.contains("\r\n") ? "\r\n" : "\n";
-        String marker = "// Legacy Connector: AlienEvo temporary crystal expiry on KubeJS 7";
-        String handlers = marker + lineEnding
+        String lineEnding = script.contains("\\r\\n") ? "\\r\\n" : "\\n";
+        String serverScript = "// Legacy Connector: Diamondhead temporary crystal expiry (SERVER script)" + lineEnding
                 + "BlockEvents.blockEntityTick('alienevo:crystal_block', event => {" + lineEnding
                 + "    event.level.destroyBlock(event.block.pos, false);" + lineEnding
                 + "});" + lineEnding
                 + "BlockEvents.blockEntityTick('alienevo:smooth_crystal_block', event => {" + lineEnding
                 + "    event.level.destroyBlock(event.block.pos, false);" + lineEnding
                 + "});" + lineEnding;
+        byte[] serverBytes = serverScript.getBytes(StandardCharsets.UTF_8);
+        byte[] existingServerScript = resources.get(ALIEN_EVO_SERVER_CRYSTAL_TICKS);
+        if (existingServerScript != null && !java.util.Arrays.equals(existingServerScript, serverBytes)) {
+            throw new IllegalStateException(
+                    "AlienEvo already contains an unexpected server crystal-expiry script at "
+                            + ALIEN_EVO_SERVER_CRYSTAL_TICKS);
+        }
 
         String legacyStart = "blockEntity.serverTick(2500, 250, entity => {";
         String migratedOffset = "blockEntity.tickOffset(250);";
         int legacyCount = occurrences(script, legacyStart);
         int migratedCount = occurrences(script, migratedOffset);
-        boolean hasHandlers = script.contains(marker);
-        if (legacyCount == 0 && migratedCount == 2 && hasHandlers) return 0;
-        if (legacyCount != 2 || migratedCount != 0 || hasHandlers) {
+
+        if (legacyCount == 0 && migratedCount == 2) {
+            if (existingServerScript == null) {
+                resources.put(ALIEN_EVO_SERVER_CRYSTAL_TICKS, serverBytes);
+                return 1;
+            }
+            return 0;
+        }
+        if (legacyCount != 2 || migratedCount != 0
+                || script.contains("BlockEvents.blockEntityTick('alienevo:crystal_block'")
+                || script.contains("BlockEvents.blockEntityTick('alienevo:smooth_crystal_block'")) {
             throw new IllegalStateException(
                     "AlienEvo blocks.js has an unexpected temporary crystal tick migration shape: expected "
                             + "two legacy serverTick calls, found " + legacyCount + " legacy and "
-                            + migratedCount + " migrated; event handlers present=" + hasHandlers);
+                            + migratedCount + " migrated");
         }
 
         java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
-                "(?m)^([\\t ]*)blockEntity\\.serverTick\\(2500, 250, entity => \\{\\R"
-                        + "[\\t ]*entity\\.level\\.destroyBlock\\(entity\\.blockPos, false\\)\\R"
-                        + "[\\t ]*\\}\\)");
+                "(?m)^([\\\\t ]*)blockEntity\\\\.serverTick\\\\(2500, 250, entity => \\\\{\\\\R"
+                        + "[\\\\t ]*entity\\\\.level\\\\.destroyBlock\\\\(entity\\\\.blockPos, false\\\\)\\\\R"
+                        + "[\\\\t ]*\\\\}\\\\)");
         java.util.regex.Matcher matcher = pattern.matcher(script);
         StringBuffer migrated = new StringBuffer();
         int replacements = 0;
@@ -347,9 +367,11 @@ final class PalladiumResourceCompat1201 {
                             + replacements);
         }
 
-        resources.put(
-                ALIEN_EVO_BLOCKS,
-                (migrated.toString() + lineEnding + handlers).getBytes(StandardCharsets.UTF_8));
+        resources.put(ALIEN_EVO_BLOCKS, migrated.toString().getBytes(StandardCharsets.UTF_8));
+        if (existingServerScript == null) {
+            resources.put(ALIEN_EVO_SERVER_CRYSTAL_TICKS, serverBytes);
+            return 2;
+        }
         return 1;
     }
 
