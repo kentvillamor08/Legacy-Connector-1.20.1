@@ -411,7 +411,7 @@ final class PalladiumResourceCompat1201 {
             String indent = fireCallMatcher.group(1);
             String replacement = indent + fireGuard + lineEnding
                     + indent + "    targets[j].setSecondsOnFire(firetick);" + lineEnding
-                    + indent + "}";
+                    + indent + "}" + lineEnding;
             fireCallMatcher.appendReplacement(
                     fireRewritten, java.util.regex.Matcher.quoteReplacement(replacement));
             fireCallReplacements++;
