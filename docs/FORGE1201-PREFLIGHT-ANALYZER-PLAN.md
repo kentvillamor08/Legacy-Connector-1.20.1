@@ -866,3 +866,50 @@ Before handing this increment to the user, the Mixin inventory was tightened aga
 - `@At`/`@Slice` values remain future work; this checkpoint records only their counts. Handler signature compatibility against injector-specific target instructions is not claimed.
 - Schema/analyzer versions advance to `1.6 / 1.6.0`. ASM tests cover all six injector kinds, descriptor and owner selectors, `@Desc`, wildcard, `@At`/`@Slice` counts, remap=false, malformed selector, and invalid field placement.
 - **Validation status:** the injector increment is pending the user's forced `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks` run. After it passes, continue with `@At` and `@Constant` inventory (including the `@ModifyConstant` selector payload); the consolidated clean build remains a later integration checkpoint.
+
+---
+
+## Slice 4 implementation checkpoint — Schema 1.7 source-side @At and @Constant inventory (2026-11-14)
+
+### Prior validation confirmed by the user
+
+The user ran the forced loader test gate at Schema 1.6 branch HEAD `b661313f41460321845f617b4b81684f314eb614`:
+
+```powershell
+.\gradlew.bat :loader:clean :loader:test --no-daemon --console=plain --rerun-tasks
+```
+
+Result: **BUILD SUCCESSFUL in 50s; 14 actionable tasks, all 14 executed.** The local HEAD and clean-worktree guards passed. This validates the Schema 1.6 handler/selector inventory tests, not runtime compatibility or the new Schema 1.7 changes below.
+
+### Schema 1.7 source changes — pending local Gradle verification
+
+The current source increment adds immutable per-injection-point `AtFinding` records beneath each `InjectorFinding`:
+
+- Preserve `@At.value` and classify known built-in injection-point codes versus custom/unknown values.
+- Preserve raw `target`, parse common owner/name forms, and validate exact method and field JVM descriptors without claiming target presence.
+- Preserve nested `@At.desc` selectors through the existing exact source-side `@Desc` parser.
+- Capture `opcode`, `ordinal`, `shift`, `by`, `slice` ID, `args`, `remap`, and `id`, including Mixin 0.8.5 annotation defaults.
+- Unsupported selector chains, malformed target descriptors, malformed `@Desc`, and absent required `value` remain explicit statuses/warnings. Unknown/custom injection-point values are retained as custom/unknown rather than executed or guessed.
+
+It also adds `ConstantFinding` records for every `@ModifyConstant.constant` entry, preserving:
+- `nullValue`, `intValue`, `floatValue`, `longValue`, `doubleValue`, `stringValue`, and class literal descriptor.
+- `ordinal`, `slice`, `expandZeroConditions`, and `log`.
+- Explicit distinction between an absent discriminator array (Mixin's implicit match-by-handler-return-type behavior), a declared typed discriminator, multiple conflicting type discriminators, invalid enum values, and unsupported nested annotation types.
+
+The preflight report schema/analyzer versions advance to **`1.7 / 1.7.0`**. JSON carries the structured nested records through the immutable injector findings; text output prints the At and Constant details. Limitations are updated to state that source-side capture is not target instruction resolution, handler stack validation, @Slice boundary interpretation, member mapping, or semantic refmap application.
+
+### Regression tests added — pending user execution
+
+The synthetic ASM fixture checks:
+- `FIELD` @At with owner/name/field descriptor, GETFIELD opcode, ordinal, BY shift, negative by value, slice ID, named args, remap=false, and custom id.
+- `INVOKE` with nested `@Desc` owner/name/method descriptor and min/max.
+- `HEAD` with default opcode/ordinal/shift/by/remap and no target.
+- Explicit int/float/long/double/string/class/null constant discriminators, including ordinal/slice/expand-zero/log data.
+- No explicit @Constant discriminator, which must be represented as Mixin's handler-return-type default.
+- A conflicting int+string discriminator state.
+
+**No Schema 1.7 Gradle test or build has been run yet.** The user must first fast-forward from their last confirmed local/tested commit `b661313f41460321845f617b4b81684f314eb614` to the final remote branch head recorded by the next handoff update. Then run the forced loader test gate before any broader build. If it fails, fix the concrete failure and rerun from a refreshed exact remote SHA.
+
+### Next bounded increment after Schema 1.7 tests pass
+
+Implement `@Slice` boundary inventory using both `from` and `to` nested `@At` annotations. Preserve defaults and boundary provenance separately; do not infer instruction order or prove slice validity without target method bytecode and resolved selectors. Then proceed to semantic refmap interpretation using explicit versioned mapping inputs. Nested source-archive config/class discovery must continue to reuse `Forge1201ArchiveGraph`; no second ZIP walker. Runtime client/server tests remain a separate later gate.
