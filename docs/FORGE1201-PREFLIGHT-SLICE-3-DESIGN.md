@@ -1,4 +1,4 @@
-# Forge 1.20.1 Preflight Analyzer — Slice 3 Design
+Status: The Slice 3 implementation and planned forced loader test gate are complete at source checkpoint `b0d2b7b68915137aed44ef9153fdfa304fa5819` (BUILD SUCCESSFUL, 14/14 tasks executed). The real Symbiote Schema 1.3 / Analyzer 1.3.0 report has been generated and inspected from report-generation checkout `340805e8a1bb93bf1994645981c3246fd46298ea`. All 278 source-JAR classes were scanned; no Jar-in-Jar paths exist in this source JAR, so there are no source-nested archive class entries to scan. The report inventories 443 API types, 1,156 dynamic references, and 1,076/1,076 mapped source SRG member references. Static findings are not a target API or gameplay compatibility verdict.# Forge 1.20.1 Preflight Analyzer — Slice 3 Design
 
 Status: nested source-archive bytecode scanning and SRG-to-1.20.1 Mojang-name normalization passed the user's forced clean loader test gate at 43f6db7726c3e023b331d714cbc3ccb6452e7564 (BUILD SUCCESSFUL, 14/14 tasks executed). A follow-up ClassRemapper audit added annotation-value visitors, null-safe contextual ordering and structural ASM fixtures; these newest changes are committed but still require the next forced loader test gate. The Symbiote Schema 1.3 report remains blocked until that gate passes.
 
@@ -264,3 +264,31 @@ The source jar is `C:/Users/Administrator/legacy-connector-testbench/symbiote-1.
 Use root Gradle task `preflight1201` with explicit `-PpreflightJar`, `-PpreflightModsDirs`, `-PpreflightJson`, and `-PpreflightText` paths. The schema/analyzer versions in source are `1.3` / `1.3.0`; target is Minecraft `1.21.1` / NeoForge `21.1.258`. Validate the JSON parses and its source SHA matches the expected original before uploading the JSON/text files to the testbench root.
 
 After reviewing the report, update `archive/preflight/README.md` with output blob SHAs and report totals, then run the consolidated clean build. Actual NeoForge launch and gameplay remain a separate unverified gate.
+
+## Real Symbiote Schema 1.3 report inspection — 2026-11-14
+
+The first actual report from `symbiote-1.1.3.jar` is now generated, parsed, and checked against its text companion. Input SHA-256: `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c`; target: Minecraft `1.21.1` / NeoForge `21.1.258`; schema/analyzer: `1.3 / 1.3.0`.
+
+### Observed source inventory
+
+- 515 source archive entries.
+- 278 outer source-JAR class entries discovered; 278 scanned; zero class-scan warnings.
+- No source Jar-in-Jar paths were declared. Therefore zero source-nested archive class entries is the expected result for this input, not an indication that its 278 class entries were skipped.
+- The separate installed-mod directory contributes 11 archive graph records: 7 top-level installed archives, 3 nested archives under KubeJS, and the Symbiote source root. The 9 provider records include 8 installed NeoForge providers and Symbiote itself. The installed provider archives are not scanned as Forge source-mod bytecode.
+- 1 metadata warning: the partial scalar metadata reader does not parse the multiline value beginning on `mods.toml` line 10.
+- 1 archive-graph warning: Symbiote's declared Minecraft range `[1.20.1,1.21)` excludes target `1.21.1`.
+
+### Reference inventory
+
+- 443 API types: 322 outside the Forge API namespace, 78 package-relocation candidates, 28 manual-adapter requirements, and 15 explicit type replacements.
+- 1,110 method references and 352 field references; 5,369 method call-sites and 1,196 field call-sites.
+- 1,156 dynamic/bootstrap references: 813 invokedynamic sites, 282 method-type constants, 56 class literals, and 5 method handles.
+- 1,076 source SRG member references normalized to 1.20.1 Mojang names; all 1,076 map successfully.
+- The explicit replacement set includes ModConfigSpec, IMenuTypeExtension, Legacy Connector-owned networking compatibility types, and Supplier mappings. The manual set includes config-screen, GUI overlay/layered draw, tick/damage-event, FML/side-separation, menu-opening, event-subscriber, and registry changes.
+
+### Interpretation boundary
+
+The report has no Mixin config candidates, no source Jar-in-Jar paths, and no coremod class. It still contains package references under `org/spongepowered/asm`; the absence of a detected config is not Mixin target validation. The report does not validate target class/member existence, injection targets/handler descriptors/slices/refmaps/plugins, provider bytecode, translated resources, initialization, rendering, networking behavior, or gameplay. The 78 package-relocation candidates remain provisional until target verification; the 28 manual-adapter types require semantic review.
+
+The JSON and text summaries were compared and agree on source identity, schema, archive/provider/dependency totals, class counts, API/member/call-site totals, dynamic references, normalized SRG rows, and warnings. All Slice 3 test gates and the real report generation are complete. The next build gate is the consolidated clean root/loader/test-mod build; then begin Slice 4 Mixin analysis.
+
