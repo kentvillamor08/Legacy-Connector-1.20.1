@@ -184,3 +184,10 @@ The first integration commit was followed by commit 3c6febb075c32391b6879b0f3ef0
 ### Generated mapping-resource test wiring — 2026-11-14
 
 Commit 0c7c55b72033c986d94f1cba5d836dfce26e95a0 updates loader/build.gradle so the loader test task depends on genSrgMojang and includes the generated srgMojangDir on its runtime classpath. This is necessary because SrgMojangTable.load() returns an empty map when the generated resource is absent. A clean forced loader test will therefore run the existing fetchMojangMappings1201 and genSrgMojang1201 tasks before executing the regression suite. This is committed but not yet user-tested.
+
+
+### Test-gate diagnosis — 2026-11-14
+
+The first forced test run against source commit `1c403bcc93f3e2c1d57215aea7e41419f29e1ed3` reached 454 tests with one failure: `reportsOversizedNestedClassEntriesAsExplicitlySkipped()`, line 144. The class entry was counted as skipped, and `snapshotFromBytes()` generated the expected oversized-class warning. However, `scanNestedClassEntries()` initialized the per-archive summary warning list as empty, so the warning was retained only in the graph-wide warnings and omitted from `ClassScanSummary.warnings()`. The regression assertion therefore exposed a reporting-provenance gap, not a failure to enforce the byte limit.
+
+The follow-up fix seeds each per-archive class summary with the class-specific snapshot warnings (unsafe class-entry paths, duplicate class entries, and class payload capture-limit skips). Non-class archive warnings remain in the graph-wide warning list and are not copied into the class summary. The user must pull the new commit and rerun the forced loader test gate; no passing result is claimed yet.
