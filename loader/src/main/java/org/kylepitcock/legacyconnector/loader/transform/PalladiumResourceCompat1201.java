@@ -23,6 +23,8 @@ final class PalladiumResourceCompat1201 {
             "assets/alienevo/kubejs_scripts/power_ui.js";
     static final String ALIEN_EVO_BLOCKS =
             "addon/alienevo/kubejs_scripts/blocks.js";
+    static final String AFOMNI_AOE_DAMAGE =
+            "addon/afomni/kubejs_scripts/aoe_damage.js";
     static final String ALIEN_EVO_DIAMOND_CREATION =
             "addon/alienevo/kubejs_scripts/diamond_creation.js";
     static final String ALIEN_EVO_STAT_ABILITY =
@@ -221,6 +223,7 @@ final class PalladiumResourceCompat1201 {
         rewritePowerUiEntityPreview(resources);
         rewritePowerUiEditBoxTick(resources);
         rewriteAlienEvoTemporaryCrystalBlockTicks(resources);
+        rewriteAfOmniAoeDamageMarkerGuard(resources);
         rewriteDiamondShardTexture(resources);
         rewriteAfOmniParticleTextureReferences(resources);
         rewriteGeckoLibAnimationFileNames(resources);
@@ -347,6 +350,79 @@ final class PalladiumResourceCompat1201 {
         resources.put(
                 ALIEN_EVO_BLOCKS,
                 (migrated.toString() + lineEnding + handlers).getBytes(StandardCharsets.UTF_8));
+        return 1;
+    }
+
+    /**
+     * AFOMNI's shared AOE ability may include Palladium Marker entities in its
+     * target AABB. Markers are not LivingEntity instances and cannot receive
+     * setSecondsOnFire. Keep normal damage handling for the other supported
+     * targets, exclude internal marker entities, and apply fire only to living
+     * targets with a positive configured fire duration.
+     */
+    private static int rewriteAfOmniAoeDamageMarkerGuard(Map<String, byte[]> resources) {
+        byte[] original = resources.get(AFOMNI_AOE_DAMAGE);
+        if (original == null) return 0;
+
+        String script = new String(original, StandardCharsets.UTF_8);
+        String lineEnding = script.contains("\r\n") ? "\r\n" : "\n";
+        String header = "StartupEvents.registry('palladium:abilities', (event) => {";
+        String declaration = "    const LivingEntity = Java.loadClass('net.minecraft.world.entity.LivingEntity');";
+        String legacyFilter = "targets[j].type !== \"palladium:suit_stand\") {";
+        String migratedFilter =
+                "targets[j].type !== \"palladium:suit_stand\" && targets[j].type !== \"minecraft:marker\") {";
+        String fireGuard = "if (firetick > 0 && targets[j] instanceof LivingEntity) {";
+
+        int headerCount = occurrences(script, header);
+        int declarationCount = occurrences(script, declaration);
+        int legacyFilterCount = occurrences(script, legacyFilter);
+        int migratedFilterCount = occurrences(script, migratedFilter);
+        int fireCallCount = occurrences(script, "targets[j].setSecondsOnFire(firetick);");
+        int fireGuardCount = occurrences(script, fireGuard);
+
+        if (headerCount != 1 || fireCallCount != 1
+                || (declarationCount == 1 && legacyFilterCount == 0
+                        && migratedFilterCount == 1 && fireGuardCount == 1)) {
+            if (headerCount == 1 && fireCallCount == 1
+                    && declarationCount == 1 && legacyFilterCount == 0
+                    && migratedFilterCount == 1 && fireGuardCount == 1) {
+                return 0;
+            }
+            throw new IllegalStateException(
+                    "AFOMNI aoe_damage.js has an unexpected Marker/fire migration shape: "
+                            + "header=" + headerCount + ", LivingEntity declaration=" + declarationCount
+                            + ", legacy filter=" + legacyFilterCount + ", migrated filter=" + migratedFilterCount
+                            + ", setSecondsOnFire calls=" + fireCallCount + ", fire guards=" + fireGuardCount);
+        }
+
+        String migrated = script;
+        if (declarationCount == 0) {
+            migrated = migrated.replace(header, header + lineEnding + declaration);
+        }
+        migrated = migrated.replace(legacyFilter, migratedFilter);
+
+        java.util.regex.Pattern fireCallPattern = java.util.regex.Pattern.compile(
+                "(?m)^([\t ]*)targets\\[j\\]\\.setSecondsOnFire\\(firetick\\);\\R?");
+        java.util.regex.Matcher fireCallMatcher = fireCallPattern.matcher(migrated);
+        StringBuffer fireRewritten = new StringBuffer();
+        int fireCallReplacements = 0;
+        while (fireCallMatcher.find()) {
+            String indent = fireCallMatcher.group(1);
+            String replacement = indent + fireGuard + lineEnding
+                    + indent + "    targets[j].setSecondsOnFire(firetick);" + lineEnding
+                    + indent + "}";
+            fireCallMatcher.appendReplacement(
+                    fireRewritten, java.util.regex.Matcher.quoteReplacement(replacement));
+            fireCallReplacements++;
+        }
+        fireCallMatcher.appendTail(fireRewritten);
+        if (fireCallReplacements != 1) {
+            throw new IllegalStateException(
+                    "AFOMNI aoe_damage.js expected one unguarded setSecondsOnFire call, found "
+                            + fireCallReplacements);
+        }
+
+        resources.put(AFOMNI_AOE_DAMAGE, fireRewritten.toString().getBytes(StandardCharsets.UTF_8));
         return 1;
     }
 
