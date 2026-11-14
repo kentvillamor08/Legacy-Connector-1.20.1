@@ -713,3 +713,51 @@ The current user local branch is at `3e1291494b6c10cc58b2c54be8978df972e6cd68`; 
 
 Keep Palladium + Alien Evolution paused and isolated. Preserve the universal, reusable, modpack-ready compatibility platform goal.
 
+
+
+## CURRENT UPDATE — 2026-11-14 — Schema 1.4 Mixin preflight wiring committed; test gate pending
+
+### Integration increment
+
+The feature branch now includes the first unified preflight wiring for Slice 4:
+
+- `Forge1201MixinAnalyzer.Result` now distinguishes `AVAILABLE` from `UNAVAILABLE_NO_TARGET_CLASSPATH` target-index state.
+- When no target classpath is supplied, a mapped platform target is reported as `TARGET_INDEX_UNAVAILABLE`, not `TARGET_CLASS_MISSING`. Unmapped Minecraft targets remain `TARGET_REMAP_UNRESOLVED`; no identity mapping is assumed.
+- The existing manifest `MixinConfigs` entries and outer-JAR resource path/content heuristic candidates are converted to analyzer declarations. If a path is found by both routes, both provenance values are retained deterministically.
+- `Forge1201PreflightAnalyzer.PreflightResult` now embeds the immutable Mixin result. JSON serializes it as `mixinAnalysis`; text output prints config, mixin-class, target-selector, and target-index findings.
+- Preflight schema/analyzer versions are now `1.4` / `1.4.0`.
+- The existing CLI accepts `--target-classpath-file`; the path list is bounded to 4 MiB / 4,096 entries and each entry is validated as an existing file or directory.
+- Root `preflight1201` obtains `sourceSets.main.compileClasspath`, declares it as task input, writes its resolved entries to the target-classpath list, and passes that list to the analyzer. The root build uses ModDevGradle 2.0.148 with `neoForge.version = project.neo_version`; ModDevGradle adds its compile dependencies to the source set compile classpath. The analyzer uses resource lookup only through a dedicated URLClassLoader and never calls `loadClass`, defines, initializes, or executes target classes.
+- The class-mapping input remains deliberately empty in this increment. Forge/NeoForge types can use the reviewed Forge mapping catalog; Minecraft/Mojang targets stay unresolved until a versioned class mapping is supplied.
+- `FORGE_METADATA` remains a reserved discovery-source value. The current Forge `mods.toml` parser is scalar/partial and does not currently expose Mixin config declarations; no unsupported TOML syntax is being reinterpreted as a declaration.
+
+### Synthetic coverage added (not yet user-tested)
+
+- The existing deterministic preflight fixture now asserts schema 1.4, manifest-plus-heuristic provenance merging, heuristic-only provenance, explicit missing mixin-class findings, and unavailable target-index status when the compatibility overload receives no target classpath.
+- A synthetic integration test builds a manifest-declared mixin whose source annotation targets `net.minecraftforge.fml.ModList`, supplies a temporary target classpath containing `net/neoforged/fml/ModList.class`, and asserts that the reviewed Forge mapping resolves to a present NeoForge class.
+- A Mixin analyzer test asserts that a mapped target with no target index is `TARGET_INDEX_UNAVAILABLE`, not a false missing-class finding.
+
+### Commit batch and test boundary
+
+The integration batch begins from the last user-synced documentation checkpoint `0d3d04a9dbf54f2cc37f2eda7d42380a443ea688` and contains these commits:
+
+- `985aa79f5b3cf34f956dac1c4f6f75bd0928744e` — explicit target-index availability state.
+- `115ab4f73a6c9bc2834564b6949cfe3021e05f3c` — missing-index regression test.
+- `caa874d3dd134d94019ba8b84d5cb31ebcfa9bc5` — preflight Schema 1.4 and Mixin result integration.
+- `7ce6917469aacf8896eebe7d44e2b3bb5bc69619` — Gradle target compile-classpath handoff.
+- `79148fb5533bafe655c8cb7e802e284a83da9b7a` — preflight integration tests.
+- `97d35ae727ecb63142bce9cdde714f4e4af98e6b` — scope the classpath-list file in the task argument provider.
+
+Latest verified feature-branch HEAD at this update: `97d35ae727ecb63142bce9cdde714f4e4af98e6b`. The compare against `0d3d04a...` is six commits ahead and zero behind; the six commits update five implementation/test files.
+
+The user's last confirmed green loader test remains at `90daa1ee78d2de73ff44e27ffd01ba6e126858f4` (`BUILD SUCCESSFUL in 57s`, 14 actionable tasks executed). **The Schema 1.4 integration and new regression tests have not yet been compiled or run in the user's Gradle environment. Do not claim this increment passes until the next forced test output is reviewed.**
+
+### Exact next action
+
+Guard the local checkout at branch `feat/forge1201-preflight-analyzer`, expected local HEAD `0d3d04a9dbf54f2cc37f2eda7d42380a443ea688`, and a clean worktree. Verify the remote tip is exactly `97d35ae727ecb63142bce9cdde714f4e4af98e6b`; fast-forward only; verify the resulting HEAD; then run:
+
+```powershell
+.gradlew.bat :loader:clean :loader:test --no-daemon --console=plain --rerun-tasks
+```
+
+If compilation or tests fail, fix the concrete issue in a new commit and rerun only after refreshing the expected remote SHA. If green, run the consolidated clean build and then continue with descriptor-aware `@Shadow`, `@Overwrite`, `@Accessor`, `@Invoker`, injector, `@At`, and `@Slice` findings. Source-nested config/class analysis must reuse `Forge1201ArchiveGraph`; do not create another ZIP traversal. Keep plugin code unexecuted and preserve unresolved states.
