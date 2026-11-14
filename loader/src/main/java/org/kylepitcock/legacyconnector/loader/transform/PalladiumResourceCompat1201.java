@@ -380,14 +380,15 @@ final class PalladiumResourceCompat1201 {
         int fireCallCount = occurrences(script, "targets[j].setSecondsOnFire(firetick);");
         int fireGuardCount = occurrences(script, fireGuard);
 
-        if (headerCount != 1 || fireCallCount != 1
-                || (declarationCount == 1 && legacyFilterCount == 0
-                        && migratedFilterCount == 1 && fireGuardCount == 1)) {
-            if (headerCount == 1 && fireCallCount == 1
-                    && declarationCount == 1 && legacyFilterCount == 0
-                    && migratedFilterCount == 1 && fireGuardCount == 1) {
-                return 0;
-            }
+        boolean alreadyMigrated = headerCount == 1 && declarationCount == 1
+                && legacyFilterCount == 0 && migratedFilterCount == 1
+                && fireCallCount == 1 && fireGuardCount == 1;
+        if (alreadyMigrated) return 0;
+
+        boolean legacyShape = headerCount == 1 && declarationCount == 0
+                && legacyFilterCount == 1 && migratedFilterCount == 0
+                && fireCallCount == 1 && fireGuardCount == 0;
+        if (!legacyShape) {
             throw new IllegalStateException(
                     "AFOMNI aoe_damage.js has an unexpected Marker/fire migration shape: "
                             + "header=" + headerCount + ", LivingEntity declaration=" + declarationCount
