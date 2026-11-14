@@ -878,6 +878,42 @@ class PalladiumResourceCompat1201Test {
     }
 
     @Test
+    void guardsAfOmniAoeFireAgainstPalladiumMarkersAndNonLivingEntities() {
+        Map<String, byte[]> resources = new HashMap<>();
+        put(resources, PalladiumResourceCompat1201.AFOMNI_AOE_DAMAGE, """
+                StartupEvents.registry('palladium:abilities', (event) => {
+                    event.create('afomni:aoe_damage')
+                        .tick((entity, entry, holder, enabled) => {
+                            if (enabled) {
+                                for (let j = 0; j < targets.length; j++) {
+                                    if (targets[j] !== entity
+                                            && targets[j].type !== "minecraft:armor_stand"
+                                            && targets[j].type !== "palladium:suit_stand") {
+                                        entity.server.runCommandSilent("damage @s 3 minecraft:player_attack");
+                                        targets[j].setSecondsOnFire(firetick);
+                                    }
+                                }
+                            }
+                        });
+                });
+                """);
+
+        assertEquals(1, PalladiumResourceCompat1201.apply(resources));
+
+        String migrated = get(resources, PalladiumResourceCompat1201.AFOMNI_AOE_DAMAGE);
+        assertTrue(migrated.contains(
+                "const LivingEntity = Java.loadClass('net.minecraft.world.entity.LivingEntity');"));
+        assertTrue(migrated.contains(
+                "targets[j].type !== \"palladium:suit_stand\" && targets[j].type !== \"minecraft:marker\""));
+        assertTrue(migrated.contains(
+                "if (firetick > 0 && targets[j] instanceof LivingEntity) {"));
+        assertEquals(1, occurrences(migrated, "targets[j].setSecondsOnFire(firetick);"));
+        assertEquals(0, occurrences(migrated, "targets[j].setSecondsOnFire(firetick);\\n"));
+        assertEquals(0, PalladiumResourceCompat1201.apply(resources));
+        assertEquals(migrated, get(resources, PalladiumResourceCompat1201.AFOMNI_AOE_DAMAGE));
+    }
+
+    @Test
     void repairsKnownDiamondShardAndAfOmniParticleTextureReferences() {
         Map<String, byte[]> resources = new HashMap<>();
         put(resources, "assets/alienevo/models/item/diamond_shard.json", """
