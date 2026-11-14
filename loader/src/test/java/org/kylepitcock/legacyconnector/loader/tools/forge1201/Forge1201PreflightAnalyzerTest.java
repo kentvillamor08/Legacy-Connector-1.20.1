@@ -146,6 +146,7 @@ final class Forge1201PreflightAnalyzerTest {
 
         // Class, field, method, parameter, type and record-component annotation descriptors.
         assertTrue(references.contains("net/minecraft/client/ClientMarker"));
+        assertTrue(references.contains("net/minecraft/client/ClassTypeMarker"));
         assertTrue(references.contains("net/minecraft/client/FieldMarker"));
         assertTrue(references.contains("net/minecraft/client/FieldTypeMarker"));
         assertTrue(references.contains("net/minecraft/client/MethodMarker"));
