@@ -189,6 +189,31 @@ final class Forge1201MixinAnalyzerTest {
     }
 
     @Test
+    void reportsTargetIndexUnavailableInsteadOfCallingMappedClassesMissing() throws Exception {
+        String configPath = "mixins.index-unavailable.json";
+        Path jar = writeJar("index-unavailable.jar", Map.of(
+                configPath, """
+                        {"package":"com.example.mixins","mixins":["UnverifiedMixin"]}
+                        """.getBytes(StandardCharsets.UTF_8),
+                "com/example/mixins/UnverifiedMixin.class",
+                mixinClass("com/example/mixins/UnverifiedMixin", SOURCE_ENTITY, null, true)));
+
+        var result = Forge1201MixinAnalyzer.analyze(
+                jar,
+                List.of(new Forge1201MixinAnalyzer.ConfigDeclaration(
+                        configPath, Forge1201MixinAnalyzer.DiscoverySource.MANIFEST)),
+                null,
+                Map.of(SOURCE_ENTITY, SOURCE_ENTITY),
+                "synthetic-mc-class-map-v1");
+
+        assertEquals(Forge1201MixinAnalyzer.TargetIndexStatus.UNAVAILABLE_NO_TARGET_CLASSPATH,
+                result.targetIndexStatus());
+        assertEquals(Forge1201MixinAnalyzer.TargetStatus.TARGET_INDEX_UNAVAILABLE,
+                result.targets().getFirst().status());
+        assertEquals(SOURCE_ENTITY, result.targets().getFirst().targetInternalName());
+    }
+
+    @Test
     void distinguishesMappedMissingTargetClassAndRefmapAndPluginAbsence() throws Exception {
         String configPath = "mixins.target-missing.json";
         Path jar = writeJar("missing-target.jar", Map.of(
