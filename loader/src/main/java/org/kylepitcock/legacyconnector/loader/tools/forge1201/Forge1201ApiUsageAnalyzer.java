@@ -78,6 +78,58 @@ public final class Forge1201ApiUsageAnalyzer {
         }
     }
 
+    public enum ApiDynamicReferenceKind {
+        INVOKEDYNAMIC_SITE,
+        METHOD_HANDLE,
+        FIELD_HANDLE,
+        CLASS_LITERAL,
+        METHOD_TYPE,
+        CONSTANT_DYNAMIC
+    }
+
+    /**
+     * A contextual reference carried by an invokedynamic instruction, LDC value,
+     * method handle, or ConstantDynamic. instructionOrdinal is the zero-based
+     * position among bytecode instructions, not a byte offset.
+     */
+    public record ApiDynamicReference(
+            String archivePath,
+            String classEntryPath,
+            String callerClass,
+            String callerMethod,
+            String callerDescriptor,
+            ApiDynamicReferenceKind kind,
+            String context,
+            String owner,
+            String name,
+            String descriptor,
+            int handleTag,
+            int instructionOrdinal,
+            int count) {
+        public String display() {
+            String target = owner == null ? "" : owner.replace('/', '.') + "#";
+            return target + (name == null ? "" : name)
+                    + (descriptor == null ? "" : descriptor)
+                    + " <= " + archivePath + "!/" + classEntryPath
+                    + " :: " + callerClass.replace('/', '.') + "#" + callerMethod + callerDescriptor
+                    + " [" + kind + ", " + context + ", instruction " + instructionOrdinal + "]";
+        }
+    }
+
+    private record DynamicReferenceKey(
+            String archivePath,
+            String classEntryPath,
+            String callerClass,
+            String callerMethod,
+            String callerDescriptor,
+            ApiDynamicReferenceKind kind,
+            String context,
+            String owner,
+            String name,
+            String descriptor,
+            int handleTag,
+            int instructionOrdinal) {}
+
     private record CallSiteKey(
             String callerClass,
             String callerMethod,
@@ -107,7 +159,26 @@ public final class Forge1201ApiUsageAnalyzer {
             List<ApiMethodCallSite> methodCallSites,
             List<ApiFieldCallSite> fieldCallSites,
             List<ApiMemberReference> methodReferences,
-            List<ApiMemberReference> fieldReferences) {
+            List<ApiMemberReference> fieldReferences,
+            List<ApiDynamicReference> dynamicReferences) {
+
+        /** Source-compatible constructor for tools that create synthetic Analysis values. */
+        public Analysis(
+                Forge1201JarInfo metadata,
+                int classCount,
+                List<String> modEntrypoints,
+                List<String> mixinConfigs,
+                String coreModClass,
+                Map<String, Integer> packageReferences,
+                List<String> referencedApiClasses,
+                List<ApiMethodCallSite> methodCallSites,
+                List<ApiFieldCallSite> fieldCallSites,
+                List<ApiMemberReference> methodReferences,
+                List<ApiMemberReference> fieldReferences) {
+            this(metadata, classCount, modEntrypoints, mixinConfigs, coreModClass,
+                    packageReferences, referencedApiClasses, methodCallSites, fieldCallSites,
+                    methodReferences, fieldReferences, List.of());
+        }
 
         public Analysis {
             modEntrypoints = List.copyOf(modEntrypoints);
@@ -118,6 +189,7 @@ public final class Forge1201ApiUsageAnalyzer {
             fieldCallSites = List.copyOf(fieldCallSites);
             methodReferences = List.copyOf(methodReferences);
             fieldReferences = List.copyOf(fieldReferences);
+            dynamicReferences = List.copyOf(dynamicReferences);
         }
     }
 
@@ -130,6 +202,108 @@ public final class Forge1201ApiUsageAnalyzer {
         private final Map<MemberKey, Integer> fields = new HashMap<>();
         private final Map<CallSiteKey, Integer> callSites = new HashMap<>();
         private final Map<FieldCallSiteKey, Integer> fieldCallSites = new HashMap<>();
+        private final Map<DynamicReferenceKey, Integer> dynamicReferences = new HashMap<>();
+
+        private void recordDynamic(
+                String archivePath,
+                String classEntryPath,
+                String callerClass,
+                String callerMethod,
+                String callerDescriptor,
+                ApiDynamicReferenceKind kind,
+                String context,
+                String owner,
+                String name,
+                String descriptor,
+                int handleTag,
+                int instructionOrdinal) {
+            DynamicReferenceKey key = new DynamicReferenceKey(
+                    archivePath, classEntryPath, callerClass, callerMethod, callerDescriptor,
+                    kind, context, owner, name, descriptor, handleTag, instructionOrdinal);
+            dynamicReferences.merge(key, 1, Integer::sum);
+        }
+
+        private void recordHandle(
+                String archivePath,
+                String classEntryPath,
+                String callerClass,
+                String callerMethod,
+                String callerDescriptor,
+                String context,
+                org.objectweb.asm.Handle handle,
+                int instructionOrdinal) {
+            boolean fieldHandle = switch (handle.getTag()) {
+                case Opcodes.H_GETFIELD, Opcodes.H_GETSTATIC, Opcodes.H_PUTFIELD, Opcodes.H_PUTSTATIC -> true;
+                default -> false;
+            };
+            if (!isForgeOrOptionalApi(handle.getOwner()) && !isGameApi(handle.getOwner())) return;
+            recordDynamic(archivePath, classEntryPath, callerClass, callerMethod, callerDescriptor,
+                    fieldHandle ? ApiDynamicReferenceKind.FIELD_HANDLE : ApiDynamicReferenceKind.METHOD_HANDLE,
+                    context, handle.getOwner(), handle.getName(), handle.getDesc(),
+                    handle.getTag(), instructionOrdinal);
+        }
+
+        private void recordDynamicValue(
+                String archivePath,
+                String classEntryPath,
+                String callerClass,
+                String callerMethod,
+                String callerDescriptor,
+                String context,
+                Object value,
+                int instructionOrdinal,
+                int depth) {
+            if (value == null || depth > 16) return;
+            if (value instanceof org.objectweb.asm.Handle handle) {
+                recordHandle(archivePath, classEntryPath, callerClass, callerMethod,
+                        callerDescriptor, context, handle, instructionOrdinal);
+                return;
+            }
+            if (value instanceof org.objectweb.asm.Type type) {
+                if (type.getSort() == org.objectweb.asm.Type.METHOD) {
+                    if (containsGameApiType(type)) {
+                        recordDynamic(archivePath, classEntryPath, callerClass, callerMethod, callerDescriptor,
+                                ApiDynamicReferenceKind.METHOD_TYPE, context, null, null,
+                                type.getDescriptor(), -1, instructionOrdinal);
+                    }
+                } else {
+                    org.objectweb.asm.Type element = type.getSort() == org.objectweb.asm.Type.ARRAY
+                            ? type.getElementType() : type;
+                    if (element.getSort() == org.objectweb.asm.Type.OBJECT
+                            && (isGameApi(element.getInternalName()) || isForgeOrOptionalApi(element.getInternalName()))) {
+                        recordDynamic(archivePath, classEntryPath, callerClass, callerMethod, callerDescriptor,
+                                ApiDynamicReferenceKind.CLASS_LITERAL, context, element.getInternalName(), null,
+                                type.getDescriptor(), -1, instructionOrdinal);
+                    }
+                }
+                return;
+            }
+            if (value instanceof org.objectweb.asm.ConstantDynamic constant) {
+                recordDynamic(archivePath, classEntryPath, callerClass, callerMethod, callerDescriptor,
+                        ApiDynamicReferenceKind.CONSTANT_DYNAMIC, context, null, constant.getName(),
+                        constant.getDescriptor(), -1, instructionOrdinal);
+                recordHandle(archivePath, classEntryPath, callerClass, callerMethod, callerDescriptor,
+                        context + "/bootstrap", constant.getBootstrapMethod(), instructionOrdinal);
+                for (int i = 0; i < constant.getBootstrapMethodArgumentCount(); i++) {
+                    recordDynamicValue(archivePath, classEntryPath, callerClass, callerMethod,
+                            callerDescriptor, context + "/constant-argument-" + i,
+                            constant.getBootstrapMethodArgument(i), instructionOrdinal, depth + 1);
+                }
+            }
+        }
+
+        private static boolean containsGameApiType(org.objectweb.asm.Type type) {
+            if (type.getSort() == org.objectweb.asm.Type.METHOD) {
+                if (containsGameApiType(type.getReturnType())) return true;
+                for (org.objectweb.asm.Type argument : type.getArgumentTypes()) {
+                    if (containsGameApiType(argument)) return true;
+                }
+                return false;
+            }
+            if (type.getSort() == org.objectweb.asm.Type.ARRAY) return containsGameApiType(type.getElementType());
+            return type.getSort() == org.objectweb.asm.Type.OBJECT
+                    && (isGameApi(type.getInternalName()) || isForgeOrOptionalApi(type.getInternalName()));
+        }
 
         private void recordClass(String internalName) {
             if (!isGameApi(internalName)) return;
@@ -268,6 +442,30 @@ public final class Forge1201ApiUsageAnalyzer {
             return toReferences(fields);
         }
 
+        List<ApiDynamicReference> dynamicReferenceList() {
+            return dynamicReferences.entrySet().stream()
+                    .map(entry -> new ApiDynamicReference(
+                            entry.getKey().archivePath(), entry.getKey().classEntryPath(),
+                            entry.getKey().callerClass(), entry.getKey().callerMethod(),
+                            entry.getKey().callerDescriptor(), entry.getKey().kind(),
+                            entry.getKey().context(), entry.getKey().owner(), entry.getKey().name(),
+                            entry.getKey().descriptor(), entry.getKey().handleTag(),
+                            entry.getKey().instructionOrdinal(), entry.getValue()))
+                    .sorted(Comparator.comparing(ApiDynamicReference::archivePath)
+                            .thenComparing(ApiDynamicReference::classEntryPath)
+                            .thenComparing(ApiDynamicReference::callerClass)
+                            .thenComparing(ApiDynamicReference::callerMethod)
+                            .thenComparing(ApiDynamicReference::callerDescriptor)
+                            .thenComparing(reference -> reference.kind().name())
+                            .thenComparing(ApiDynamicReference::context)
+                            .thenComparing(reference -> reference.owner() == null ? "" : reference.owner())
+                            .thenComparing(reference -> reference.name() == null ? "" : reference.name())
+                            .thenComparing(reference -> reference.descriptor() == null ? "" : reference.descriptor())
+                            .thenComparingInt(ApiDynamicReference::handleTag)
+                            .thenComparingInt(ApiDynamicReference::instructionOrdinal))
+                    .toList();
+        }
+
         private static List<ApiMemberReference> toReferences(Map<MemberKey, Integer> source) {
             return source.entrySet().stream()
                     .map(entry -> new ApiMemberReference(
@@ -319,6 +517,7 @@ public final class Forge1201ApiUsageAnalyzer {
         String coreModClass = null;
         int classCount = 0;
 
+        String archivePath = "source/" + jarPath.getFileName();
         try (ZipFile zip = new ZipFile(jarPath.toFile())) {
             ZipEntry manifestEntry = zip.getEntry(JarFile.MANIFEST_NAME);
             if (manifestEntry != null) {
@@ -359,10 +558,38 @@ public final class Forge1201ApiUsageAnalyzer {
                             String callerClass = className;
                             String callerMethod = name;
                             String callerDescriptor = descriptor;
+                            String classEntryPath = entry.getName();
                             return new MethodVisitor(Opcodes.ASM9) {
+                                private int instructionOrdinal;
+
+                                private int nextInstruction() {
+                                    return instructionOrdinal++;
+                                }
+
+                                @Override
+                                public void visitInsn(int opcode) {
+                                    nextInstruction();
+                                }
+
+                                @Override
+                                public void visitIntInsn(int opcode, int operand) {
+                                    nextInstruction();
+                                }
+
+                                @Override
+                                public void visitVarInsn(int opcode, int var) {
+                                    nextInstruction();
+                                }
+
+                                @Override
+                                public void visitTypeInsn(int opcode, String type) {
+                                    nextInstruction();
+                                }
+
                                 @Override
                                 public void visitMethodInsn(int opcode, String owner, String targetName,
                                                             String targetDescriptor, boolean isInterface) {
+                                    nextInstruction();
                                     references.recordCallSite(
                                             callerClass, callerMethod, callerDescriptor,
                                             opcode, owner, targetName, targetDescriptor);
@@ -371,9 +598,66 @@ public final class Forge1201ApiUsageAnalyzer {
                                 @Override
                                 public void visitFieldInsn(int opcode, String owner, String targetName,
                                                            String targetDescriptor) {
+                                    nextInstruction();
                                     references.recordFieldCallSite(
                                             callerClass, callerMethod, callerDescriptor,
                                             opcode, owner, targetName, targetDescriptor);
+                                }
+
+                                @Override
+                                public void visitInvokeDynamicInsn(String targetName, String targetDescriptor,
+                                                                   org.objectweb.asm.Handle bootstrapMethodHandle,
+                                                                   Object... bootstrapMethodArguments) {
+                                    int ordinal = nextInstruction();
+                                    references.recordDynamic(archivePath, classEntryPath,
+                                            callerClass, callerMethod, callerDescriptor,
+                                            ApiDynamicReferenceKind.INVOKEDYNAMIC_SITE, "instruction",
+                                            null, targetName, targetDescriptor, -1, ordinal);
+                                    references.recordHandle(archivePath, classEntryPath,
+                                            callerClass, callerMethod, callerDescriptor,
+                                            "invokedynamic-bootstrap", bootstrapMethodHandle, ordinal);
+                                    for (int i = 0; i < bootstrapMethodArguments.length; i++) {
+                                        references.recordDynamicValue(archivePath, classEntryPath,
+                                                callerClass, callerMethod, callerDescriptor,
+                                                "invokedynamic-argument-" + i,
+                                                bootstrapMethodArguments[i], ordinal, 0);
+                                    }
+                                }
+
+                                @Override
+                                public void visitJumpInsn(int opcode, org.objectweb.asm.Label label) {
+                                    nextInstruction();
+                                }
+
+                                @Override
+                                public void visitLdcInsn(Object value) {
+                                    int ordinal = nextInstruction();
+                                    references.recordDynamicValue(archivePath, classEntryPath,
+                                            callerClass, callerMethod, callerDescriptor,
+                                            "ldc", value, ordinal, 0);
+                                }
+
+                                @Override
+                                public void visitIincInsn(int var, int increment) {
+                                    nextInstruction();
+                                }
+
+                                @Override
+                                public void visitTableSwitchInsn(int min, int max,
+                                                                  org.objectweb.asm.Label defaultLabel,
+                                                                  org.objectweb.asm.Label... labels) {
+                                    nextInstruction();
+                                }
+
+                                @Override
+                                public void visitLookupSwitchInsn(org.objectweb.asm.Label defaultLabel,
+                                                                  int[] keys, org.objectweb.asm.Label[] labels) {
+                                    nextInstruction();
+                                }
+
+                                @Override
+                                public void visitMultiANewArrayInsn(String descriptor, int dimensions) {
+                                    nextInstruction();
                                 }
                             };
                         }
@@ -408,7 +692,8 @@ public final class Forge1201ApiUsageAnalyzer {
                 references.methodCallSiteList(),
                 references.fieldCallSiteList(),
                 references.methodList(),
-                references.fieldList());
+                references.fieldList(),
+                references.dynamicReferenceList());
     }
 
     private static String opcodeName(int opcode) {
