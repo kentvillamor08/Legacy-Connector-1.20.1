@@ -75,10 +75,16 @@ public final class Forge1201MixinAnalyzer {
         STRING_TARGET
     }
 
+    public enum TargetIndexStatus {
+        AVAILABLE,
+        UNAVAILABLE_NO_TARGET_CLASSPATH
+    }
+
     public enum TargetStatus {
         TARGET_CLASS_PRESENT,
         TARGET_CLASS_MISSING,
         TARGET_REMAP_UNRESOLVED,
+        TARGET_INDEX_UNAVAILABLE,
         NON_PLATFORM_TARGET
     }
 
@@ -160,6 +166,7 @@ public final class Forge1201MixinAnalyzer {
             String sourceArchive,
             String targetProfile,
             String classMappingVersion,
+            TargetIndexStatus targetIndexStatus,
             List<ConfigFinding> configs,
             List<MixinClassFinding> mixinClasses,
             List<TargetFinding> targets,
@@ -201,7 +208,6 @@ public final class Forge1201MixinAnalyzer {
             throw new IllegalArgumentException("Mixin analysis input must be an existing archive: " + sourceJar);
         }
         if (declarations == null) throw new IllegalArgumentException("Mixin config declarations are required");
-        if (targetIndex == null) throw new IllegalArgumentException("Target class index is required");
 
         Map<String, String> classMappings = sourceToTargetClassMappings == null
                 ? Map.of() : Map.copyOf(sourceToTargetClassMappings);
@@ -417,7 +423,10 @@ public final class Forge1201MixinAnalyzer {
                     .thenComparing(TargetFinding::sourceTargetInternalName)
                     .thenComparing(TargetFinding::selectorForm));
             return new Result(archivePath, "Minecraft 1.21.1 / NeoForge 21.1.258",
-                    mappingVersion, configFindings, classFindings, targetFindings,
+                    mappingVersion,
+                    targetIndex == null ? TargetIndexStatus.UNAVAILABLE_NO_TARGET_CLASSPATH
+                            : TargetIndexStatus.AVAILABLE,
+                    configFindings, classFindings, targetFindings,
                     warnings.stream().distinct().sorted().toList());
         }
     }
@@ -597,6 +606,8 @@ public final class Forge1201MixinAnalyzer {
             status = TargetStatus.NON_PLATFORM_TARGET;
         } else if (target == null) {
             status = TargetStatus.TARGET_REMAP_UNRESOLVED;
+        } else if (targetIndex == null) {
+            status = TargetStatus.TARGET_INDEX_UNAVAILABLE;
         } else {
             status = targetIndex.classInfo(target).isPresent()
                     ? TargetStatus.TARGET_CLASS_PRESENT : TargetStatus.TARGET_CLASS_MISSING;
