@@ -229,7 +229,7 @@ The focused loader tests are confirmed passing as recorded above. Treat the real
 
 **Slice 2 correction implementation — committed; local validation pending:**
 1. `minecraft` and `neoforge` are now treated as host-provided dependencies, not searched for among installed mod archives. Their version ranges are evaluated against target Minecraft `1.21.1` and NeoForge `21.1.258`; an out-of-range host version emits `HOST_VERSION_MISMATCH`. Unknown or qualified ranges remain `UNPARSEABLE`.
-2. NeoForge metadata uses `type` rather than Forge's legacy `mandatory` key. The inspector now preserves `REQUIRED`, `OPTIONAL`, `INCOMPATIBLE`, `DISCOURAGED`, and `UNKNOWN`; absent NeoForge `type` defaults to `REQUIRED`. The graph reports incompatible/discouraged presence separately rather than incorrectly treating those relations as required dependencies.
+2. NeoForge `neoforge.mods.toml` and Forge `mods.toml` now use separate dependency parsing rules. NeoForge reads `type` and defaults to `REQUIRED` even if a legacy `mandatory=false` key is also present; Forge reads `mandatory=true/false`. The inspector preserves `REQUIRED`, `OPTIONAL`, `INCOMPATIBLE`, `DISCOURAGED`, and `UNKNOWN`. The graph reports incompatible/discouraged presence separately rather than incorrectly treating those relations as required dependencies.
 3. Existing Forge `mandatory=true/false` metadata continues to map to required/optional. The old four-argument archive-graph entry point remains available; the preflight analyzer supplies both target host versions.
 4. Qualified versions such as Rhino `2101.2.8-build.91`, Better Advanced Tooltips `2101.1.0-build.1`, and prerelease NeoForge bounds remain explicitly unverified. Do not silently coerce them to numeric versions.
 
