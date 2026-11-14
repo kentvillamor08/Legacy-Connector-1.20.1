@@ -737,7 +737,8 @@ public final class Forge1201MixinAnalyzer {
                         addSelectorCandidate(targetNames, inferred);
                     }
                 }
-                operation = targetNames.contains("<init>") ? "CONSTRUCTOR" : "METHOD";
+                operation = targetNames.stream().anyMatch(name -> name.equals("<init>") || name.contains("."))
+                        ? "CONSTRUCTOR" : "METHOD";
             }
         }
 
@@ -810,7 +811,8 @@ public final class Forge1201MixinAnalyzer {
 
     private static String inferAccessorTarget(String methodName) {
         for (String prefix : List.of("get", "is", "set")) {
-            if (methodName.startsWith(prefix) && methodName.length() > prefix.length()) {
+            if (methodName.startsWith(prefix) && methodName.length() > prefix.length()
+                    && Character.isUpperCase(methodName.charAt(prefix.length()))) {
                 return decapitalize(methodName.substring(prefix.length()));
             }
         }
@@ -818,9 +820,9 @@ public final class Forge1201MixinAnalyzer {
     }
 
     private static String inferInvokerTarget(String methodName) {
-        if (methodName.equals("new")) return "<init>";
         for (String prefix : List.of("call", "invoke")) {
-            if (methodName.startsWith(prefix) && methodName.length() > prefix.length()) {
+            if (methodName.startsWith(prefix) && methodName.length() > prefix.length()
+                    && Character.isUpperCase(methodName.charAt(prefix.length()))) {
                 return decapitalize(methodName.substring(prefix.length()));
             }
         }
