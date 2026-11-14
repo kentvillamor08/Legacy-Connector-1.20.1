@@ -169,6 +169,9 @@ final class Forge1201PreflightAnalyzerTest {
         assertTrue(references.contains("net/minecraft/client/ReturnTypeMarker"));
         assertTrue(references.contains("net/minecraft/client/RecordMarker"));
         assertTrue(references.contains("net/minecraft/client/RecordTypeMarker"));
+        assertTrue(references.contains("net/minecraft/client/InstructionTypeMarker"));
+        assertTrue(references.contains("net/minecraft/client/TryCatchTypeMarker"));
+        assertTrue(references.contains("net/minecraft/client/LocalVariableTypeMarker"));
         assertTrue(references.contains("net/minecraft/client/NestedClientMarker"));
 
         // Annotation class literals are separately inventoried with annotation provenance,
@@ -194,6 +197,19 @@ final class Forge1201PreflightAnalyzerTest {
         assertTrue(result.dynamicReferences().stream().anyMatch(reference ->
                 reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CLASS_LITERAL
                         && reference.context().startsWith("record-component-annotation:")));
+        assertTrue(result.dynamicReferences().stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CLASS_LITERAL
+                        && reference.owner().equals("net/minecraft/world/item/InstructionAnnotationType")
+                        && reference.context().startsWith("instruction-annotation:")
+                        && reference.instructionOrdinal() == 0));
+        assertTrue(result.dynamicReferences().stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CLASS_LITERAL
+                        && reference.owner().equals("net/minecraft/world/entity/TryCatchAnnotationType")
+                        && reference.context().startsWith("try-catch-annotation:")));
+        assertTrue(result.dynamicReferences().stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CLASS_LITERAL
+                        && reference.owner().equals("net/minecraft/world/entity/LocalVariableAnnotationType")
+                        && reference.context().startsWith("local-variable-annotation:")));
         assertTrue(result.dynamicReferences().stream()
                 .filter(reference -> reference.instructionOrdinal() == -1)
                 .anyMatch(reference -> reference.display().contains("#<class-context>")
@@ -485,9 +501,21 @@ final class Forge1201PreflightAnalyzerTest {
         org.objectweb.asm.Label end = new org.objectweb.asm.Label();
         org.objectweb.asm.Label handler = new org.objectweb.asm.Label();
         method.visitTryCatchBlock(start, end, handler, "net/minecraft/world/entity/CatchException");
+        AnnotationVisitor tryCatchAnnotation = method.visitTryCatchAnnotation(
+                org.objectweb.asm.TypeReference.newTryCatchReference(0).getValue(),
+                null, "Lnet/minecraft/client/TryCatchTypeMarker;", true);
+        tryCatchAnnotation.visit("type",
+                org.objectweb.asm.Type.getType("Lnet/minecraft/world/entity/TryCatchAnnotationType;"));
+        tryCatchAnnotation.visitEnd();
         method.visitCode();
         method.visitLabel(start);
         method.visitTypeInsn(Opcodes.NEW, "net/minecraft/world/entity/NewInstructionType");
+        AnnotationVisitor instructionAnnotation = method.visitInsnAnnotation(
+                org.objectweb.asm.TypeReference.newTypeReference(org.objectweb.asm.TypeReference.NEW).getValue(),
+                null, "Lnet/minecraft/client/InstructionTypeMarker;", true);
+        instructionAnnotation.visit("type",
+                org.objectweb.asm.Type.getType("Lnet/minecraft/world/item/InstructionAnnotationType;"));
+        instructionAnnotation.visitEnd();
         method.visitInsn(Opcodes.POP);
         method.visitMultiANewArrayInsn("[[Lnet/minecraft/world/item/ArrayInstructionType;", 2);
         method.visitInsn(Opcodes.POP);
@@ -503,6 +531,14 @@ final class Forge1201PreflightAnalyzerTest {
         method.visitInsn(Opcodes.ARETURN);
         method.visitLocalVariable("entity", "Lnet/minecraft/world/entity/LocalVariableType;",
                 "Ljava/util/List<Lnet/minecraft/world/entity/LocalVariableGenericType;>;", start, end, 1);
+        AnnotationVisitor localVariableAnnotation = method.visitLocalVariableAnnotation(
+                org.objectweb.asm.TypeReference.newTypeReference(
+                        org.objectweb.asm.TypeReference.LOCAL_VARIABLE).getValue(),
+                null, new org.objectweb.asm.Label[] {start}, new org.objectweb.asm.Label[] {end},
+                new int[] {1}, "Lnet/minecraft/client/LocalVariableTypeMarker;", true);
+        localVariableAnnotation.visit("type",
+                org.objectweb.asm.Type.getType("Lnet/minecraft/world/entity/LocalVariableAnnotationType;"));
+        localVariableAnnotation.visitEnd();
         method.visitMaxs(2, 2);
         method.visitEnd();
         writer.visitEnd();
