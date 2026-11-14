@@ -510,7 +510,7 @@ class PalladiumResourceCompat1201Test {
         String xp = get(resources, "data/alienevo/kubejs_scripts/xp.js");
         assertEquals(1, occurrences(xp, "player.server.scoreboard"));
         assertFalse(xp.contains("Utils.server"));
-        assertTrue(xp.contains("let player = source ? source.getEntity() : null;"));
+        assertTrue(xp.contains("let player = source ? source.getActual() : null;"));
         assertTrue(xp.contains("if (player && player.isPlayer()) {"));
         assertFalse(xp.contains("source.getPlayer()"));
         assertFalse(xp.contains("source.player"));
@@ -814,6 +814,8 @@ class PalladiumResourceCompat1201Test {
     void removesObsoleteEditBoxTickCallAndFixesHexFilteringForAlienEvoPowerUi() {
         Map<String, byte[]> resources = new HashMap<>();
         put(resources, PalladiumResourceCompat1201.ALIEN_EVO_POWER_UI, """
+                nickTextBox.render(e.guiGraphics, mouseX, mouseY, e.partialTick);
+                nickTextBox.tick();
                 hexTextBox.render(e.guiGraphics, mouseX, mouseY, e.partialTick);
                 let currentTime = Date.now();
                 if (currentTime - lastTickTime >= TICK_INTERVAL) {
@@ -830,11 +832,49 @@ class PalladiumResourceCompat1201Test {
         assertTrue(migrated.contains("hexTextBox.render(e.guiGraphics, mouseX, mouseY, e.partialTick);"));
         assertTrue(migrated.contains("EditBox input is ticked by the 1.21.1 screen; no manual tick() call."));
         assertFalse(migrated.contains("hexTextBox.tick()"));
+        assertFalse(migrated.contains("nickTextBox.tick()"));
         assertTrue(migrated.contains("rawTextboxValue.replaceAll(\"[^0-9A-Fa-f]\", \"\")"));
         assertTrue(migrated.contains("cleanedHexString.substring(0, 6)"));
         assertFalse(migrated.contains("rawTextboxValue.replace(/[^0-9A-Fa-f]/g"));
         assertEquals(0, PalladiumResourceCompat1201.apply(resources));
         assertEquals(migrated, get(resources, PalladiumResourceCompat1201.ALIEN_EVO_POWER_UI));
+    }
+
+    @Test
+    void migratesTemporaryCrystalBlockServerTicksToKubeJs7BlockEntityEvents() {
+        Map<String, byte[]> resources = new HashMap<>();
+        put(resources, PalladiumResourceCompat1201.ALIEN_EVO_BLOCKS, """
+                event.create('alienevo:crystal_block')
+                    .blockEntity(blockEntity => {
+                        blockEntity.enableSync();
+                        blockEntity.serverTick(2500, 250, entity => {
+                            entity.level.destroyBlock(entity.blockPos, false)
+                        })
+                    });
+                event.create('alienevo:smooth_crystal_block')
+                    .blockEntity(blockEntity => {
+                        blockEntity.enableSync();
+                        blockEntity.serverTick(2500, 250, entity => {
+                            entity.level.destroyBlock(entity.blockPos, false)
+                        })
+                    });
+                """);
+
+        assertEquals(1, PalladiumResourceCompat1201.apply(resources));
+
+        String migrated = get(resources, PalladiumResourceCompat1201.ALIEN_EVO_BLOCKS);
+        assertEquals(2, occurrences(migrated, "blockEntity.serverTicking();"));
+        assertEquals(2, occurrences(migrated, "blockEntity.tickFrequency(2500);"));
+        assertEquals(2, occurrences(migrated, "blockEntity.tickOffset(250);"));
+        assertTrue(migrated.contains(
+                "BlockEvents.blockEntityTick('alienevo:crystal_block', event => {"));
+        assertTrue(migrated.contains(
+                "BlockEvents.blockEntityTick('alienevo:smooth_crystal_block', event => {"));
+        assertEquals(2, occurrences(migrated, "event.level.destroyBlock(event.block.pos, false);"));
+        assertFalse(migrated.contains("blockEntity.serverTick("));
+
+        assertEquals(0, PalladiumResourceCompat1201.apply(resources));
+        assertEquals(migrated, get(resources, PalladiumResourceCompat1201.ALIEN_EVO_BLOCKS));
     }
 
     @Test
