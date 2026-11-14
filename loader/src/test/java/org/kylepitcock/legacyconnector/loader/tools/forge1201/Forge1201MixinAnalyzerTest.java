@@ -262,6 +262,38 @@ final class Forge1201MixinAnalyzerTest {
                 explicitTrue.status());
     }
 
+
+    @Test
+    void pluginDeclaredMixinMembersRemainPluginDependentWithoutExecutingPluginCode() throws Exception {
+        String configPath = "mixins.plugin.json";
+        Path jar = writeJar("mixin-plugin-members.jar", Map.of(
+                configPath, """
+                        {
+                          "package":"com.example.mixins",
+                          "plugin":"com.example.DynamicPlugin",
+                          "mixins":["MemberMixin"]
+                        }
+                        """.getBytes(StandardCharsets.UTF_8),
+                "com/example/mixins/MemberMixin.class",
+                memberMixinClass("com/example/mixins/MemberMixin", SOURCE_ENTITY)));
+
+        var result = Forge1201MixinAnalyzer.analyze(
+                jar,
+                List.of(new Forge1201MixinAnalyzer.ConfigDeclaration(
+                        configPath, Forge1201MixinAnalyzer.DiscoverySource.MANIFEST)),
+                emptyTargetIndex(),
+                Map.of(),
+                "no-member-mapping-supplied");
+
+        assertEquals(Forge1201MixinAnalyzer.PluginStatus.MISSING_FROM_SOURCE_ARCHIVE,
+                result.configs().getFirst().pluginStatus());
+        var overwrite = result.memberAnnotations().stream()
+                .filter(finding -> finding.annotationKind() == Forge1201MixinAnalyzer.MemberAnnotationKind.OVERWRITE)
+                .findFirst().orElseThrow();
+        assertEquals(Forge1201MixinAnalyzer.MemberResolutionStatus.PLUGIN_DEPENDENT, overwrite.status());
+        assertTrue(overwrite.evidence().contains("Plugin code was not executed"));
+    }
+
     @Test
     void reportsUnsafeMissingAndMalformedConfigsWithoutSilentlySkippingThem() throws Exception {
         Path jar = writeJar("config-errors.jar", Map.of(
