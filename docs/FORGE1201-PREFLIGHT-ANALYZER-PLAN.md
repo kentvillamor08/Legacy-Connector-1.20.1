@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Compatibility Analyzer
 
-**Status:** Slices 1 and 2 are implemented and validated. Slice 3 is in progress: the first Schema 1.3 / Analyzer 1.3.0 code batch now captures contextual invokedynamic/bootstrap/LDC/ConstantDynamic references for outer-JAR classes and includes synthetic regression tests. The new focused test gate has not yet been run; nested archive bytecode and source SRG-to-Mojang normalization remain next.
+**Status:** Slices 1 and 2 are implemented and validated. Slice 3 is in progress: the first Schema 1.3 / Analyzer 1.3.0 code batch now captures contextual invokedynamic/bootstrap/LDC/ConstantDynamic references for outer-JAR classes and includes synthetic regression tests. The first focused test run compiled successfully but exposed one stale test expectation for the updated limitation wording; that assertion has been corrected in commit `804c9c6c1e51969cc0168848cd0ebea3e551f354`. The corrected forced test gate is pending. Nested archive bytecode and source SRG-to-Mojang normalization remain next.
 
 **Report filename rule:** every analyzer output filename includes its slice number, e.g. `symbiote-1.1.3.jar-slice-2.json` and `symbiote-1.1.3.jar-slice-2.txt`. Repeated runs append a run number, e.g. `symbiote-1.1.3.jar-slice-2-run-2.json` and `.txt`. Use the root Gradle task's explicit `-PpreflightJson=<path>` and `-PpreflightText=<path>` options. Never overwrite the unsuffixed legacy root filenames or an earlier slice/run. The testbench archive index is `archive/preflight/README.md`.
   
@@ -279,7 +279,52 @@ Synthetic coverage added:
 - Reflection/resource string candidates remain deferred heuristics.
 - The Schema 1.3 report has not yet been generated against Symbiote; do not overwrite Slice 2 run-3.
 
-### Exact next action — pull and test the first Slice 3 batch
+### Slice 3 first test-run result and correction
+
+**User-run result:** The Universal branch fast-forwarded from `aa5f5d32ba865e7f056851b1dfd39c12fb8fcffc` to `0bfcb5b4022da8da7d8aff7b3630ae6ec4ebc08d`. Gradle compiled the main and test code successfully, then ran 452 tests with exactly one failure: `Forge1201PreflightAnalyzerTest > buildsDeterministicInventoryAndPreservesDependencyEvidence()` at line 98. The failure was not in a dynamic-reference assertion. Line 98 still expected the Slice 2 limitation phrase `outer JAR only`, but the Slice 3 implementation had intentionally revised the limitation to say that nested archive class bytecode remains pending. All other 451 tests passed in that invocation.
+
+**Fix committed:** `804c9c6c1e51969cc0168848cd0ebea3e551f354` updates the stale assertion to require the current report sentence to contain both `outer JAR` and `nested archive class bytecode`. This makes the test check the actual remaining-analysis boundary rather than freeze an obsolete phrase.
+
+**Interpretation:** The first run reached `:loader:test`, so the code and test sources compiled. The failure indicates a stale assertion after a deliberate report-wording change, not evidence of a scanner implementation defect. Nevertheless, no passing Slice 3 test result exists yet; rerun the complete forced loader test suite after pulling the fix.
+
+### Exact next action — pull the stale-assertion fix and rerun
+
+The user has already fast-forwarded the Universal local worktree to `0bfcb5b4022da8da7d8aff7b3630ae6ec4ebc08d`; Gradle failed after running tests and the PowerShell guard correctly surfaced the nonzero exit. The new assertion fix is now on the remote branch. Confirm the same Universal path and branch, confirm the expected local HEAD and a clean worktree, fetch the exact remote branch head, fast-forward, then rerun the focused tests with all tasks forced.
+
+```powershell
+$repo = 'F:\Program\intellij-idea-portable\Legacy-Connector-1.20.1'
+$branch = 'feat/forge1201-preflight-analyzer'
+$expectedLocalHead = '0bfcb5b4022da8da7d8aff7b3630ae6ec4ebc08d'
+
+$actualRepo = [System.IO.Path]::GetFullPath((git -C $repo rev-parse --show-toplevel).Trim().Replace('/', '\')).TrimEnd('\')
+$expectedRepo = [System.IO.Path]::GetFullPath($repo).TrimEnd('\')
+if (-not [string]::Equals($actualRepo, $expectedRepo, [System.StringComparison]::OrdinalIgnoreCase)) { throw "Unexpected repository path: $actualRepo" }
+$actualBranch = (git -C $repo branch --show-current).Trim()
+if ($actualBranch -ne $branch) { throw "Wrong branch: $actualBranch" }
+$actualHead = (git -C $repo rev-parse HEAD).Trim()
+if ($actualHead -ne $expectedLocalHead) { throw "Unexpected local HEAD: $actualHead" }
+$changes = @(git -C $repo status --porcelain)
+if ($changes.Count -gt 0) { $changes; throw "Worktree is not clean. Stop and inspect changes." }
+
+$remoteLines = @(git -C $repo ls-remote origin "refs/heads/$branch")
+if ($LASTEXITCODE -ne 0 -or $remoteLines.Count -ne 1) { throw "Could not resolve remote branch." }
+$expectedRemoteHead = ($remoteLines[0] -split '\s+')[0]
+if ($expectedRemoteHead -notmatch '^[0-9a-f]{40}$') { throw "Invalid remote branch SHA." }
+git -C $repo pull --ff-only origin $branch
+if ($LASTEXITCODE -ne 0) { throw "Pull failed." }
+$pulledHead = (git -C $repo rev-parse HEAD).Trim()
+if ($pulledHead -ne $expectedRemoteHead) { throw "Unexpected pulled HEAD: $pulledHead" }
+
+Push-Location $repo
+.\gradlew.bat :loader:clean :loader:test --no-daemon --console=plain --rerun-tasks
+$testExit = $LASTEXITCODE
+Pop-Location
+if ($testExit -ne 0) { throw "Slice 3 focused test gate failed." }
+```
+
+Do not run the real Symbiote report yet. Once this gate passes, continue nested archive bytecode and source SRG-to-Mojang integration. Keep the Palladium + Alien Evolution worktree/branch isolated.
+
+
 
 The user's last confirmed local Universal checkout was `aa5f5d32ba865e7f056851b1dfd39c12fb8fcffc`. The remote branch now has the Slice 3 source commits above plus this plan update. First fast-forward the **Universal** worktree only, then run the focused loader tests with `--rerun-tasks`. The command must stop on wrong path, branch, HEAD, dirty worktree, failed pull, or unexpected pulled HEAD.
 
