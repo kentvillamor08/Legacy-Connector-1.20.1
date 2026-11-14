@@ -482,7 +482,11 @@ public final class Forge1201PreflightAnalyzer {
                     .append(finding.sourceMemberName()).append(finding.sourceMemberDescriptor())
                     .append(" [").append(finding.elementKind()).append(", ")
                     .append(finding.status()).append(", remap=").append(finding.remap())
-                    .append(", operation=").append(finding.operation()).append("] candidates=")
+                    .append(", operation=").append(finding.operation())
+                    .append(", prefix=").append(finding.prefix())
+                    .append(", aliases=").append(finding.aliases())
+                    .append(", value=").append(finding.explicitValue())
+                    .append(", constraints=").append(finding.constraints()).append("] candidates=")
                     .append(finding.targetMemberNameCandidates())
                     .append(" source-targets=").append(finding.sourceTargetInternalNames())
                     .append(" — ").append(finding.evidence()).append('\n');
