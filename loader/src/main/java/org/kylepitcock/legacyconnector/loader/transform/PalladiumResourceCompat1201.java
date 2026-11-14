@@ -56,6 +56,13 @@ final class PalladiumResourceCompat1201 {
                     + "    }\n"
                     + "    return soundEvent;\n"
                     + "}\n\n";
+    static final String LEGACY_SOUND_SOURCE_HELPER =
+            "function getAlienEvoSoundSource(soundSource) {\n"
+                    + "    const AlienEvoSoundSource = Java.loadClass('net.minecraft.sounds.SoundSource');\n"
+                    + "    const enumName = soundSource != null && typeof soundSource.name === 'function'\n"
+                    + "            ? String(soundSource.name()) : String(soundSource).toUpperCase();\n"
+                    + "    return AlienEvoSoundSource.valueOf(enumName);\n"
+                    + "}\n\n";
     private static final String ALIEN_EVO_CYCLE = "addon/alienevo/kubejs_scripts/cycle_sounds.js";
     private static final String ALIEN_EVO_DETRANSFORM = "addon/alienevo/kubejs_scripts/detransform.js";
     private static final String ALIEN_EVO_FLATTEN = "addon/alienevo/kubejs_scripts/flatten.js";
@@ -65,6 +72,8 @@ final class PalladiumResourceCompat1201 {
             "function ResourceLocation(namespaceOrLocation, path) {";
     private static final String SOUND_EVENT_HELPER_MARKER =
             "function getAlienEvoSoundEvent(soundId) {";
+    private static final String SOUND_SOURCE_HELPER_MARKER =
+            "function getAlienEvoSoundSource(soundSource) {";
 
     private static final String ALIEN_EVO_OBTAIN_SCROLL_ADVANCEMENT =
             "data/alienevo/advancements/obtain_scroll.json";
@@ -204,7 +213,7 @@ final class PalladiumResourceCompat1201 {
         removeDuplicateMalformedGeckoLibAnimation(resources);
         addMissingAlienEvoMachineScrollTag(resources);
         rewriteLegacyScriptApis(resources);
-        rewriteDiamondCreationSound(resources);
+        rewriteAlienEvoLevelPlaySoundCalls(resources);
         rewriteScoreboardApi(resources);
         rewriteServerApiAccess(resources);
         rewriteOmnitrixPacketPlayerAccess(resources);
@@ -571,57 +580,73 @@ final class PalladiumResourceCompat1201 {
 
 
     /**
-     * AlienEvo 1.1.3's diamond-creation ability still passes its legacy string
-     * sound ID to Level.playSound. In 1.21.1 Rhino sees both the Holder and
-     * SoundEvent overloads and cannot choose one. Resolve the ID to the
-     * registered SoundEvent first, just as the other AlienEvo ability scripts
-     * do. This is scoped to the inspected diamond_creation.js resource.
+     * AlienEvo 1.1.3 has 43 direct eight-argument Level.playSound calls in its
+     * server-side KubeJS scripts. In 1.21.1 Rhino sees both the Holder and
+     * SoundEvent overloads when the sound is passed as a JS string. Some scripts
+     * also pass the sound category as a string. Resolve both arguments to their
+     * exact Java enum/event types before overload selection. Keep the 3-argument
+     * client player.playSound helper calls untouched.
+     *
+     * @return number of distinct AlienEvo script resources changed
      */
-    private static int rewriteDiamondCreationSound(Map<String, byte[]> resources) {
-        byte[] original = resources.get(ALIEN_EVO_DIAMOND_CREATION);
-        if (original == null) return 0;
+    private static int rewriteAlienEvoLevelPlaySoundCalls(Map<String, byte[]> resources) {
+        int changed = 0;
+        for (Map.Entry<String, byte[]> entry : resources.entrySet()) {
+            if (!isAlienEvoKubeJsScript(entry.getKey())) continue;
 
-        String script = new String(original, StandardCharsets.UTF_8);
-        List<ScriptArgument> soundArguments = new java.util.ArrayList<>();
-        int searchFrom = 0;
-        while (true) {
-            int call = script.indexOf(".playSound(", searchFrom);
-            if (call < 0) break;
-            int open = call + ".playSound".length();
-            int close = matchingCallParen(script, open);
-            if (close < 0) {
-                throw new IllegalStateException(
-                        "AlienEvo diamond_creation.js has an unterminated Level.playSound call");
-            }
-
-            List<ScriptArgument> arguments = splitScriptArguments(script, open + 1, close);
-            if (arguments.size() == 8
-                    && "null".equals(script.substring(arguments.get(0).start(), arguments.get(0).end()).trim())) {
-                ScriptArgument sound = arguments.get(4);
-                String expression = script.substring(sound.start(), sound.end()).trim();
-                if (!expression.startsWith("getAlienEvoSoundEvent(")) {
-                    soundArguments.add(sound);
+            String path = entry.getKey();
+            String script = new String(entry.getValue(), StandardCharsets.UTF_8);
+            List<ScriptRewrite> rewrites = new java.util.ArrayList<>();
+            int searchFrom = 0;
+            while (true) {
+                int call = script.indexOf(".playSound(", searchFrom);
+                if (call < 0) break;
+                int open = call + ".playSound".length();
+                int close = matchingCallParen(script, open);
+                if (close < 0) {
+                    throw new IllegalStateException(
+                            "AlienEvo resource " + path + " has an unterminated playSound call");
                 }
+
+                List<ScriptArgument> arguments = splitScriptArguments(script, open + 1, close);
+                if (arguments.size() == 8) {
+                    ScriptArgument sound = arguments.get(4);
+                    String soundExpression = script.substring(sound.start(), sound.end()).trim();
+                    if (!soundExpression.startsWith("getAlienEvoSoundEvent(")) {
+                        rewrites.add(new ScriptRewrite(sound.start(), sound.end(), "getAlienEvoSoundEvent"));
+                    }
+
+                    ScriptArgument source = arguments.get(5);
+                    String sourceExpression = script.substring(source.start(), source.end()).trim();
+                    if (!sourceExpression.startsWith("getAlienEvoSoundSource(")) {
+                        rewrites.add(new ScriptRewrite(source.start(), source.end(), "getAlienEvoSoundSource"));
+                    }
+                }
+                searchFrom = close + 1;
             }
-            searchFrom = close + 1;
-        }
 
-        if (soundArguments.isEmpty()) return 0;
+            if (rewrites.isEmpty()) continue;
 
-        String migrated = script;
-        for (int i = soundArguments.size() - 1; i >= 0; i--) {
-            ScriptArgument range = soundArguments.get(i);
-            String expression = migrated.substring(range.start(), range.end()).trim();
-            migrated = migrated.substring(0, range.start())
-                    + "getAlienEvoSoundEvent(" + expression + ")"
-                    + migrated.substring(range.end());
+            // Apply argument replacements from right to left so original offsets remain valid.
+            rewrites.sort((left, right) -> Integer.compare(right.start(), left.start()));
+            String migrated = script;
+            for (ScriptRewrite rewrite : rewrites) {
+                String expression = migrated.substring(rewrite.start(), rewrite.end()).trim();
+                migrated = migrated.substring(0, rewrite.start())
+                        + rewrite.helperName() + "(" + expression + ")"
+                        + migrated.substring(rewrite.end());
+            }
+            migrated = addSoundEventHelper(migrated);
+            if (!migrated.equals(script)) {
+                entry.setValue(migrated.getBytes(StandardCharsets.UTF_8));
+                changed++;
+            }
         }
-        migrated = addSoundEventHelper(migrated);
-        resources.put(ALIEN_EVO_DIAMOND_CREATION, migrated.getBytes(StandardCharsets.UTF_8));
-        return 1;
+        return changed;
     }
 
     private record ScriptArgument(int start, int end) {}
+    private record ScriptRewrite(int start, int end, String helperName) {}
 
     private record PreviewInsertion(int offset, String followingSeparator) {}
 
@@ -959,8 +984,13 @@ final class PalladiumResourceCompat1201 {
     }
 
     private static String addSoundEventHelper(String script) {
-        if (script.contains(SOUND_EVENT_HELPER_MARKER)) return script;
-        return insertAfterOmnitrixIntegerHelper(script, LEGACY_SOUND_EVENT_HELPER);
+        if (!script.contains(SOUND_EVENT_HELPER_MARKER)) {
+            script = insertAfterOmnitrixIntegerHelper(script, LEGACY_SOUND_EVENT_HELPER);
+        }
+        if (!script.contains(SOUND_SOURCE_HELPER_MARKER)) {
+            script = insertAfterOmnitrixIntegerHelper(script, LEGACY_SOUND_SOURCE_HELPER);
+        }
+        return script;
     }
 
     private static String replaceExactScriptOccurrence(
