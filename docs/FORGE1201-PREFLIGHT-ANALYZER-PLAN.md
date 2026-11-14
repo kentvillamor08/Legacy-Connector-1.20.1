@@ -807,3 +807,39 @@ Proceed with descriptor-aware Mixin member annotation inventory:
 4. Follow with injector handler descriptors/selectors, `@At`, `@Slice`, refmap interpretation, dynamic plugin declarations (without executing plugin code), and nested config/class discovery using the existing `Forge1201ArchiveGraph`. Do not introduce another ZIP walker.
 5. Re-run the forced loader tests after source changes and the consolidated clean build at the next integration checkpoint.
 
+
+
+---
+
+## 2026-11-14 — Schema 1.5 descriptor-aware Mixin member inventory committed (tests pending)
+
+The prior Schema 1.4 integration has been user-validated:
+- Forced `:loader:test --no-daemon --console=plain --rerun-tasks`: **BUILD SUCCESSFUL in 45s; 13/13 tasks** at `afdf5c0b8b4410d0deb401683e60b0255843c58d`.
+- Full `clean build --no-daemon --console=plain --rerun-tasks`: **BUILD SUCCESSFUL in 2m 34s; 33/33 tasks** at the same user-tested base commit.
+
+A new untested increment is now committed on `feat/forge1201-preflight-analyzer`, currently at `e60447ed3769077ebf391d21d1a724cda4a64d40`.
+
+### New source-side structural findings
+
+`Forge1201MixinAnalyzer.Result.memberAnnotations` now contains immutable findings for `@Shadow`, `@Overwrite`, `@Accessor`, and `@Invoker` annotations on visible/invisible fields and methods. Findings retain exact source member JVM descriptors, source targets, archive/config/section/class provenance, element kind, prefix, aliases, explicit value, Overwrite constraints, effective remap state, target member name candidates, operation shape, warnings, and explicit status.
+
+The effective member `remap` default comes from class-level `@Mixin(remap)` and can be overridden at member level. Shadow prefixes strip methods only; explicitly prefixed shadow fields are retained and marked as invalid annotation values. Alias use is checked against the private-member rule. Accessor/Invoker name inference requires the documented prefix followed by an uppercase character; constructor targets require explicit constructor notation/name. Plugins remain unexecuted and can mark member findings plugin-dependent.
+
+The preflight schema is now `1.5` / analyzer `1.5.0`. The JSON adds `mixinAnalysis.memberAnnotations` and text output includes complete member annotation data and warnings. The implementation does not claim target member presence or target descriptor compatibility; no complete versioned 1.20.1 → 1.21.1 member map is supplied.
+
+### Regression coverage added — not yet executed
+
+Synthetic ASM tests now cover Shadow field/method and prefix/alias rules, Overwrite descriptors/aliases/constraints/remap, Accessor getter/setter/inference and invalid shapes, Invoker inferred method and explicit constructor, class-level remap inheritance/member override, plugin-dependent findings without plugin execution, and Schema 1.5 JSON/text serialization.
+
+**Important:** none of these new Schema 1.5 source/test changes have yet been compiled or executed by Gradle. The only verified green checkpoint remains the Schema 1.4 build at `afdf5c0b8b4410d0deb401683e60b0255843c58d`.
+
+### Exact next validation action
+
+The user must fast-forward the clean local checkout from its last tested base `afdf5c0b8b4410d0deb401683e60b0255843c58d` to the verified remote feature branch head `e60447ed3769077ebf391d21d1a724cda4a64d40`, with branch/HEAD/clean-worktree/remote-SHA guards. Then run:
+
+```powershell
+.\gradlew.bat :loader:clean :loader:test --no-daemon --console=plain --rerun-tasks
+```
+
+The forced loader gate is the first validation. If it fails, diagnose and fix the actual compiler/test failure before any broader build. If it passes, update this plan and handoff with the new checkpoint; the next appropriate integration checkpoint is a full `clean build`. Do not claim Schema 1.5 is validated until the user supplies a successful Gradle output.
+
