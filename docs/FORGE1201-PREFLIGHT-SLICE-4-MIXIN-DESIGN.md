@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Analyzer — Slice 4 Mixin Analysis Design
 
-Status: Slice 4 implementation has started. The existing target verifier now exposes a reusable per-run target index with exact descriptor and inherited-member lookup; focused synthetic ASM tests have been added but still require the user's forced loader test run. The Mixin analyzer/result model and report integration are not implemented yet.
+Status: Slice 4 is in progress. The shared target index and its synthetic ASM tests have passed the user's forced loader test gate at commit `246002c6fcc1af371bb11a716483dd1df23a2dbe`. A first bounded outer-archive Mixin analyzer API and synthetic tests have since been committed; those newer tests still require a forced loader test run. Member annotation/injector analysis and unified preflight reporting remain future increments.
 
 ## Goal
 
@@ -140,7 +140,28 @@ The first Slice 4 source increment is committed on `feat/forge1201-preflight-ana
 Source commit: `e3aa921d01d8ee134de3a71d3aa1016d249dbaf1`.
 Focused synthetic ASM tests: `69a93e13183466e51a6bab8023eecb0bb906e5e9`.
 
-The tests cover exact descriptor matching, inherited methods and fields, missing classes, incomplete hierarchy, and isolation between index instances. They are authored but **not yet executed** in the user's Windows/Gradle environment. No reusable Mixin analyzer, config parser, selector analysis, refmap parser, or preflight integration is claimed yet.
+The tests cover exact descriptor matching, inherited methods and fields, missing classes, incomplete hierarchy, and isolation between index instances. The user subsequently ran `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks` at commit `246002c6fcc1af371bb11a716483dd1df23a2dbe`; it passed (`BUILD SUCCESSFUL in 1m 40s`, 14 actionable tasks, all 14 executed). This validates the TargetIndex API and its tests. The newer Mixin analyzer tests described below were added after that run and remain pending.
+
+## Implementation checkpoint — bounded config and @Mixin target discovery (2026-11-14)
+
+The next implementation increment adds `Forge1201MixinAnalyzer` and synthetic tests:
+
+- It accepts explicit config declarations with discovery provenance (`MANIFEST`, `FORGE_METADATA`, or `RESOURCE_HEURISTIC)); duplicate declarations for one path are coalesced while retaining all sources.
+- It performs bounded, read-only inventory of the **outer source JAR only**. Unsafe paths, missing/duplicate configs, malformed JSON, config count/size budgets, unresolved mixin classes, duplicate class entries, class byte limits, and incomplete archive inventory are explicit states/findings.
+- It resolves `package` plus `mixins` / `client` / `server` entries and records missing classes rather than silently skipping them. It checks both visible and invisible `@Mixin` annotations, class-literal targets, string `targets`, and `remap`.
+- Minecraft and Mojang targets require an explicit versioned source-to-target class mapping. The analyzer does not assume identity mapping. Forge namespace targets use only the existing reviewed `Forge1201MappingCatalog` package moves/explicit replacements; manual-adapter and unmapped cases remain unresolved.
+- Resolved target class presence is checked through the shared `Forge1201TargetApiVerifier.TargetIndex`. Structural presence is not an injection or gameplay success claim.
+- It checks a declared plugin class as a source-archive resource and marks a present plugin `PRESENT_NOT_EXECUTED`; plugin code is never loaded or run. Refmap presence and bounded JSON object validity are checked without applying remapping.
+- Plugin lookup is currently limited to the source archive; a missing-in-source plugin may still be supplied by a declared dependency and must be reconciled with dependency-graph provenance in a later increment.
+- Nested JAR configs/classes, Forge metadata config discovery, member annotations, injector target descriptors, `@At` / `@Slice`, refmap semantic mapping, and `Forge1201PreflightAnalyzer` JSON/text integration are **not yet implemented**.
+
+Source commits:
+- `df4d8531b1b1a739119ca3be8bbf982c04f42bd0` — initial analyzer API.
+- `d0248dd544e028f55abb2bf41ac2d1a43f51c9ad` — stricter mapping/plugin/class-entry states.
+- `c81b8a2556819f85332b7b527f09635fff9f1422` — explicit archive-index-incomplete findings and simpler annotation iteration.
+- `d852da1ffd64d59dca1e9b4f3148077e244d4cfd` — synthetic analyzer tests.
+
+The new `Forge1201MixinAnalyzerTest` covers declaration-source coalescing, config parsing, visible/invisible target annotations, class literal/string targets, mixin class missing, unsafe/missing/malformed config paths, explicit mapping absence, `remap=false`, mapped target missing, plugin non-execution, and refmap presence/absence. These newer tests **have not yet been run** by the user. Run the forced loader test gate before expanding annotation/member analysis.
 
 ## Regression test matrix
 
