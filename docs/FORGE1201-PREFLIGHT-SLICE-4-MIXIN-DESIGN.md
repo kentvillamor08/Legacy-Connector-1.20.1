@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Analyzer — Slice 4 Mixin Analysis Design
 
-Status (2026-11-14): Slice 4 remains in progress. Schema 1.7 @At/@Constant source inventory passed the user's forced loader test gate at 267db731f7b16b30498f3402daf83bcb340849d1 (BUILD SUCCESSFUL in 39s; 14/14 actionable tasks executed). Schema 1.8 now captures @Slice from/to boundaries, distinguishing explicit declarations from Mixin 0.8.5 HEAD/TAIL defaults. The Schema 1.8 implementation and synthetic test updates are committed at 0dc6ae5b7d4497e341ef2968040f08ef124bdb3a; the forced loader test gate is pending. Boundary capture does not establish target instruction ordering or injection success.
+Status (2026-11-14): Slice 4 remains in progress. Schema 1.7 @At/@Constant inventory passed the user loader test gate at `267db731f7b16b30498f3402daf83bcb340849d1` (BUILD SUCCESSFUL in 39s; 14/14 tasks). Schema 1.8 @Slice from/to inventory then passed at `4b4f9ce437671f08eafd3f9cf4a18e34a3d24284` (BUILD SUCCESSFUL in 33s; 14/14 tasks). Boundary capture does not establish target instruction ordering, slice applicability, or injection success. The next bounded task is a design/research pass over Mixin 0.8.5 semantic refmap interpretation with explicit versioned mapping inputs; implementation must not guess namespaces or same-name mappings.
 
 Historical implementation checkpoints below remain useful context; the latest dated checkpoint at the end controls current status.
 ## Goal
@@ -344,3 +344,22 @@ Wrong nested annotation types, malformed boundary metadata, and unexpected value
 **Evidence limit:** the analyzer does not inspect target method instructions, infer their order, resolve selectors through refmaps/member mappings, or establish that a slice or injector will apply. It does not execute plugins and remains outer-source-JAR-only. Nested config/class provenance still needs to reuse Forge1201ArchiveGraph.
 
 Synthetic tests cover explicit from/to selector metadata, omitted HEAD/TAIL defaults and provenance, unsupported nested boundary annotations, and JSON/text reporting. **The Schema 1.8 forced loader test gate is pending user execution.**
+
+
+---
+
+## 2026-11-14 — Schema 1.8 validated; next: semantic refmap contract
+
+The user fast-forwarded the Universal branch to `4b4f9ce437671f08eafd3f9cf4a18e34a3d24284` and ran the forced loader gate:
+
+```powershell
+.\gradlew.bat :loader:clean :loader:test --no-daemon --console=plain --rerun-tasks
+```
+
+**BUILD SUCCESSFUL in 33s; 14 actionable tasks, all 14 executed.** This validates the Schema 1.8 loader tests. It is not evidence that target instructions are found or any runtime Mixin applies.
+
+The schema now preserves source-side @Slice index/ID, separate from/to records, explicit-versus-default provenance, nested AtFinding metadata, and explicit unsupported/invalid statuses. Mixin 0.8.5 omitted boundary defaults are recorded as `from=@At("HEAD")` and `to=@At("TAIL")`. The report serializes the nested slice findings in JSON and prints them in text output.
+
+### Next bounded design task
+
+Research the Mixin 0.8.5 refmap JSON contract and the actual runtime remapper's context/namespace lookup semantics before coding semantic interpretation. The design must identify raw resource discovery, JSON structure, context keys, source/target namespace assumptions, versioned mapping inputs, provenance, and explicit unknown/ambiguous/error states. A raw refmap entry is not itself proof of target member existence. Never guess a missing mapping from identical names; never execute Mixin plugins. Keep refmap interpretation distinct from target member/instruction resolution and runtime compatibility.
