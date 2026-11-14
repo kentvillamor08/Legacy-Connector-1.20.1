@@ -48,10 +48,11 @@ final class Forge1201PreflightAnalyzerTest {
                         && candidate.discoveredBy().contains("manifest")));
         assertTrue(first.mixinConfigCandidates().stream().anyMatch(candidate ->
                 candidate.path().equals("config/feature.json")));
-        assertEquals("1.4", first.schemaVersion());
-        assertEquals("1.4.0", first.analyzerVersion());
+        assertEquals("1.5", first.schemaVersion());
+        assertEquals("1.5.0", first.analyzerVersion());
         assertEquals(Forge1201MixinAnalyzer.TargetIndexStatus.UNAVAILABLE_NO_TARGET_CLASSPATH,
                 first.mixinAnalysis().targetIndexStatus());
+        assertTrue(first.mixinAnalysis().memberAnnotations().isEmpty());
         var manifestConfig = first.mixinAnalysis().configs().stream()
                 .filter(finding -> finding.configPath().equals("mixins.alpha.json")).findFirst().orElseThrow();
         assertEquals(Forge1201MixinAnalyzer.ConfigStatus.PARSED, manifestConfig.status());
@@ -134,7 +135,9 @@ final class Forge1201PreflightAnalyzerTest {
 
         assertEquals(Forge1201PreflightAnalyzer.toJson(first), Forge1201PreflightAnalyzer.toJson(second));
         assertTrue(Forge1201PreflightAnalyzer.toJson(first).contains("\"dynamicReferences\""));
+        assertTrue(Forge1201PreflightAnalyzer.toJson(first).contains("\"memberAnnotations\""));
         assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("Dynamic / bootstrap references:"));
+        assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("Mixin member annotations (0):"));
         assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("Nested class archive scans: 1"));
         assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("Source SRG -> Minecraft 1.20.1 Mojang member names:"));
         assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("not a compatibility approval"));
