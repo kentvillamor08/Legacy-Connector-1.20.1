@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Compatibility Analyzer
 
-**Status:** Slice 1 implemented and archived; Slice 2 host-provider and NeoForge dependency-type corrections are committed as Schema 1.2 / Analyzer 1.2.0; forced local tests, the corrected real-JAR report, and the consolidated clean build are pending
+**Status:** Slice 1 implemented and archived; Slice 2 Schema 1.2 / Analyzer 1.2.0 host-provider and NeoForge dependency-type corrections are committed and the forced loader test gate passed at source HEAD `4ece76833d1614738bc626fe64dbde31e42b8941`; corrected real-JAR report and consolidated clean build remain pending
 
 **Report filename rule:** every analyzer output filename includes its slice number, e.g. `symbiote-1.1.3.jar-slice-2.json` and `symbiote-1.1.3.jar-slice-2.txt`. Repeated runs append a run number, e.g. `symbiote-1.1.3.jar-slice-2-run-2.json` and `.txt`. Use the root Gradle task's explicit `-PpreflightJson=<path>` and `-PpreflightText=<path>` options. Never overwrite the unsuffixed legacy root filenames or an earlier slice/run. The testbench archive index is `archive/preflight/README.md`.
   
@@ -227,24 +227,24 @@ The focused loader tests are confirmed passing as recorded above. Treat the real
 
 **Already completed:** the focused loader tests passed at source HEAD `e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb`. The latest root testbench JSON/text are the actual Slice 2 report and have been parsed/reviewed. They are archived immutably at `archive/preflight/slice-2/`. Do not regenerate or overwrite them.
 
-**Slice 2 correction implementation — committed; local validation pending:**
+**Slice 2 correction implementation — committed; focused loader tests passed:**
 1. `minecraft` and `neoforge` are now treated as host-provided dependencies, not searched for among installed mod archives. Their version ranges are evaluated against target Minecraft `1.21.1` and NeoForge `21.1.258`; an out-of-range host version emits `HOST_VERSION_MISMATCH`. Unknown or qualified ranges remain `UNPARSEABLE`.
 2. NeoForge `neoforge.mods.toml` and Forge `mods.toml` now use separate dependency parsing rules. NeoForge reads `type` and defaults to `REQUIRED` even if a legacy `mandatory=false` key is also present; Forge reads `mandatory=true/false`. The inspector preserves `REQUIRED`, `OPTIONAL`, `INCOMPATIBLE`, `DISCOURAGED`, and `UNKNOWN`. The graph reports incompatible/discouraged presence separately rather than incorrectly treating those relations as required dependencies.
 3. Existing Forge `mandatory=true/false` metadata continues to map to required/optional. The old four-argument archive-graph entry point remains available; the preflight analyzer supplies both target host versions.
 4. Qualified versions such as Rhino `2101.2.8-build.91`, Better Advanced Tooltips `2101.1.0-build.1`, and prerelease NeoForge bounds remain explicitly unverified. Do not silently coerce them to numeric versions.
 
-**Validation still required:** the user must run the forced loader tests, inspect the corrected Schema 1.2 / Analyzer 1.2.0 real-JAR report, and run the consolidated clean build. No successful validation is claimed for this correction yet.
+**Validation result — user-confirmed 2026-11-14:** after a clean fast-forward to `4ece76833d1614738bc626fe64dbde31e42b8941`, the user ran `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks`. Result: `BUILD SUCCESSFUL in 40s`; 12 actionable tasks, all 12 executed. Both production and test sources compiled, `genBetaMappings` completed with 9,243 rows, and the forced loader test task passed. Deprecation warnings were non-fatal. This validates the corrected focused loader test gate only; it does not validate the real-JAR output, consolidated build, or Minecraft runtime/gameplay behavior.
 
-After implementing the fixes, run the forced loader test gate in the Universal worktree on the intended branch, then generate a new report pair using explicit `-PpreflightJson` / `-PpreflightText` paths ending in `symbiote-1.1.3.jar-slice-2-run-3.json` and `symbiote-1.1.3.jar-slice-2-run-3.txt` under the testbench root. The `-run-2` filenames have now been used and must not be overwritten, even though their content was identical to the earlier Slice 2 report. Never overwrite the archived Slice 1 or Slice 2 reports or canonical Slice 2 filenames. When reviewing the rerun, preserve the original Symbiote SHA-256 `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c` and saved input paths from the continuation handoff. Use `-run-4` for any further rerun.
+With the corrected focused loader tests passing, generate a new report pair using explicit `-PpreflightJson` / `-PpreflightText` paths ending in `symbiote-1.1.3.jar-slice-2-run-3.json` and `symbiote-1.1.3.jar-slice-2-run-3.txt` under the testbench root. The `-run-2` filenames have now been used and must not be overwritten, even though their content was identical to the earlier Slice 2 report. Never overwrite the archived Slice 1 or Slice 2 reports or canonical Slice 2 filenames. When reviewing the rerun, preserve the original Symbiote SHA-256 `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c` and saved input paths from the continuation handoff. Use `-run-4` for any further rerun.
 
-If the corrected report is consistent and tests pass, run the consolidated clean build:
+If the corrected report is consistent, run the consolidated clean build:
 ```powershell
 $repo = 'F:\\Program\\intellij-idea-portable\\Legacy-Connector-1.20.1'
 $branch = 'feat/forge1201-preflight-analyzer'
 $actual = (git -C $repo branch --show-current).Trim()
 if ($actual -ne $branch) { throw "Wrong branch: expected $branch, found $actual" }
 $head = (git -C $repo rev-parse HEAD).Trim()
-if ($head -notin @('e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb','aef59d654310abc48ae241c994840c2551908204')) { throw "Unexpected source HEAD: $head" }
+if ($head -ne '4ece76833d1614738bc626fe64dbde31e42b8941') { throw "Unexpected source HEAD: $head" }
 Push-Location $repo
 .\\gradlew.bat :clean :loader:clean :testmods:clean :build :loader:build :testmods:assemble --no-daemon --console=plain
 $buildExit = $LASTEXITCODE
