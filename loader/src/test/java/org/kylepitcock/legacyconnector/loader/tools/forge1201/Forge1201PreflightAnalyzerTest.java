@@ -153,6 +153,7 @@ final class Forge1201PreflightAnalyzerTest {
         assertTrue(references.contains("net/minecraft/world/entity/NewInstructionType"));
         assertTrue(references.contains("net/minecraft/world/item/ArrayInstructionType"));
         assertTrue(references.contains("net/minecraft/world/entity/RecordComponentType"));
+        assertTrue(references.contains("net/minecraft/world/entity/RecordComponentGenericType"));
         assertTrue(references.contains("net/minecraft/world/item/ItemStack"));
         assertTrue(references.contains("net/minecraft/resources/ResourceLocation"));
         assertTrue(references.contains("net/minecraft/client/Minecraft"));
@@ -193,6 +194,10 @@ final class Forge1201PreflightAnalyzerTest {
         assertTrue(result.dynamicReferences().stream().anyMatch(reference ->
                 reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CLASS_LITERAL
                         && reference.context().startsWith("record-component-annotation:")));
+        assertTrue(result.dynamicReferences().stream()
+                .filter(reference -> reference.instructionOrdinal() == -1)
+                .anyMatch(reference -> reference.display().contains("#<class-context>")
+                        && reference.display().contains("non-code context")));
     }
 
     @Test
