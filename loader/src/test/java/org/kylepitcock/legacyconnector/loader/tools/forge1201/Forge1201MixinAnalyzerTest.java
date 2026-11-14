@@ -40,6 +40,7 @@ final class Forge1201MixinAnalyzerTest {
     private static final String AT_DESC = "Lorg/spongepowered/asm/mixin/injection/At;";
     private static final String SLICE_DESC = "Lorg/spongepowered/asm/mixin/injection/Slice;";
     private static final String DESC_DESC = "Lorg/spongepowered/asm/mixin/injection/Desc;";
+    private static final String CONSTANT_DESC = "Lorg/spongepowered/asm/mixin/injection/Constant;";
     private static final String SOURCE_ENTITY = "net/minecraft/world/entity/Entity";
     private static final String SOURCE_LIVING = "net/minecraft/world/entity/LivingEntity";
 
@@ -318,8 +319,10 @@ final class Forge1201MixinAnalyzerTest {
         assertEquals(Forge1201MixinAnalyzer.InjectorResolutionStatus.INVALID_ANNOTATION_PLACEMENT,
                 field.status());
 
-        assertTrue(result.injectors().stream().anyMatch(f ->
-                f.annotationKind() == Forge1201MixinAnalyzer.InjectorAnnotationKind.MODIFY_CONSTANT));
+        var modifyConstant = result.injectors().stream()
+                .filter(f -> f.annotationKind() == Forge1201MixinAnalyzer.InjectorAnnotationKind.MODIFY_CONSTANT)
+                .findFirst().orElseThrow();
+        assertEquals(1, modifyConstant.sliceAnnotationCount());
         assertTrue(result.injectors().stream().anyMatch(f ->
                 f.annotationKind() == Forge1201MixinAnalyzer.InjectorAnnotationKind.MODIFY_ARGS));
     }
@@ -338,7 +341,7 @@ final class Forge1201MixinAnalyzerTest {
                 new String[] {"tick()V", "L" + targetInternalName + ";hurt(D)Z"},
                 false, true, 1, null, true);
         addInjectorMethod(writer, "redirectHurt", "(L" + targetInternalName + ";D)Z", REDIRECT_DESC,
-                new String[] {"redirectTarget(I)V"}, null, true, null, null, false);
+                new String[] {"L" + targetInternalName + ";hurt(D)Z"}, null, true, null, null, false);
         addDescSelectorMethod(writer, "redirectHurtDesc", targetInternalName);
         addInjectorMethod(writer, "modifyOverload", "(I)I", MODIFY_ARG_DESC,
                 new String[] {"overloaded()V", "overloaded(I)V"}, null, false, null, 1, false);
@@ -413,6 +416,13 @@ final class Forge1201MixinAnalyzerTest {
             AnnotationVisitor at = annotation.visitAnnotation("at", AT_DESC);
             at.visit("value", "HEAD");
             at.visitEnd();
+        }
+        if (MODIFY_CONSTANT_DESC.equals(annotationDescriptor)) {
+            AnnotationVisitor constants = annotation.visitArray("constant");
+            AnnotationVisitor constant = constants.visitAnnotation(null, CONSTANT_DESC);
+            constant.visit("intValue", 1);
+            constant.visitEnd();
+            constants.visitEnd();
         }
         if (includeSlice) {
             if (INJECT_DESC.equals(annotationDescriptor) || MODIFY_CONSTANT_DESC.equals(annotationDescriptor)) {
