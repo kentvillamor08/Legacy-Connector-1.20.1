@@ -150,9 +150,10 @@ final class Forge1201MixinAnalyzerTest {
                 .findFirst().orElseThrow();
         assertEquals("shadow$health", shadowField.sourceMemberName());
         assertEquals("D", shadowField.sourceMemberDescriptor());
-        assertEquals("shadow$", shadowField.prefix());
+        assertNull(shadowField.prefix());
         assertEquals(List.of("healthLegacy"), shadowField.aliases());
-        assertEquals(List.of("health", "healthLegacy"), shadowField.targetMemberNameCandidates());
+        assertEquals(List.of("shadow$health", "healthLegacy"), shadowField.targetMemberNameCandidates());
+        assertTrue(shadowField.warnings().stream().anyMatch(warning -> warning.contains("prefixes only apply to shadow methods")));
         assertEquals(Forge1201MixinAnalyzer.MemberResolutionStatus.MEMBER_REMAP_UNRESOLVED,
                 shadowField.status());
 
@@ -169,6 +170,7 @@ final class Forge1201MixinAnalyzerTest {
         assertEquals("tick", overwrite.sourceMemberName());
         assertEquals("(I)V", overwrite.sourceMemberDescriptor());
         assertEquals(List.of("tick", "oldTick"), overwrite.targetMemberNameCandidates());
+        assertEquals("@env(DEFAULT)", overwrite.constraints());
         assertFalse(overwrite.remap());
         assertEquals(Forge1201MixinAnalyzer.MemberResolutionStatus.MEMBER_REMAP_DISABLED_UNVERIFIED,
                 overwrite.status());
@@ -203,6 +205,41 @@ final class Forge1201MixinAnalyzerTest {
         assertTrue(unresolvedAccessor.targetMemberNameCandidates().isEmpty());
         assertEquals(Forge1201MixinAnalyzer.MemberResolutionStatus.INVALID_MEMBER_SELECTOR,
                 unresolvedAccessor.status());
+    }
+
+
+    @Test
+    void memberRemapDefaultsToMixinRemapButCanBeExplicitlyReenabled() throws Exception {
+        String configPath = "mixins.remap.json";
+        Path jar = writeJar("mixin-remap-defaults.jar", Map.of(
+                configPath, """
+                        {"package":"com.example.mixins","mixins":["RemapMixin"]}
+                        """.getBytes(StandardCharsets.UTF_8),
+                "com/example/mixins/RemapMixin.class",
+                mixinRemapClass("com/example/mixins/RemapMixin")));
+
+        var result = Forge1201MixinAnalyzer.analyze(
+                jar,
+                List.of(new Forge1201MixinAnalyzer.ConfigDeclaration(
+                        configPath, Forge1201MixinAnalyzer.DiscoverySource.MANIFEST)),
+                emptyTargetIndex(),
+                Map.of(),
+                "no-member-mapping-supplied");
+
+        assertEquals(2, result.memberAnnotations().size());
+        var inheritedFalse = result.memberAnnotations().stream()
+                .filter(finding -> finding.sourceMemberName().equals("tick"))
+                .findFirst().orElseThrow();
+        assertFalse(inheritedFalse.remap());
+        assertEquals(Forge1201MixinAnalyzer.MemberResolutionStatus.MEMBER_REMAP_DISABLED_UNVERIFIED,
+                inheritedFalse.status());
+
+        var explicitTrue = result.memberAnnotations().stream()
+                .filter(finding -> finding.sourceMemberName().equals("forceRemap"))
+                .findFirst().orElseThrow();
+        assertTrue(explicitTrue.remap());
+        assertEquals(Forge1201MixinAnalyzer.MemberResolutionStatus.MEMBER_REMAP_UNRESOLVED,
+                explicitTrue.status());
     }
 
     @Test
@@ -355,6 +392,25 @@ final class Forge1201MixinAnalyzerTest {
     }
 
 
+
+    private static byte[] mixinRemapClass(String internalName) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, internalName, null, "java/lang/Object", null);
+
+        AnnotationVisitor mixin = writer.visitAnnotation(MIXIN_DESC, true);
+        AnnotationVisitor targets = mixin.visitArray("targets");
+        targets.visit(null, "net.minecraft.world.entity.Entity");
+        targets.visitEnd();
+        mixin.visit("remap", false);
+        mixin.visitEnd();
+
+        addAnnotatedMethod(writer, "tick", "()V", OVERWRITE_DESC, null, null, null, null);
+        addAnnotatedMethod(writer, "forceRemap", "()V", OVERWRITE_DESC, null, null, null, true);
+
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
     private static byte[] memberMixinClass(String internalName, String targetInternalName) {
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, internalName, null, "java/lang/Object", null);
@@ -405,6 +461,9 @@ final class Forge1201MixinAnalyzerTest {
             AnnotationVisitor aliasValues = annotation.visitArray("aliases");
             for (String alias : aliases) aliasValues.visit(null, alias);
             aliasValues.visitEnd();
+        }
+        if (OVERWRITE_DESC.equals(annotationDescriptor)) {
+            annotation.visit("constraints", "@env(DEFAULT)");
         }
         annotation.visitEnd();
 
