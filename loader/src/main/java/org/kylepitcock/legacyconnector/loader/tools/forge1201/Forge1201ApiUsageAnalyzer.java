@@ -740,24 +740,31 @@ public final class Forge1201ApiUsageAnalyzer {
 
                     private AnnotationVisitor recordingAnnotation(
                             String context, String callerClass, String callerMethod, String callerDescriptor) {
+                        return recordingAnnotation(context, callerClass, callerMethod, callerDescriptor, -1);
+                    }
+
+                    private AnnotationVisitor recordingAnnotation(
+                            String context, String callerClass, String callerMethod,
+                            String callerDescriptor, int instructionOrdinal) {
                         return new AnnotationVisitor(Opcodes.ASM9) {
                             @Override
                             public void visit(String name, Object value) {
                                 references.recordDynamicValue(archivePath, classEntryPath,
                                         callerClass, callerMethod, callerDescriptor,
-                                        context + "/" + (name == null ? "<value>" : name), value, -1, 0);
+                                        context + "/" + (name == null ? "<value>" : name),
+                                        value, instructionOrdinal, 0);
                             }
 
                             @Override
                             public AnnotationVisitor visitAnnotation(String name, String descriptor) {
                                 return recordingAnnotation(context + "/" + name + "@" + descriptor,
-                                        callerClass, callerMethod, callerDescriptor);
+                                        callerClass, callerMethod, callerDescriptor, instructionOrdinal);
                             }
 
                             @Override
                             public AnnotationVisitor visitArray(String name) {
                                 return recordingAnnotation(context + "/" + (name == null ? "<array>" : name),
-                                        callerClass, callerMethod, callerDescriptor);
+                                        callerClass, callerMethod, callerDescriptor, instructionOrdinal);
                             }
                         };
                     }
@@ -868,7 +875,8 @@ public final class Forge1201ApiUsageAnalyzer {
                                     int typeRef, org.objectweb.asm.TypePath typePath,
                                     String annotationDescriptor, boolean visible) {
                                 return recordingAnnotation("instruction-annotation:" + annotationDescriptor,
-                                        callerClass, callerMethod, callerDescriptor);
+                                        callerClass, callerMethod, callerDescriptor,
+                                        Math.max(0, instructionOrdinal - 1));
                             }
 
                             @Override
