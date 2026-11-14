@@ -616,7 +616,7 @@ public final class Forge1201ApiUsageAnalyzer {
                                     references.recordDynamic(archivePath, classEntryPath,
                                             callerClass, callerMethod, callerDescriptor,
                                             ApiDynamicReferenceKind.INVOKEDYNAMIC_SITE, "instruction",
-                                            null, targetName, targetDescriptor, -1, ordinal);
+                                            null, targetName, targetDescriptor, -1, false, ordinal);
                                     references.recordHandle(archivePath, classEntryPath,
                                             callerClass, callerMethod, callerDescriptor,
                                             "invokedynamic-bootstrap", bootstrapMethodHandle, ordinal);
