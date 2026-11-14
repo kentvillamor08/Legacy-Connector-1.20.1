@@ -4,6 +4,8 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -32,11 +34,13 @@ import java.util.zip.ZipFile;
  * inspect them, validate mixin injection semantics, or prove runtime compatibility.</p>
  */
 public final class Forge1201PreflightAnalyzer {
-    public static final String SCHEMA_VERSION = "1.3";
-    public static final String ANALYZER_VERSION = "1.3.0";
+    public static final String SCHEMA_VERSION = "1.4";
+    public static final String ANALYZER_VERSION = "1.4.0";
     public static final String TARGET_MINECRAFT_VERSION = "1.21.1";
     public static final String TARGET_NEOFORGE_VERSION = "21.1.258";
     private static final int MAX_MIXIN_JSON_BYTES = 1024 * 1024;
+    private static final int MAX_TARGET_CLASSPATH_ENTRIES = 4096;
+    private static final long MAX_TARGET_CLASSPATH_FILE_BYTES = 4L * 1024 * 1024;
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
 
     private Forge1201PreflightAnalyzer() {}
@@ -107,6 +111,7 @@ public final class Forge1201PreflightAnalyzer {
             List<String> resourceNamespaces,
             Map<String, String> manifestAttributes,
             List<MixinConfigCandidate> mixinConfigCandidates,
+            Forge1201MixinAnalyzer.Result mixinAnalysis,
             String coreModClass,
             List<String> jarInJarPaths,
             int classCount,
@@ -151,8 +156,19 @@ public final class Forge1201PreflightAnalyzer {
         }
     }
 
-    /** Inspects one source archive. Installed native-mod directories are optional. */
+    /** Inspects one source archive. Installed native-mod directories and target classpath are optional. */
     public static PreflightResult analyze(Path jarPath, Collection<Path> installedModDirectories) throws IOException {
+        return analyze(jarPath, installedModDirectories, List.of());
+    }
+
+    /**
+     * Inspects one source archive. Target classpath entries are used only as class resources; target
+     * classes are never defined, initialized, or executed by the analyzer.
+     */
+    public static PreflightResult analyze(
+            Path jarPath,
+            Collection<Path> installedModDirectories,
+            Collection<Path> targetClasspath) throws IOException {
         if (jarPath == null || !Files.isRegularFile(jarPath)) {
             throw new IllegalArgumentException("Preflight input must be an existing JAR file: " + jarPath);
         }
@@ -162,6 +178,17 @@ public final class Forge1201PreflightAnalyzer {
                 : installedModDirectories.stream().filter(java.util.Objects::nonNull)
                         .map(path -> path.toAbsolutePath().normalize())
                         .sorted(Comparator.comparing(Path::toString)).toList();
+        List<Path> normalizedTargetClasspath = targetClasspath == null ? List.of()
+                : targetClasspath.stream().filter(java.util.Objects::nonNull)
+                        .map(path -> path.toAbsolutePath().normalize()).distinct().toList();
+        if (normalizedTargetClasspath.size() > MAX_TARGET_CLASSPATH_ENTRIES) {
+            throw new IllegalArgumentException("Target classpath exceeds " + MAX_TARGET_CLASSPATH_ENTRIES + " entries");
+        }
+        for (Path entry : normalizedTargetClasspath) {
+            if (!Files.exists(entry) || (!Files.isDirectory(entry) && !Files.isRegularFile(entry))) {
+                throw new IllegalArgumentException("Target classpath entry does not exist or is not a file/directory: " + entry);
+            }
+        }
 
         Map<String, String> manifest = readManifest(jar);
         List<String> manifestMixins = splitCommaList(valueIgnoreCase(manifest, "MixinConfigs"));
@@ -316,20 +343,38 @@ public final class Forge1201PreflightAnalyzer {
             analysisStatus = AnalysisStatus.BYTECODE_INVENTORY_RAN_FOR_RECOGNIZED_OUTER_JAR;
         }
 
-        Map<String, String> mixinSources = new TreeMap<>();
-        manifestMixins.forEach(path -> mixinSources.put(path, "manifest MixinConfigs attribute"));
+        Map<String, Set<Forge1201MixinAnalyzer.DiscoverySource>> mixinSources = new TreeMap<>();
+        manifestMixins.forEach(path -> mixinSources.computeIfAbsent(path, ignored -> new TreeSet<>())
+                .add(Forge1201MixinAnalyzer.DiscoverySource.MANIFEST));
         try (ZipFile zip = new ZipFile(jar.toFile())) {
             var entries = zip.entries();
             while (entries.hasMoreElements()) {
                 ZipEntry entry = entries.nextElement();
                 if (entry.isDirectory() || !entry.getName().toLowerCase(Locale.ROOT).endsWith(".json")) continue;
                 if (isMixinPathCandidate(entry.getName()) || looksLikeMixinConfig(zip, entry)) {
-                    mixinSources.putIfAbsent(entry.getName(), "resource path/content heuristic");
+                    mixinSources.computeIfAbsent(entry.getName(), ignored -> new TreeSet<>())
+                            .add(Forge1201MixinAnalyzer.DiscoverySource.RESOURCE_HEURISTIC);
                 }
             }
         }
         List<MixinConfigCandidate> mixinCandidates = mixinSources.entrySet().stream()
-                .map(entry -> new MixinConfigCandidate(entry.getKey(), entry.getValue())).toList();
+                .map(entry -> new MixinConfigCandidate(entry.getKey(), entry.getValue().stream()
+                        .map(Forge1201PreflightAnalyzer::mixinDiscoveryLabel)
+                        .collect(java.util.stream.Collectors.joining("; "))))
+                .toList();
+        List<Forge1201MixinAnalyzer.ConfigDeclaration> mixinDeclarations = mixinSources.entrySet().stream()
+                .flatMap(entry -> entry.getValue().stream()
+                        .map(source -> new Forge1201MixinAnalyzer.ConfigDeclaration(entry.getKey(), source)))
+                .toList();
+        Forge1201MixinAnalyzer.Result mixinAnalysis;
+        try (URLClassLoader targetLoader = createTargetClassLoader(normalizedTargetClasspath)) {
+            Forge1201TargetApiVerifier.TargetIndex targetIndex = targetLoader == null ? null
+                    : Forge1201TargetApiVerifier.createIndex(internalName ->
+                            targetLoader.getResourceAsStream(internalName + ".class"));
+            // No 1.20.1 -> 1.21.1 Minecraft class map is supplied yet; Mojang names are never assumed identical.
+            mixinAnalysis = Forge1201MixinAnalyzer.analyze(
+                    jar, mixinDeclarations, targetIndex, Map.of(), "not-supplied");
+        }
 
         List<String> observedNativeIds = nativeIds.stream().sorted().toList();
         List<String> limitations = List.of(
@@ -337,7 +382,8 @@ public final class Forge1201PreflightAnalyzer {
                 "Slice 3 inventories bytecode in the outer source JAR and bounded, safe source-nested Forge/library archives. Installed provider JAR bytecode and embedded native NeoForge mod bytecode are intentionally excluded.",
                 "Source Minecraft SRG member names are normalized to 1.20.1 Mojang names where the generated mapping table has an entry; missing entries remain explicitly UNMAPPED. This source-name normalization is not a 1.21.1 target API or semantic compatibility verdict.",
                 "Nested archive traversal is bounded by depth, archive count, per-archive size, and total inflated-byte limits. Class capture is bounded to 8 MiB per class, 16 MiB per nested archive, 128 MiB aggregate nested class bytes submitted, and 64 MiB aggregate outer class bytes. Archives/classes skipped by a limit or rejected as unsafe/corrupt remain explicit findings.",
-                "Mixin discovery uses manifest declarations and resource path/content heuristics. Injection targets, handler descriptors, slices, refmaps, and dynamic plugins are not validated in Slice 3.",
+                "Mixin configs discovered by the manifest and outer-archive resource heuristics are parsed in Schema 1.4. Target-class presence is checked only when the root project's resolved target compile classpath is supplied; no 1.20.1-to-1.21.1 Minecraft class identity mapping is assumed.",
+                "Mixin analysis currently covers outer-archive configs, mixin class entries, and statically readable @Mixin class targets. Source-nested JAR config/class provenance, member annotations, injector handlers, @At/@Slice semantics, and semantic refmap remapping remain future increments. Mixin plugin classes are inventoried as resources but never executed.",
                 "Reflection/resource string candidates remain heuristic and are not treated as confirmed bytecode references.",
                 "Installed provider discovery records top-level and nested archive paths, mod IDs, and declared versions. A provider ID/version match does not establish API or behavioral compatibility; installed version ranges and API compatibility are not verified.",
                 "Maven-style version ranges with numeric dotted versions are evaluated conservatively. Qualified or otherwise unsupported version strings remain explicitly unverified.",
@@ -349,7 +395,7 @@ public final class Forge1201PreflightAnalyzer {
                 TARGET_MINECRAFT_VERSION, TARGET_NEOFORGE_VERSION, forgeMetadata, metadataStatus, analysisStatus,
                 metadataWarnings.stream().distinct().sorted().toList(), mods, duplicateModIds, dependencies,
                 archiveEntries.size(), archiveEntries, resourceNamespaces.stream().toList(), manifest,
-                mixinCandidates, coreModClass, jarInJarPaths.stream().toList(), classCount,
+                mixinCandidates, mixinAnalysis, coreModClass, jarInJarPaths.stream().toList(), classCount,
                 outerClassScannedCount, entrypoints, packageReferences, apiTypes, methodReferences,
                 fieldReferences, methodCallSites, fieldCallSites, dynamicReferences, nestedClassCount,
                 nestedClassScannedCount, normalizedMemberReferences, classScanWarnings,
@@ -405,6 +451,30 @@ public final class Forge1201PreflightAnalyzer {
         for (MixinConfigCandidate candidate : result.mixinConfigCandidates()) {
             out.append("  ").append(candidate.path()).append(" (").append(candidate.discoveredBy()).append(")\n");
         }
+        Forge1201MixinAnalyzer.Result mixins = result.mixinAnalysis();
+        out.append("\nMixin analysis (").append(mixins.configs().size()).append(" configs, ")
+                .append(mixins.mixinClasses().size()).append(" mixin classes, ")
+                .append(mixins.targets().size()).append(" target selectors): target index=")
+                .append(mixins.targetIndexStatus()).append(", class map=").append(mixins.classMappingVersion())
+                .append('\n');
+        for (Forge1201MixinAnalyzer.ConfigFinding finding : mixins.configs()) {
+            out.append("  config ").append(finding.configPath()).append(" [").append(finding.status())
+                    .append(", discovered by ").append(finding.discoverySources()).append("]\n");
+            finding.warnings().forEach(warning -> out.append("    warning: ").append(warning).append('\n'));
+        }
+        for (Forge1201MixinAnalyzer.MixinClassFinding finding : mixins.mixinClasses()) {
+            out.append("  mixin ").append(finding.mixinClassName()).append(" [").append(finding.status())
+                    .append(", section=").append(finding.section()).append("]\n");
+            finding.warnings().forEach(warning -> out.append("    warning: ").append(warning).append('\n'));
+        }
+        for (Forge1201MixinAnalyzer.TargetFinding finding : mixins.targets()) {
+            out.append("  target ").append(finding.sourceTargetInternalName()).append(" -> ")
+                    .append(finding.targetInternalName() == null ? "unresolved" : finding.targetInternalName())
+                    .append(" [").append(finding.status()).append(", remap=").append(finding.remap())
+                    .append(", plugin-dependent=").append(finding.pluginDependent()).append("] ")
+                    .append(finding.evidence()).append('\n');
+        }
+        mixins.warnings().forEach(warning -> out.append("  warning: ").append(warning).append('\n'));
         out.append("Jar-in-Jar archive paths: ")
                 .append(result.jarInJarPaths().isEmpty() ? "none" : String.join(", ", result.jarInJarPaths())).append('\n');
         Forge1201ArchiveGraph.Result graph = result.archiveGraph();
@@ -634,6 +704,50 @@ public final class Forge1201PreflightAnalyzer {
         return -1;
     }
 
+    private static URLClassLoader createTargetClassLoader(List<Path> classpathEntries) throws IOException {
+        if (classpathEntries.isEmpty()) return null;
+        URL[] urls = new URL[classpathEntries.size()];
+        for (int i = 0; i < classpathEntries.size(); i++) {
+            urls[i] = classpathEntries.get(i).toUri().toURL();
+        }
+        // Resource lookup only: callers use getResourceAsStream and never invoke loadClass.
+        return new URLClassLoader(urls, ClassLoader.getPlatformClassLoader());
+    }
+
+    private static List<Path> readTargetClasspathFile(Path classpathFile) throws IOException {
+        if (classpathFile == null) return List.of();
+        if (!Files.isRegularFile(classpathFile)) {
+            throw new IllegalArgumentException("Target classpath list is not a file: " + classpathFile);
+        }
+        if (Files.size(classpathFile) > MAX_TARGET_CLASSPATH_FILE_BYTES) {
+            throw new IllegalArgumentException("Target classpath list exceeds "
+                    + MAX_TARGET_CLASSPATH_FILE_BYTES + " bytes");
+        }
+        Set<Path> entries = new java.util.LinkedHashSet<>();
+        for (String line : Files.readAllLines(classpathFile, StandardCharsets.UTF_8)) {
+            String value = line.trim();
+            if (value.isEmpty()) continue;
+            Path entry = Path.of(value).toAbsolutePath().normalize();
+            if (!Files.exists(entry) || (!Files.isDirectory(entry) && !Files.isRegularFile(entry))) {
+                throw new IllegalArgumentException("Target classpath entry does not exist or is not a file/directory: " + entry);
+            }
+            entries.add(entry);
+            if (entries.size() > MAX_TARGET_CLASSPATH_ENTRIES) {
+                throw new IllegalArgumentException("Target classpath exceeds "
+                        + MAX_TARGET_CLASSPATH_ENTRIES + " entries");
+            }
+        }
+        return List.copyOf(entries);
+    }
+
+    private static String mixinDiscoveryLabel(Forge1201MixinAnalyzer.DiscoverySource source) {
+        return switch (source) {
+            case MANIFEST -> "manifest MixinConfigs attribute";
+            case FORGE_METADATA -> "Forge metadata";
+            case RESOURCE_HEURISTIC -> "resource path/content heuristic";
+        };
+    }
+
     private static String conciseMessage(Throwable throwable) {
         String message = throwable.getMessage();
         return message == null || message.isBlank() ? throwable.getClass().getSimpleName() : message;
@@ -659,13 +773,15 @@ public final class Forge1201PreflightAnalyzer {
         Files.writeString(absolute, content, StandardCharsets.UTF_8);
     }
 
-    /** CLI: <jar> [--mods-dir <directory>]... [--json <path>] [--text <path>] */
+    /** CLI: <jar> [--mods-dir <directory>]... [--target-classpath-file <path>] [--json <path>] [--text <path>] */
     public static void main(String[] args) throws IOException {
         if (args.length < 1) {
-            throw new IllegalArgumentException("Usage: <jar> [--mods-dir <directory>]... [--json <path>] [--text <path>]");
+            throw new IllegalArgumentException("Usage: <jar> [--mods-dir <directory>]... "
+                    + "[--target-classpath-file <path>] [--json <path>] [--text <path>]");
         }
         Path jar = Path.of(args[0]);
         List<Path> modDirectories = new ArrayList<>();
+        Path targetClasspathFile = null;
         Path json = null;
         Path text = null;
         for (int i = 1; i < args.length; i++) {
@@ -674,12 +790,13 @@ public final class Forge1201PreflightAnalyzer {
             Path value = Path.of(args[i]);
             switch (option) {
                 case "--mods-dir" -> modDirectories.add(value);
+                case "--target-classpath-file" -> targetClasspathFile = value;
                 case "--json" -> json = value;
                 case "--text" -> text = value;
                 default -> throw new IllegalArgumentException("Unknown preflight option: " + option);
             }
         }
-        PreflightResult result = analyze(jar, modDirectories);
+        PreflightResult result = analyze(jar, modDirectories, readTargetClasspathFile(targetClasspathFile));
         if (json != null) write(json, toJson(result));
         if (text != null) write(text, toText(result));
         if (json == null && text == null) {
