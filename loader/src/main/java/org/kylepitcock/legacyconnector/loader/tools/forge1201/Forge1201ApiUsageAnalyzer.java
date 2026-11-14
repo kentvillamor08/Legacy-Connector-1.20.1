@@ -104,6 +104,7 @@ public final class Forge1201ApiUsageAnalyzer {
             String name,
             String descriptor,
             int handleTag,
+            boolean interfaceOwner,
             int instructionOrdinal,
             int count) {
         public String display() {
@@ -128,6 +129,7 @@ public final class Forge1201ApiUsageAnalyzer {
             String name,
             String descriptor,
             int handleTag,
+            boolean interfaceOwner,
             int instructionOrdinal) {}
 
     private record CallSiteKey(
@@ -216,10 +218,11 @@ public final class Forge1201ApiUsageAnalyzer {
                 String name,
                 String descriptor,
                 int handleTag,
+                boolean interfaceOwner,
                 int instructionOrdinal) {
             DynamicReferenceKey key = new DynamicReferenceKey(
                     archivePath, classEntryPath, callerClass, callerMethod, callerDescriptor,
-                    kind, context, owner, name, descriptor, handleTag, instructionOrdinal);
+                    kind, context, owner, name, descriptor, handleTag, interfaceOwner, instructionOrdinal);
             dynamicReferences.merge(key, 1, Integer::sum);
         }
 
@@ -240,7 +243,7 @@ public final class Forge1201ApiUsageAnalyzer {
             recordDynamic(archivePath, classEntryPath, callerClass, callerMethod, callerDescriptor,
                     fieldHandle ? ApiDynamicReferenceKind.FIELD_HANDLE : ApiDynamicReferenceKind.METHOD_HANDLE,
                     context, handle.getOwner(), handle.getName(), handle.getDesc(),
-                    handle.getTag(), instructionOrdinal);
+                    handle.getTag(), handle.isInterface(), instructionOrdinal);
         }
 
         private void recordDynamicValue(
@@ -264,7 +267,7 @@ public final class Forge1201ApiUsageAnalyzer {
                     if (containsGameApiType(type)) {
                         recordDynamic(archivePath, classEntryPath, callerClass, callerMethod, callerDescriptor,
                                 ApiDynamicReferenceKind.METHOD_TYPE, context, null, null,
-                                type.getDescriptor(), -1, instructionOrdinal);
+                                type.getDescriptor(), -1, false, instructionOrdinal);
                     }
                 } else {
                     org.objectweb.asm.Type element = type.getSort() == org.objectweb.asm.Type.ARRAY
@@ -273,7 +276,7 @@ public final class Forge1201ApiUsageAnalyzer {
                             && (isGameApi(element.getInternalName()) || isForgeOrOptionalApi(element.getInternalName()))) {
                         recordDynamic(archivePath, classEntryPath, callerClass, callerMethod, callerDescriptor,
                                 ApiDynamicReferenceKind.CLASS_LITERAL, context, element.getInternalName(), null,
-                                type.getDescriptor(), -1, instructionOrdinal);
+                                type.getDescriptor(), -1, false, instructionOrdinal);
                     }
                 }
                 return;
@@ -281,7 +284,7 @@ public final class Forge1201ApiUsageAnalyzer {
             if (value instanceof org.objectweb.asm.ConstantDynamic constant) {
                 recordDynamic(archivePath, classEntryPath, callerClass, callerMethod, callerDescriptor,
                         ApiDynamicReferenceKind.CONSTANT_DYNAMIC, context, null, constant.getName(),
-                        constant.getDescriptor(), -1, instructionOrdinal);
+                        constant.getDescriptor(), -1, false, instructionOrdinal);
                 recordHandle(archivePath, classEntryPath, callerClass, callerMethod, callerDescriptor,
                         context + "/bootstrap", constant.getBootstrapMethod(), instructionOrdinal);
                 for (int i = 0; i < constant.getBootstrapMethodArgumentCount(); i++) {
@@ -450,7 +453,7 @@ public final class Forge1201ApiUsageAnalyzer {
                             entry.getKey().callerDescriptor(), entry.getKey().kind(),
                             entry.getKey().context(), entry.getKey().owner(), entry.getKey().name(),
                             entry.getKey().descriptor(), entry.getKey().handleTag(),
-                            entry.getKey().instructionOrdinal(), entry.getValue()))
+                            entry.getKey().interfaceOwner(), entry.getKey().instructionOrdinal(), entry.getValue()))
                     .sorted(Comparator.comparing(ApiDynamicReference::archivePath)
                             .thenComparing(ApiDynamicReference::classEntryPath)
                             .thenComparing(ApiDynamicReference::callerClass)
@@ -462,6 +465,7 @@ public final class Forge1201ApiUsageAnalyzer {
                             .thenComparing(reference -> reference.name() == null ? "" : reference.name())
                             .thenComparing(reference -> reference.descriptor() == null ? "" : reference.descriptor())
                             .thenComparingInt(ApiDynamicReference::handleTag)
+                            .thenComparing(ApiDynamicReference::interfaceOwner)
                             .thenComparingInt(ApiDynamicReference::instructionOrdinal))
                     .toList();
         }
@@ -540,6 +544,7 @@ public final class Forge1201ApiUsageAnalyzer {
                 classCount++;
                 try (var in = zip.getInputStream(entry)) {
                     ClassReader reader = new ClassReader(in);
+                    String classEntryPath = entry.getName();
                     reader.accept(new ClassRemapper(new ClassVisitor(Opcodes.ASM9) {
                         private String className;
 
@@ -558,7 +563,6 @@ public final class Forge1201ApiUsageAnalyzer {
                             String callerClass = className;
                             String callerMethod = name;
                             String callerDescriptor = descriptor;
-                            String classEntryPath = entry.getName();
                             return new MethodVisitor(Opcodes.ASM9) {
                                 private int instructionOrdinal;
 
