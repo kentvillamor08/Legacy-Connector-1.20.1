@@ -20,11 +20,17 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.objectweb.asm.AnnotationVisitor;
 import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.FieldVisitor;
+import org.objectweb.asm.MethodVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 
 final class Forge1201MixinAnalyzerTest {
     private static final String MIXIN_DESC = "Lorg/spongepowered/asm/mixin/Mixin;";
+    private static final String SHADOW_DESC = "Lorg/spongepowered/asm/mixin/Shadow;";
+    private static final String OVERWRITE_DESC = "Lorg/spongepowered/asm/mixin/Overwrite;";
+    private static final String ACCESSOR_DESC = "Lorg/spongepowered/asm/mixin/gen/Accessor;";
+    private static final String INVOKER_DESC = "Lorg/spongepowered/asm/mixin/gen/Invoker;";
     private static final String SOURCE_ENTITY = "net/minecraft/world/entity/Entity";
     private static final String SOURCE_LIVING = "net/minecraft/world/entity/LivingEntity";
 
@@ -111,6 +117,92 @@ final class Forge1201MixinAnalyzerTest {
                 target.selectorForm() == Forge1201MixinAnalyzer.TargetSelectorForm.STRING_TARGET));
         assertEquals("synthetic-mc-class-map-v1", result.targets().getFirst().mappingVersion());
         assertFalse(targetRequests.contains("com/example/Plugin"));
+    }
+
+
+    @Test
+    void inventoriesDescriptorAwareMixinMemberAnnotationsWithoutClaimingTargetPresence() throws Exception {
+        String configPath = "mixins.members.json";
+        Path jar = writeJar("member-annotations.jar", Map.of(
+                configPath, """
+                        {"package":"com.example.mixins","mixins":["MemberMixin"]}
+                        """.getBytes(StandardCharsets.UTF_8),
+                "com/example/mixins/MemberMixin.class",
+                memberMixinClass("com/example/mixins/MemberMixin", SOURCE_ENTITY)));
+
+        var result = Forge1201MixinAnalyzer.analyze(
+                jar,
+                List.of(new Forge1201MixinAnalyzer.ConfigDeclaration(
+                        configPath, Forge1201MixinAnalyzer.DiscoverySource.MANIFEST)),
+                emptyTargetIndex(),
+                Map.of(),
+                "no-member-mapping-supplied");
+
+        assertEquals(7, result.memberAnnotations().size());
+        assertTrue(result.memberAnnotations().stream().allMatch(finding ->
+                finding.configPath().equals(configPath)
+                        && finding.mixinClassName().equals("com.example.mixins.MemberMixin")
+                        && finding.sourceTargetInternalNames().equals(List.of(SOURCE_ENTITY))));
+
+        var shadowField = result.memberAnnotations().stream()
+                .filter(finding -> finding.annotationKind() == Forge1201MixinAnalyzer.MemberAnnotationKind.SHADOW
+                        && finding.elementKind() == Forge1201MixinAnalyzer.MemberElementKind.FIELD)
+                .findFirst().orElseThrow();
+        assertEquals("shadow$health", shadowField.sourceMemberName());
+        assertEquals("D", shadowField.sourceMemberDescriptor());
+        assertEquals("shadow$", shadowField.prefix());
+        assertEquals(List.of("healthLegacy"), shadowField.aliases());
+        assertEquals(List.of("health", "healthLegacy"), shadowField.targetMemberNameCandidates());
+        assertEquals(Forge1201MixinAnalyzer.MemberResolutionStatus.MEMBER_REMAP_UNRESOLVED,
+                shadowField.status());
+
+        var shadowMethod = result.memberAnnotations().stream()
+                .filter(finding -> finding.annotationKind() == Forge1201MixinAnalyzer.MemberAnnotationKind.SHADOW
+                        && finding.elementKind() == Forge1201MixinAnalyzer.MemberElementKind.METHOD)
+                .findFirst().orElseThrow();
+        assertEquals("(I)V", shadowMethod.sourceMemberDescriptor());
+        assertEquals(List.of("heal", "healLegacy"), shadowMethod.targetMemberNameCandidates());
+
+        var overwrite = result.memberAnnotations().stream()
+                .filter(finding -> finding.annotationKind() == Forge1201MixinAnalyzer.MemberAnnotationKind.OVERWRITE)
+                .findFirst().orElseThrow();
+        assertEquals("tick", overwrite.sourceMemberName());
+        assertEquals("(I)V", overwrite.sourceMemberDescriptor());
+        assertEquals(List.of("tick", "oldTick"), overwrite.targetMemberNameCandidates());
+        assertFalse(overwrite.remap());
+        assertEquals(Forge1201MixinAnalyzer.MemberResolutionStatus.MEMBER_REMAP_DISABLED_UNVERIFIED,
+                overwrite.status());
+
+        var getter = result.memberAnnotations().stream()
+                .filter(finding -> finding.annotationKind() == Forge1201MixinAnalyzer.MemberAnnotationKind.ACCESSOR
+                        && finding.sourceMemberName().equals("getHealth"))
+                .findFirst().orElseThrow();
+        assertEquals("()D", getter.sourceMemberDescriptor());
+        assertEquals("GETTER", getter.operation());
+        assertEquals(List.of("health"), getter.targetMemberNameCandidates());
+
+        var setter = result.memberAnnotations().stream()
+                .filter(finding -> finding.annotationKind() == Forge1201MixinAnalyzer.MemberAnnotationKind.ACCESSOR
+                        && finding.sourceMemberName().equals("setHealth"))
+                .findFirst().orElseThrow();
+        assertEquals("(D)V", setter.sourceMemberDescriptor());
+        assertEquals("SETTER", setter.operation());
+        assertEquals("health", setter.explicitValue());
+
+        var invoker = result.memberAnnotations().stream()
+                .filter(finding -> finding.annotationKind() == Forge1201MixinAnalyzer.MemberAnnotationKind.INVOKER)
+                .findFirst().orElseThrow();
+        assertEquals("callHeal", invoker.sourceMemberName());
+        assertEquals("(I)V", invoker.sourceMemberDescriptor());
+        assertEquals("METHOD", invoker.operation());
+        assertEquals(List.of("heal"), invoker.targetMemberNameCandidates());
+
+        var unresolvedAccessor = result.memberAnnotations().stream()
+                .filter(finding -> finding.sourceMemberName().equals("fetchHealth"))
+                .findFirst().orElseThrow();
+        assertTrue(unresolvedAccessor.targetMemberNameCandidates().isEmpty());
+        assertEquals(Forge1201MixinAnalyzer.MemberResolutionStatus.INVALID_MEMBER_SELECTOR,
+                unresolvedAccessor.status());
     }
 
     @Test
@@ -260,6 +352,89 @@ final class Forge1201MixinAnalyzerTest {
             }
         }
         return path;
+    }
+
+
+    private static byte[] memberMixinClass(String internalName, String targetInternalName) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, internalName, null, "java/lang/Object", null);
+
+        AnnotationVisitor mixin = writer.visitAnnotation(MIXIN_DESC, true);
+        AnnotationVisitor targets = mixin.visitArray("value");
+        targets.visit(null, Type.getObjectType(targetInternalName));
+        targets.visitEnd();
+        mixin.visitEnd();
+
+        FieldVisitor shadowField = writer.visitField(Opcodes.ACC_PRIVATE, "shadow$health", "D", null, null);
+        AnnotationVisitor shadowFieldAnnotation = shadowField.visitAnnotation(SHADOW_DESC, false);
+        shadowFieldAnnotation.visit("prefix", "shadow$");
+        AnnotationVisitor fieldAliases = shadowFieldAnnotation.visitArray("aliases");
+        fieldAliases.visit(null, "healthLegacy");
+        fieldAliases.visitEnd();
+        shadowFieldAnnotation.visitEnd();
+        shadowField.visitEnd();
+
+        addAnnotatedMethod(writer, "shadow$heal", "(I)V", SHADOW_DESC,
+                null, "shadow$", new String[] {"healLegacy"}, null);
+        addAnnotatedMethod(writer, "tick", "(I)V", OVERWRITE_DESC,
+                null, null, new String[] {"oldTick"}, false);
+        addAnnotatedMethod(writer, "getHealth", "()D", ACCESSOR_DESC, null, null, null, null);
+        addAnnotatedMethod(writer, "setHealth", "(D)V", ACCESSOR_DESC, "health", null, null, null);
+        addAnnotatedMethod(writer, "callHeal", "(I)V", INVOKER_DESC, null, null, null, null);
+        addAnnotatedMethod(writer, "fetchHealth", "()D", ACCESSOR_DESC, null, null, null, null);
+
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static void addAnnotatedMethod(
+            ClassWriter writer,
+            String name,
+            String descriptor,
+            String annotationDescriptor,
+            String value,
+            String prefix,
+            String[] aliases,
+            Boolean remap) {
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, name, descriptor, null, null);
+        AnnotationVisitor annotation = method.visitAnnotation(annotationDescriptor, false);
+        if (value != null) annotation.visit("value", value);
+        if (prefix != null) annotation.visit("prefix", prefix);
+        if (remap != null) annotation.visit("remap", remap);
+        if (aliases != null) {
+            AnnotationVisitor aliasValues = annotation.visitArray("aliases");
+            for (String alias : aliases) aliasValues.visit(null, alias);
+            aliasValues.visitEnd();
+        }
+        annotation.visitEnd();
+
+        method.visitCode();
+        switch (Type.getReturnType(descriptor).getSort()) {
+            case Type.VOID -> method.visitInsn(Opcodes.RETURN);
+            case Type.BOOLEAN, Type.BYTE, Type.CHAR, Type.SHORT, Type.INT -> {
+                method.visitInsn(Opcodes.ICONST_0);
+                method.visitInsn(Opcodes.IRETURN);
+            }
+            case Type.LONG -> {
+                method.visitInsn(Opcodes.LCONST_0);
+                method.visitInsn(Opcodes.LRETURN);
+            }
+            case Type.FLOAT -> {
+                method.visitInsn(Opcodes.FCONST_0);
+                method.visitInsn(Opcodes.FRETURN);
+            }
+            case Type.DOUBLE -> {
+                method.visitInsn(Opcodes.DCONST_0);
+                method.visitInsn(Opcodes.DRETURN);
+            }
+            case Type.ARRAY, Type.OBJECT -> {
+                method.visitInsn(Opcodes.ACONST_NULL);
+                method.visitInsn(Opcodes.ARETURN);
+            }
+            default -> throw new IllegalArgumentException("Unsupported test method descriptor: " + descriptor);
+        }
+        method.visitMaxs(0, 0);
+        method.visitEnd();
     }
 
     private static byte[] plainClass(String internalName) {
