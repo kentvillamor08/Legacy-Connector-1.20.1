@@ -82,11 +82,17 @@ public final class Forge1201ArchiveGraph {
 
     public enum DependencyStatus {
         HOST_BRIDGE,
+        HOST_VERSION_MISMATCH,
         PROVIDER_PRESENT,
         PROVIDER_VERSION_MISMATCH,
         PROVIDER_AMBIGUOUS,
         REQUIRED_MISSING,
-        OPTIONAL_MISSING
+        OPTIONAL_MISSING,
+        INCOMPATIBLE_PROVIDER_PRESENT,
+        INCOMPATIBLE_PROVIDER_ABSENT,
+        DISCOURAGED_PROVIDER_PRESENT,
+        DISCOURAGED_PROVIDER_ABSENT,
+        UNSUPPORTED_DEPENDENCY_TYPE
     }
 
     public enum VersionRangeStatus {
@@ -137,6 +143,7 @@ public final class Forge1201ArchiveGraph {
             String dependencyModId,
             String versionRange,
             boolean mandatory,
+            Forge1201JarInfo.DependencyType dependencyType,
             String ordering,
             String side,
             DependencyStatus status,
@@ -199,12 +206,22 @@ public final class Forge1201ArchiveGraph {
         private boolean archiveCountWarningAdded;
     }
 
-    /** Analyze nested archives in the source JAR and providers in supplied installed-mod directories. */
+    /** Analyze nested archives and installed providers when the Minecraft host version is known. */
     public static Result analyze(
             Path sourceJar,
             Forge1201JarInfo sourceInfo,
             Collection<Path> installedModDirectories,
             String targetMinecraftVersion) throws IOException {
+        return analyze(sourceJar, sourceInfo, installedModDirectories, targetMinecraftVersion, null);
+    }
+
+    /** Analyze nested archives and evaluate both Minecraft and NeoForge host-provided dependencies. */
+    public static Result analyze(
+            Path sourceJar,
+            Forge1201JarInfo sourceInfo,
+            Collection<Path> installedModDirectories,
+            String targetMinecraftVersion,
+            String targetNeoForgeVersion) throws IOException {
         Budget budget = new Budget();
         String sourcePath = "source/" + sourceJar.getFileName();
         String sourceDigest = sha256(sourceJar);
@@ -263,7 +280,7 @@ public final class Forge1201ArchiveGraph {
             }
         }
 
-        List<DependencyEdge> edges = resolveDependencies(budget);
+        List<DependencyEdge> edges = resolveDependencies(budget, targetMinecraftVersion, targetNeoForgeVersion);
         List<TargetRangeFinding> targetRanges = evaluateTargetRanges(budget, targetMinecraftVersion);
         budget.archives.sort(Comparator.comparing(ArchiveFinding::archivePath));
         budget.providers.sort(Comparator.comparing(ProviderFinding::modId)
@@ -667,7 +684,8 @@ public final class Forge1201ArchiveGraph {
         return ProviderKind.INSTALLED_NESTED_FORGE_1201;
     }
 
-    private static List<DependencyEdge> resolveDependencies(Budget budget) {
+    private static List<DependencyEdge> resolveDependencies(
+            Budget budget, String targetMinecraftVersion, String targetNeoForgeVersion) {
         Map<String, List<ProviderFinding>> providers = new HashMap<>();
         for (ProviderFinding provider : budget.providers) {
             providers.computeIfAbsent(provider.modId().toLowerCase(Locale.ROOT), ignored -> new ArrayList<>()).add(provider);
@@ -676,19 +694,62 @@ public final class Forge1201ArchiveGraph {
         for (DeclaringMod declaring : budget.declaringMods) {
             for (Forge1201JarInfo.Dependency dependency : declaring.mod().dependencies()) {
                 String id = dependency.modId().toLowerCase(Locale.ROOT);
-                if (id.equals("minecraft") || id.equals("forge") || id.equals("fml")) {
+                String hostVersion = switch (id) {
+                    case "minecraft" -> targetMinecraftVersion;
+                    case "neoforge" -> targetNeoForgeVersion;
+                    default -> null;
+                };
+                if (id.equals("minecraft") || id.equals("forge") || id.equals("fml") || id.equals("neoforge")) {
+                    VersionRangeStatus rangeStatus = hostVersion == null || hostVersion.isBlank()
+                            ? VersionRangeStatus.NOT_EVALUATED
+                            : evaluateVersionRange(dependency.versionRange(), hostVersion);
+                    DependencyStatus hostStatus = rangeStatus == VersionRangeStatus.OUTSIDE_RANGE
+                            ? DependencyStatus.HOST_VERSION_MISMATCH : DependencyStatus.HOST_BRIDGE;
                     result.add(new DependencyEdge(declaring.archivePath(), declaring.mod().modId(), id,
-                            dependency.versionRange(), dependency.mandatory(), dependency.ordering(), dependency.side(),
-                            DependencyStatus.HOST_BRIDGE, VersionRangeStatus.NOT_EVALUATED, List.of(), List.of()));
+                            dependency.versionRange(), dependency.mandatory(), dependency.type(),
+                            dependency.ordering(), dependency.side(), hostStatus, rangeStatus,
+                            List.of(), hostVersion == null || hostVersion.isBlank() ? List.of() : List.of(hostVersion)));
                     continue;
                 }
+
                 List<ProviderFinding> candidates = providers.getOrDefault(id, List.of()).stream()
                         .sorted(Comparator.comparing(ProviderFinding::archivePath)).toList();
                 if (candidates.isEmpty()) {
+                    DependencyStatus missingStatus = switch (dependency.type()) {
+                        case REQUIRED -> DependencyStatus.REQUIRED_MISSING;
+                        case OPTIONAL -> DependencyStatus.OPTIONAL_MISSING;
+                        case INCOMPATIBLE -> DependencyStatus.INCOMPATIBLE_PROVIDER_ABSENT;
+                        case DISCOURAGED -> DependencyStatus.DISCOURAGED_PROVIDER_ABSENT;
+                        case UNKNOWN -> DependencyStatus.UNSUPPORTED_DEPENDENCY_TYPE;
+                    };
                     result.add(new DependencyEdge(declaring.archivePath(), declaring.mod().modId(), id,
-                            dependency.versionRange(), dependency.mandatory(), dependency.ordering(), dependency.side(),
-                            dependency.mandatory() ? DependencyStatus.REQUIRED_MISSING : DependencyStatus.OPTIONAL_MISSING,
+                            dependency.versionRange(), dependency.mandatory(), dependency.type(),
+                            dependency.ordering(), dependency.side(), missingStatus,
                             VersionRangeStatus.NOT_EVALUATED, List.of(), List.of()));
+                    continue;
+                }
+
+                if (dependency.type() == Forge1201JarInfo.DependencyType.INCOMPATIBLE
+                        || dependency.type() == Forge1201JarInfo.DependencyType.DISCOURAGED) {
+                    DependencyStatus presenceStatus = dependency.type() == Forge1201JarInfo.DependencyType.INCOMPATIBLE
+                            ? DependencyStatus.INCOMPATIBLE_PROVIDER_PRESENT
+                            : DependencyStatus.DISCOURAGED_PROVIDER_PRESENT;
+                    result.add(new DependencyEdge(declaring.archivePath(), declaring.mod().modId(), id,
+                            dependency.versionRange(), dependency.mandatory(), dependency.type(),
+                            dependency.ordering(), dependency.side(), presenceStatus,
+                            aggregateProviderRangeStatus(candidates, dependency.versionRange()),
+                            candidates.stream().map(ProviderFinding::archivePath).distinct().sorted().toList(),
+                            candidates.stream().map(ProviderFinding::version).distinct().sorted().toList()));
+                    continue;
+                }
+
+                if (dependency.type() == Forge1201JarInfo.DependencyType.UNKNOWN) {
+                    result.add(new DependencyEdge(declaring.archivePath(), declaring.mod().modId(), id,
+                            dependency.versionRange(), dependency.mandatory(), dependency.type(),
+                            dependency.ordering(), dependency.side(), DependencyStatus.UNSUPPORTED_DEPENDENCY_TYPE,
+                            VersionRangeStatus.NOT_EVALUATED,
+                            candidates.stream().map(ProviderFinding::archivePath).distinct().sorted().toList(),
+                            candidates.stream().map(ProviderFinding::version).distinct().sorted().toList()));
                     continue;
                 }
 
@@ -724,12 +785,26 @@ public final class Forge1201ArchiveGraph {
                     rangeStatus = VersionRangeStatus.OUTSIDE_RANGE;
                 }
                 result.add(new DependencyEdge(declaring.archivePath(), declaring.mod().modId(), id,
-                        dependency.versionRange(), dependency.mandatory(), dependency.ordering(), dependency.side(),
-                        status, rangeStatus, chosen.stream().map(ProviderFinding::archivePath).distinct().sorted().toList(),
+                        dependency.versionRange(), dependency.mandatory(), dependency.type(),
+                        dependency.ordering(), dependency.side(), status, rangeStatus,
+                        chosen.stream().map(ProviderFinding::archivePath).distinct().sorted().toList(),
                         chosen.stream().map(ProviderFinding::version).distinct().sorted().toList()));
             }
         }
         return result;
+    }
+
+    private static VersionRangeStatus aggregateProviderRangeStatus(
+            List<ProviderFinding> providers, String versionRange) {
+        boolean unparseable = false;
+        for (ProviderFinding provider : providers) {
+            VersionRangeStatus status = evaluateVersionRange(versionRange, provider.version());
+            if (status == VersionRangeStatus.MATCH) return VersionRangeStatus.MATCH;
+            if (status == VersionRangeStatus.UNPARSEABLE || status == VersionRangeStatus.NOT_EVALUATED) {
+                unparseable = true;
+            }
+        }
+        return unparseable ? VersionRangeStatus.UNPARSEABLE : VersionRangeStatus.OUTSIDE_RANGE;
     }
 
     private static List<TargetRangeFinding> evaluateTargetRanges(Budget budget, String targetVersion) {
