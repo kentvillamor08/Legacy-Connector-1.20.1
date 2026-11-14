@@ -763,3 +763,47 @@ Guard the local checkout at branch `feat/forge1201-preflight-analyzer`, expected
 ```
 
 If compilation or tests fail, fix the concrete issue in a new commit and rerun only after refreshing the expected remote SHA. If green, run the consolidated clean build and then continue with descriptor-aware `@Shadow`, `@Overwrite`, `@Accessor`, `@Invoker`, injector, `@At`, and `@Slice` findings. Source-nested config/class analysis must reuse `Forge1201ArchiveGraph`; do not create another ZIP traversal. Keep plugin code unexecuted and preserve unresolved states.
+
+
+---
+
+## 2026-11-14 — Schema 1.4 validation checkpoint: full clean build passed
+
+The user validated the integrated Schema 1.4 Mixin preflight implementation on feature branch `feat/forge1201-preflight-analyzer`, source HEAD `afdf5c0b8b4410d0deb401683e60b0255843c58d`.
+
+### Forced loader tests
+
+Command:
+
+```powershell
+.\gradlew.bat :loader:test --no-daemon --console=plain --rerun-tasks
+```
+
+Result: **BUILD SUCCESSFUL in 45s; 13 actionable tasks: 13 executed.** Loader main and test sources compiled, and the complete loader test task ran successfully, including the Schema 1.4 Mixin integration regressions.
+
+### Consolidated clean build
+
+Command:
+
+```powershell
+.\gradlew.bat clean build --no-daemon --console=plain --rerun-tasks
+```
+
+Result: **BUILD SUCCESSFUL in 2m 34s; 33 actionable tasks: 33 executed.** This run included root, loader, and testmods clean/build tasks; loader and root tests; runtime compilation; shim index generation (5,258 classes); legacy 1.7.10 API stub generation (1,848 stubs); legacy 1.7.10 fixture reobfuscation (16 classes); and `bundleJar` packaging. Java/Gradle deprecation warnings remained non-fatal.
+
+The initial `:loader:clean` Windows file-lock/concurrent-writer issue did not recur in the successful consolidated clean build.
+
+### Evidence boundary
+
+This proves the current code compiles, its automated unit tests pass, and the configured packaging tasks succeed at the stated commit. It does not prove that a real Forge 1.20.1 mod works in a NeoForge 1.21.1 runtime or modpack. The current Schema 1.4 Mixin analysis is still limited to outer-archive config discovery, mixin class/target scanning, provenance preservation, and resource-only presence checks for mapped targets against the supplied target compile classpath. It does not yet implement complete member/injector semantics.
+
+### Next implementation increment
+
+Proceed with descriptor-aware Mixin member annotation inventory:
+
+1. Inspect the existing `Forge1201MixinAnalyzer` bytecode visitor, model types, output serialization, and tests.
+2. Add exact descriptor-aware structural findings for `@Shadow`, `@Overwrite`, `@Accessor`, and `@Invoker`. Preserve full JVM owner/name/descriptor identity, aliases/prefix/value metadata, and explicit unresolved mapping/presence states. Never assume identity mappings.
+3. Add deterministic synthetic classfile tests for annotation forms, overloads, descriptors and mismatches.
+4. Follow with injector handler descriptors/selectors, `@At`, `@Slice`, refmap interpretation, dynamic plugin declarations (without executing plugin code), and nested config/class discovery using the existing `Forge1201ArchiveGraph`. Do not introduce another ZIP walker.
+5. Re-run the forced loader tests after source changes and the consolidated clean build at the next integration checkpoint.
+
