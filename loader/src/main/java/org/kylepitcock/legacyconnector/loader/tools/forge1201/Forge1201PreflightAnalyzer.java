@@ -34,8 +34,8 @@ import java.util.zip.ZipFile;
  * inspect them, validate mixin injection semantics, or prove runtime compatibility.</p>
  */
 public final class Forge1201PreflightAnalyzer {
-    public static final String SCHEMA_VERSION = "1.5";
-    public static final String ANALYZER_VERSION = "1.5.0";
+    public static final String SCHEMA_VERSION = "1.6";
+    public static final String ANALYZER_VERSION = "1.6.0";
     public static final String TARGET_MINECRAFT_VERSION = "1.21.1";
     public static final String TARGET_NEOFORGE_VERSION = "21.1.258";
     private static final int MAX_MIXIN_JSON_BYTES = 1024 * 1024;
@@ -382,8 +382,8 @@ public final class Forge1201PreflightAnalyzer {
                 "Slice 3 inventories bytecode in the outer source JAR and bounded, safe source-nested Forge/library archives. Installed provider JAR bytecode and embedded native NeoForge mod bytecode are intentionally excluded.",
                 "Source Minecraft SRG member names are normalized to 1.20.1 Mojang names where the generated mapping table has an entry; missing entries remain explicitly UNMAPPED. This source-name normalization is not a 1.21.1 target API or semantic compatibility verdict.",
                 "Nested archive traversal is bounded by depth, archive count, per-archive size, and total inflated-byte limits. Class capture is bounded to 8 MiB per class, 16 MiB per nested archive, 128 MiB aggregate nested class bytes submitted, and 64 MiB aggregate outer class bytes. Archives/classes skipped by a limit or rejected as unsafe/corrupt remain explicit findings.",
-                "Mixin configs discovered by the manifest and outer-archive resource heuristics are parsed in Schema 1.4. Target-class presence is checked only when the root project's resolved target compile classpath is supplied; no 1.20.1-to-1.21.1 Minecraft class identity mapping is assumed.",
-                "Mixin analysis currently covers outer-archive configs, mixin class entries, statically readable @Mixin class targets, and source-side descriptor inventory for @Shadow, @Overwrite, @Accessor, and @Invoker annotations. Target member mapping/presence and target-descriptor comparison are not yet implemented. Source-nested JAR config/class provenance, injector handlers, @At/@Slice semantics, and semantic refmap remapping remain future increments. Mixin plugin classes are inventoried as resources but never executed.",
+                "Mixin configs discovered by the manifest and outer-archive resource heuristics are parsed in the current preflight schema. Target-class presence is checked only when the root project's resolved target compile classpath is supplied; no 1.20.1-to-1.21.1 Minecraft class identity mapping is assumed.",
+                "Mixin analysis currently covers outer-archive configs, mixin class entries, statically readable @Mixin class targets, source-side member annotations, and source-side handler/selector inventories for the six core Mixin 0.8.5 injector annotations. Target member mapping/presence, target-descriptor comparison, handler-contract validation, @At/@Slice interpretation, and semantic refmap remapping are not yet implemented. Source-nested JAR config/class provenance remains a future increment. Mixin plugin classes are inventoried as resources but never executed.",
                 "Reflection/resource string candidates remain heuristic and are not treated as confirmed bytecode references.",
                 "Installed provider discovery records top-level and nested archive paths, mod IDs, and declared versions. A provider ID/version match does not establish API or behavioral compatibility; installed version ranges and API compatibility are not verified.",
                 "Maven-style version ranges with numeric dotted versions are evaluated conservatively. Qualified or otherwise unsupported version strings remain explicitly unverified.",
@@ -488,6 +488,24 @@ public final class Forge1201PreflightAnalyzer {
                     .append(", value=").append(finding.explicitValue())
                     .append(", constraints=").append(finding.constraints()).append("] candidates=")
                     .append(finding.targetMemberNameCandidates())
+                    .append(" source-targets=").append(finding.sourceTargetInternalNames())
+                    .append(" — ").append(finding.evidence()).append('\n');
+            finding.warnings().forEach(warning -> out.append("    warning: ").append(warning).append('\n'));
+        }
+        out.append("\nMixin injectors (").append(mixins.injectors().size()).append("):\n");
+        if (mixins.injectors().isEmpty()) out.append("  none discovered\n");
+        for (Forge1201MixinAnalyzer.InjectorFinding finding : mixins.injectors()) {
+            out.append("  ").append(finding.annotationKind()).append(' ')
+                    .append(finding.mixinClassName()).append('#')
+                    .append(finding.sourceMemberName()).append(finding.sourceMemberDescriptor())
+                    .append(" [").append(finding.elementKind()).append(", ").append(finding.status())
+                    .append(", remap=").append(finding.remap())
+                    .append(", @At=").append(finding.atAnnotationCount())
+                    .append(", @Slice=").append(finding.sliceAnnotationCount())
+                    .append(", require=").append(finding.require())
+                    .append(", expect=").append(finding.expect())
+                    .append(", allow=").append(finding.allow())
+                    .append("] selectors=").append(finding.targetSelectors())
                     .append(" source-targets=").append(finding.sourceTargetInternalNames())
                     .append(" — ").append(finding.evidence()).append('\n');
             finding.warnings().forEach(warning -> out.append("    warning: ").append(warning).append('\n'));

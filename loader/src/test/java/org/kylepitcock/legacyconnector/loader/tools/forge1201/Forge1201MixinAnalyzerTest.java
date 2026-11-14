@@ -31,6 +31,15 @@ final class Forge1201MixinAnalyzerTest {
     private static final String OVERWRITE_DESC = "Lorg/spongepowered/asm/mixin/Overwrite;";
     private static final String ACCESSOR_DESC = "Lorg/spongepowered/asm/mixin/gen/Accessor;";
     private static final String INVOKER_DESC = "Lorg/spongepowered/asm/mixin/gen/Invoker;";
+    private static final String INJECT_DESC = "Lorg/spongepowered/asm/mixin/injection/Inject;";
+    private static final String REDIRECT_DESC = "Lorg/spongepowered/asm/mixin/injection/Redirect;";
+    private static final String MODIFY_ARG_DESC = "Lorg/spongepowered/asm/mixin/injection/ModifyArg;";
+    private static final String MODIFY_ARGS_DESC = "Lorg/spongepowered/asm/mixin/injection/ModifyArgs;";
+    private static final String MODIFY_VARIABLE_DESC = "Lorg/spongepowered/asm/mixin/injection/ModifyVariable;";
+    private static final String MODIFY_CONSTANT_DESC = "Lorg/spongepowered/asm/mixin/injection/ModifyConstant;";
+    private static final String AT_DESC = "Lorg/spongepowered/asm/mixin/injection/At;";
+    private static final String SLICE_DESC = "Lorg/spongepowered/asm/mixin/injection/Slice;";
+    private static final String DESC_DESC = "Lorg/spongepowered/asm/mixin/injection/Desc;";
     private static final String SOURCE_ENTITY = "net/minecraft/world/entity/Entity";
     private static final String SOURCE_LIVING = "net/minecraft/world/entity/LivingEntity";
 
@@ -234,6 +243,219 @@ final class Forge1201MixinAnalyzerTest {
         assertTrue(concreteAccessor.warnings().stream().anyMatch(warning -> warning.contains("must be abstract")));
     }
 
+
+    @Test
+    void inventoriesCoreInjectorHandlersAndDescriptorAwareTargetSelectors() throws Exception {
+        String configPath = "mixins.injectors.json";
+        Path jar = writeJar("injector-annotations.jar", Map.of(
+                configPath, """
+                        {"package":"com.example.mixins","mixins":["InjectorMixin"]}
+                        """.getBytes(StandardCharsets.UTF_8),
+                "com/example/mixins/InjectorMixin.class",
+                injectorMixinClass("com/example/mixins/InjectorMixin", SOURCE_ENTITY)));
+
+        var result = Forge1201MixinAnalyzer.analyze(jar,
+                List.of(new Forge1201MixinAnalyzer.ConfigDeclaration(
+                        configPath, Forge1201MixinAnalyzer.DiscoverySource.MANIFEST)),
+                emptyTargetIndex(), Map.of(), "no-member-mapping-supplied");
+
+        assertEquals(9, result.injectors().size());
+        assertTrue(result.injectors().stream().allMatch(finding ->
+                finding.configPath().equals(configPath)
+                        && finding.mixinClassName().equals("com.example.mixins.InjectorMixin")
+                        && finding.sourceTargetInternalNames().equals(List.of(SOURCE_ENTITY))));
+
+        var inject = result.injectors().stream()
+                .filter(finding -> finding.sourceMemberName().equals("onTick")).findFirst().orElseThrow();
+        assertEquals(Forge1201MixinAnalyzer.InjectorAnnotationKind.INJECT, inject.annotationKind());
+        assertEquals("(L" + SOURCE_ENTITY + ";I)V", inject.sourceMemberDescriptor());
+        assertEquals(2, inject.targetSelectors().size());
+        assertEquals("tick", inject.targetSelectors().getFirst().memberName());
+        assertEquals("()V", inject.targetSelectors().getFirst().descriptor());
+        assertEquals("hurt", inject.targetSelectors().get(1).memberName());
+        assertEquals(SOURCE_ENTITY, inject.targetSelectors().get(1).ownerInternalName());
+        assertEquals("(D)Z", inject.targetSelectors().get(1).descriptor());
+        assertEquals(1, inject.atAnnotationCount());
+        assertEquals(1, inject.sliceAnnotationCount());
+        assertEquals(1, inject.require());
+        assertEquals(Boolean.TRUE, inject.cancellable());
+        assertFalse(inject.remap());
+        assertEquals(Forge1201MixinAnalyzer.InjectorResolutionStatus.INJECTOR_REMAP_DISABLED_UNVERIFIED,
+                inject.status());
+
+        var descHandler = result.injectors().stream()
+                .filter(finding -> finding.sourceMemberName().equals("redirectHurtDesc")).findFirst().orElseThrow();
+        assertEquals(Forge1201MixinAnalyzer.InjectorAnnotationKind.REDIRECT, descHandler.annotationKind());
+        var descSelector = descHandler.targetSelectors().stream()
+                .filter(selector -> selector.source() == Forge1201MixinAnalyzer.InjectorSelectorSource.DESC_ANNOTATION)
+                .findFirst().orElseThrow();
+        assertEquals(SOURCE_ENTITY, descSelector.ownerInternalName());
+        assertEquals("hurt", descSelector.memberName());
+        assertEquals("(D)Z", descSelector.descriptor());
+        assertEquals(1, descSelector.minimumMatches());
+        assertEquals(1, descSelector.maximumMatches());
+
+        var overloaded = result.injectors().stream()
+                .filter(finding -> finding.sourceMemberName().equals("modifyOverload")).findFirst().orElseThrow();
+        assertEquals(List.of("()V", "(I)V"), overloaded.targetSelectors().stream()
+                .map(Forge1201MixinAnalyzer.InjectorTargetSelector::descriptor).toList());
+
+        var wildcard = result.injectors().stream()
+                .filter(finding -> finding.sourceMemberName().equals("modifyWildcard")).findFirst().orElseThrow();
+        assertEquals("tick", wildcard.targetSelectors().getFirst().memberName());
+        assertEquals("ANY", wildcard.targetSelectors().getFirst().quantifier());
+        assertEquals(2, wildcard.index());
+        assertEquals(Boolean.TRUE, wildcard.argsOnly());
+
+        var malformed = result.injectors().stream()
+                .filter(finding -> finding.sourceMemberName().equals("badSelector")).findFirst().orElseThrow();
+        assertEquals(Forge1201MixinAnalyzer.InjectorResolutionStatus.INVALID_INJECTOR_SELECTOR,
+                malformed.status());
+
+        var field = result.injectors().stream()
+                .filter(finding -> finding.sourceMemberName().equals("invalidInjectorField")).findFirst().orElseThrow();
+        assertEquals(Forge1201MixinAnalyzer.MemberElementKind.FIELD, field.elementKind());
+        assertEquals(Forge1201MixinAnalyzer.InjectorResolutionStatus.INVALID_ANNOTATION_PLACEMENT,
+                field.status());
+
+        assertTrue(result.injectors().stream().anyMatch(f ->
+                f.annotationKind() == Forge1201MixinAnalyzer.InjectorAnnotationKind.MODIFY_CONSTANT));
+        assertTrue(result.injectors().stream().anyMatch(f ->
+                f.annotationKind() == Forge1201MixinAnalyzer.InjectorAnnotationKind.MODIFY_ARGS));
+    }
+
+    private static byte[] injectorMixinClass(String internalName, String targetInternalName) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                internalName, null, "java/lang/Object", null);
+        AnnotationVisitor mixin = writer.visitAnnotation(MIXIN_DESC, true);
+        AnnotationVisitor targets = mixin.visitArray("value");
+        targets.visit(null, Type.getObjectType(targetInternalName));
+        targets.visitEnd();
+        mixin.visitEnd();
+
+        addInjectorMethod(writer, "onTick", "(L" + targetInternalName + ";I)V", INJECT_DESC,
+                new String[] {"tick()V", "L" + targetInternalName + ";hurt(D)Z"},
+                false, true, true, 1, null, false);
+        addInjectorMethod(writer, "redirectHurt", "(L" + targetInternalName + ";D)Z", REDIRECT_DESC,
+                new String[] {"redirectTarget(I)V"}, null, true, true, null, null, false);
+        addDescSelectorMethod(writer, "redirectHurtDesc", targetInternalName);
+        addInjectorMethod(writer, "modifyOverload", "(I)I", MODIFY_ARG_DESC,
+                new String[] {"overloaded()V", "overloaded(I)V"}, null, true, false, 1, null, false);
+        addInjectorMethod(writer, "modifyArgsBundle",
+                "(Lorg/spongepowered/asm/mixin/injection/invoke/arg/Args;)V", MODIFY_ARGS_DESC,
+                new String[] {"send(I)V"}, null, true, false, null, null, false);
+        addInjectorMethod(writer, "modifyWildcard", "(I)I", MODIFY_VARIABLE_DESC,
+                new String[] {"tick*()V"}, null, true, false, null, 2, false);
+        addInjectorMethod(writer, "modifyConstant", "(I)I", MODIFY_CONSTANT_DESC,
+                new String[] {"update()V"}, null, false, true, null, null, false);
+        addInjectorMethod(writer, "badSelector", "()V", INJECT_DESC,
+                new String[] {"tick(I"}, null, true, false, null, null, false);
+
+        FieldVisitor field = writer.visitField(Opcodes.ACC_PRIVATE, "invalidInjectorField", "I", null, null);
+        AnnotationVisitor invalid = field.visitAnnotation(INJECT_DESC, false);
+        AnnotationVisitor methods = invalid.visitArray("method");
+        methods.visit(null, "tick()V");
+        methods.visitEnd();
+        invalid.visitEnd();
+        field.visitEnd();
+
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static void addDescSelectorMethod(ClassWriter writer, String methodName, String ownerInternalName) {
+        String handlerDescriptor = "(L" + ownerInternalName + ";D)Z";
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PRIVATE, methodName, handlerDescriptor, null, null);
+        AnnotationVisitor annotation = method.visitAnnotation(REDIRECT_DESC, false);
+        AnnotationVisitor targetArray = annotation.visitArray("target");
+        AnnotationVisitor desc = targetArray.visitAnnotation(null, DESC_DESC);
+        desc.visit("owner", Type.getObjectType(ownerInternalName));
+        desc.visit("value", "hurt");
+        desc.visit("ret", Type.BOOLEAN_TYPE);
+        AnnotationVisitor args = desc.visitArray("args");
+        args.visit(null, Type.DOUBLE_TYPE);
+        args.visitEnd();
+        desc.visit("min", 1);
+        desc.visit("max", 1);
+        desc.visitEnd();
+        targetArray.visitEnd();
+        annotation.visitAnnotation("at", AT_DESC).visit("value", "INVOKE");
+        annotation.visitEnd();
+        emitInjectorMethodBody(method, handlerDescriptor);
+    }
+
+    private static void addInjectorMethod(
+            ClassWriter writer, String name, String descriptor, String annotationDescriptor,
+            String[] selectors, Boolean remap, boolean includeSlice,
+            Integer require, Integer index, boolean cancellable) {
+        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PRIVATE, name, descriptor, null, null);
+        AnnotationVisitor annotation = method.visitAnnotation(annotationDescriptor, false);
+        AnnotationVisitor methodSelectors = annotation.visitArray("method");
+        for (String selector : selectors) methodSelectors.visit(null, selector);
+        methodSelectors.visitEnd();
+        if (remap != null) annotation.visit("remap", remap);
+        if (require != null) annotation.visit("require", require);
+        if (index != null) annotation.visit("index", index);
+        if (MODIFY_VARIABLE_DESC.equals(annotationDescriptor) && index != null) {
+            annotation.visit("argsOnly", true);
+        }
+        if (INJECT_DESC.equals(annotationDescriptor)) {
+            annotation.visit("cancellable", cancellable);
+            AnnotationVisitor atArray = annotation.visitArray("at");
+            AnnotationVisitor at = atArray.visitAnnotation(null, AT_DESC);
+            at.visit("value", "HEAD");
+            at.visitEnd();
+            atArray.visitEnd();
+        } else if (!MODIFY_CONSTANT_DESC.equals(annotationDescriptor)) {
+            AnnotationVisitor at = annotation.visitAnnotation("at", AT_DESC);
+            at.visit("value", "HEAD");
+            at.visitEnd();
+        }
+        if (includeSlice) {
+            if (INJECT_DESC.equals(annotationDescriptor) || MODIFY_CONSTANT_DESC.equals(annotationDescriptor)) {
+                AnnotationVisitor slices = annotation.visitArray("slice");
+                AnnotationVisitor slice = slices.visitAnnotation(null, SLICE_DESC);
+                slice.visit("id", "sliceFixture");
+                slice.visitEnd();
+                slices.visitEnd();
+            } else {
+                annotation.visitAnnotation("slice", SLICE_DESC).visit("id", "sliceFixture");
+            }
+        }
+        annotation.visitEnd();
+        emitInjectorMethodBody(method, descriptor);
+    }
+
+    private static void emitInjectorMethodBody(MethodVisitor method, String descriptor) {
+        method.visitCode();
+        switch (Type.getReturnType(descriptor).getSort()) {
+            case Type.VOID -> method.visitInsn(Opcodes.RETURN);
+            case Type.BOOLEAN, Type.BYTE, Type.CHAR, Type.SHORT, Type.INT -> {
+                method.visitInsn(Opcodes.ICONST_0);
+                method.visitInsn(Opcodes.IRETURN);
+            }
+            case Type.LONG -> {
+                method.visitInsn(Opcodes.LCONST_0);
+                method.visitInsn(Opcodes.LRETURN);
+            }
+            case Type.FLOAT -> {
+                method.visitInsn(Opcodes.FCONST_0);
+                method.visitInsn(Opcodes.FRETURN);
+            }
+            case Type.DOUBLE -> {
+                method.visitInsn(Opcodes.DCONST_0);
+                method.visitInsn(Opcodes.DRETURN);
+            }
+            case Type.ARRAY, Type.OBJECT -> {
+                method.visitInsn(Opcodes.ACONST_NULL);
+                method.visitInsn(Opcodes.ARETURN);
+            }
+            default -> throw new IllegalArgumentException("Unsupported method descriptor: " + descriptor);
+        }
+        method.visitMaxs(0, 0);
+        method.visitEnd();
+    }
 
     @Test
     void memberRemapDefaultsToMixinRemapButCanBeExplicitlyReenabled() throws Exception {

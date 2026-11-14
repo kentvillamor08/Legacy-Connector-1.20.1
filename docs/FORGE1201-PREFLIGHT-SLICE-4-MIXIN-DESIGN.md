@@ -286,3 +286,20 @@ The source/test batch has since been tightened:
 - Test ASM mixin classes are abstract when they contain Accessor/Invoker methods; a separate concrete Accessor fixture verifies the explicit invalid-value state.
 
 Latest feature-branch code/test commit: `a118a81b69f6d94f81d02840c258ab26a84e7249`. The current changes remain **pending user Gradle verification**.
+
+
+## Implementation checkpoint — core injector handler/selector inventory (2026-11-14)
+
+The analyzer inventories the six core SpongePowered Mixin 0.8.5 injector annotations: `@Inject`, `@Redirect`, `@ModifyArg`, `@ModifyArgs`, `@ModifyVariable`, and `@ModifyConstant`.
+
+Each `InjectorFinding` preserves archive/config/section/mixin provenance, the exact source handler name and JVM descriptor, source `method` selector strings, and `target` `@Desc` selectors with owner/name/exact source descriptor and min/max match constraints. Common `MemberInfo` selector forms are decomposed into owner/name/descriptor and wildcard/quantifier fields while raw selector text remains authoritative; chained selector extensions are retained but explicitly marked unsupported.
+
+The finding also preserves effective `remap`, explicit `@At` and `@Slice` counts, index/argsOnly/cancellable values, require/expect/allow, and constraints. Basic JVM handler and target method descriptor syntax is checked.
+
+This increment does **not** compare handler signatures against target instructions, resolve targets through versioned 1.20.1→1.21.1 member mappings, validate target presence, parse `@At` values or `@Slice` boundaries, execute plugins, or claim injection success. Invalid annotation placement, malformed handler/selector descriptors, unsupported selector chains, plugin dependence, remap-enabled unresolved mappings, and remap-disabled-unverified cases remain explicit.
+
+The preflight schema/analyzer versions are `1.6 / 1.6.0`; JSON includes `mixinAnalysis.injectors`, and text output reports handlers, selectors, and unresolved evidence. Synthetic ASM fixtures cover all six core injector kinds, overloaded and owner-qualified selectors, wildcard selectors, `@Desc`, match limits, `@At`/`@Slice` inventory counts, remap=false, malformed selectors, and invalid field placement.
+
+### Next bounded increment
+
+Implement source-side `@At` inventory: preserve injection-point value, target selector, opcode, ordinal, shift/by, slice ID, args, and remap. Parse method/field target selectors conservatively with exact descriptors. Do not resolve a target unless a reviewed versioned mapping and the shared `Forge1201TargetApiVerifier.TargetIndex` can prove it; preserve non-member injection-point codes such as HEAD/RETURN/CONSTANT as such. Then implement `@Slice` from/to boundaries, followed by refmap interpretation. Do not create a second hierarchy cache or ZIP walker.

@@ -856,3 +856,13 @@ Before handing this increment to the user, the Mixin inventory was tightened aga
 
 **No Gradle test has yet been run against this Schema 1.5 batch.** The last green user-run build is still the Schema 1.4 checkpoint `afdf5c0b8b4410d0deb401683e60b0255843c58d`. The exact current code/test head is `a118a81b69f6d94f81d02840c258ab26a84e7249`; after documentation updates, verify the final remote branch head before giving the guarded pull command.
 
+
+
+### Slice 4 implementation checkpoint — core injector handler and selector inventory (2026-11-14)
+
+- Schema 1.5 `@Shadow` / `@Overwrite` / `@Accessor` / `@Invoker` inventory passed the user's forced loader test gate at `dad7bed4fedeac65aa6f9c0a3a67cd439e169804`: `BUILD SUCCESSFUL in 55s`, 14 actionable tasks, all 14 executed. The preceding Schema 1.4 full clean build remains the last consolidated integration build.
+- The new increment adds source-side inventory for six core Mixin 0.8.5 injector annotations, exact handler descriptors, string `method` selectors, and `@Desc` `target` selectors. It reuses the existing per-call config/class scan and does not load mixin classes.
+- Selector parsing is deliberately bounded: common owner/name/method-descriptor forms are decomposed; wildcard/quantifier selectors and raw input are retained; chained selector extensions are marked unsupported. No target resolution or member-name mapping is inferred.
+- `@At`/`@Slice` values remain future work; this checkpoint records only their counts. Handler signature compatibility against injector-specific target instructions is not claimed.
+- Schema/analyzer versions advance to `1.6 / 1.6.0`. ASM tests cover all six injector kinds, descriptor and owner selectors, `@Desc`, wildcard, `@At`/`@Slice` counts, remap=false, malformed selector, and invalid field placement.
+- **Validation status:** the injector increment is pending the user's forced `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks` run. After it passes, continue with `@At` inventory; the consolidated clean build remains a later integration checkpoint.

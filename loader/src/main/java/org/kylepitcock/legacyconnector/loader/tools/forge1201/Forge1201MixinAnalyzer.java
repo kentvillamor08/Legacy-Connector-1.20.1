@@ -30,11 +30,12 @@ import org.objectweb.asm.tree.MethodNode;
 /**
  * Bounded, read-only static Mixin configuration and target discovery for Forge 1.20.1 archives.
  *
- * <p>This first implementation slice analyzes the outer source archive only. It resolves declared
- * config resources and mixin class entries, reads both visible and invisible @Mixin annotations,
- * and checks mapped target class presence through the shared target index. It never loads or
- * executes mod classes or Mixin plugins. Nested archive resources, member annotations, injection
- * selectors, and semantic refmap remapping remain later increments. Unified preflight integration now consumes this result API.</p>
+ * <p>This implementation analyzes the outer source archive only. It resolves declared config
+ * resources and mixin class entries, reads visible/invisible @Mixin and member annotations, and
+ * inventories source-side handler and selector data for core injectors. It checks mapped class
+ * targets through the shared target index but never loads or executes mod classes or Mixin plugins.
+ * Nested archive resources, detailed @At/@Slice semantics, and semantic refmap remapping remain
+ * later increments. Unified preflight consumes this result API.</p>
  */
 public final class Forge1201MixinAnalyzer {
     public static final int MAX_ARCHIVE_ENTRIES = 100_000;
@@ -50,6 +51,13 @@ public final class Forge1201MixinAnalyzer {
     private static final String OVERWRITE_ANNOTATION = "Lorg/spongepowered/asm/mixin/Overwrite;";
     private static final String ACCESSOR_ANNOTATION = "Lorg/spongepowered/asm/mixin/gen/Accessor;";
     private static final String INVOKER_ANNOTATION = "Lorg/spongepowered/asm/mixin/gen/Invoker;";
+    private static final String INJECT_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/Inject;";
+    private static final String REDIRECT_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/Redirect;";
+    private static final String MODIFY_ARG_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/ModifyArg;";
+    private static final String MODIFY_ARGS_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/ModifyArgs;";
+    private static final String MODIFY_VARIABLE_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/ModifyVariable;";
+    private static final String MODIFY_CONSTANT_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/ModifyConstant;";
+    private static final String DESC_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/Desc;";
 
     private Forge1201MixinAnalyzer() {}
 
@@ -223,6 +231,46 @@ public final class Forge1201MixinAnalyzer {
         }
     }
 
+    public enum InjectorAnnotationKind {
+        INJECT, REDIRECT, MODIFY_ARG, MODIFY_ARGS, MODIFY_VARIABLE, MODIFY_CONSTANT
+    }
+
+    public enum InjectorSelectorSource { METHOD_STRING, DESC_ANNOTATION }
+
+    public enum InjectorSelectorStatus {
+        METHOD_NAME_ONLY, METHOD_DESCRIPTOR, WILDCARD, OWNER_ONLY,
+        INVALID_DESCRIPTOR, INVALID_SELECTOR, UNSUPPORTED_EXTENSION
+    }
+
+    public enum InjectorResolutionStatus {
+        INJECTOR_REMAP_UNRESOLVED, INJECTOR_REMAP_DISABLED_UNVERIFIED, PLUGIN_DEPENDENT,
+        UNSUPPORTED_SELECTOR_SYNTAX, INVALID_ANNOTATION_PLACEMENT,
+        INVALID_HANDLER_DESCRIPTOR, INVALID_INJECTOR_SELECTOR
+    }
+
+    /** Captured source selector; this does not assert that the target exists. */
+    public record InjectorTargetSelector(
+            InjectorSelectorSource source, String rawSelector, String ownerInternalName,
+            String memberName, String descriptor, String quantifier,
+            Integer minimumMatches, Integer maximumMatches,
+            InjectorSelectorStatus status, String evidence) {}
+
+    /** Source-side injector metadata; no target mapping or injection success is implied. */
+    public record InjectorFinding(
+            String archivePath, String configPath, String section, String mixinClassName,
+            List<String> sourceTargetInternalNames, InjectorAnnotationKind annotationKind,
+            MemberElementKind elementKind, String sourceMemberName, String sourceMemberDescriptor,
+            List<InjectorTargetSelector> targetSelectors, boolean remap,
+            int atAnnotationCount, int sliceAnnotationCount, Integer index,
+            Boolean cancellable, Boolean argsOnly, int require, int expect, int allow,
+            String constraints, InjectorResolutionStatus status, String evidence, List<String> warnings) {
+        public InjectorFinding {
+            sourceTargetInternalNames = List.copyOf(sourceTargetInternalNames);
+            targetSelectors = List.copyOf(targetSelectors);
+            warnings = List.copyOf(warnings);
+        }
+    }
+
     public record Result(
             String sourceArchive,
             String targetProfile,
@@ -232,12 +280,14 @@ public final class Forge1201MixinAnalyzer {
             List<MixinClassFinding> mixinClasses,
             List<TargetFinding> targets,
             List<MemberAnnotationFinding> memberAnnotations,
+            List<InjectorFinding> injectors,
             List<String> warnings) {
         public Result {
             configs = List.copyOf(configs);
             mixinClasses = List.copyOf(mixinClasses);
             targets = List.copyOf(targets);
             memberAnnotations = List.copyOf(memberAnnotations);
+            injectors = List.copyOf(injectors);
             warnings = List.copyOf(warnings);
         }
     }
@@ -304,6 +354,7 @@ public final class Forge1201MixinAnalyzer {
             List<MixinClassFinding> classFindings = new ArrayList<>();
             List<TargetFinding> targetFindings = new ArrayList<>();
             List<MemberAnnotationFinding> memberFindings = new ArrayList<>();
+            List<InjectorFinding> injectorFindings = new ArrayList<>();
             boolean archiveEntryIndexIncomplete = count > MAX_ARCHIVE_ENTRIES;
             long totalConfigBytes = 0;
             long totalClassBytes = 0;
@@ -461,6 +512,9 @@ public final class Forge1201MixinAnalyzer {
                         memberFindings.addAll(readMemberAnnotations(
                                 archivePath, configPath, section, mixin.name.replace('/', '.'),
                                 parsedTargets, mixin, pluginDependent, mixinRemap));
+                        injectorFindings.addAll(readInjectorAnnotations(
+                                archivePath, configPath, section, mixin.name.replace('/', '.'),
+                                parsedTargets, mixin, pluginDependent, mixinRemap));
                         boolean hasMixinAnnotation = hasMixinAnnotation(mixin);
                         List<String> classWarnings = new ArrayList<>();
                         if (!hasMixinAnnotation) {
@@ -496,11 +550,17 @@ public final class Forge1201MixinAnalyzer {
                     .thenComparing(MemberAnnotationFinding::elementKind)
                     .thenComparing(MemberAnnotationFinding::sourceMemberName)
                     .thenComparing(MemberAnnotationFinding::sourceMemberDescriptor));
+            injectorFindings.sort(Comparator.comparing(InjectorFinding::configPath)
+                    .thenComparing(InjectorFinding::mixinClassName)
+                    .thenComparing(InjectorFinding::annotationKind)
+                    .thenComparing(InjectorFinding::elementKind)
+                    .thenComparing(InjectorFinding::sourceMemberName)
+                    .thenComparing(InjectorFinding::sourceMemberDescriptor));
             return new Result(archivePath, "Minecraft 1.21.1 / NeoForge 21.1.258",
                     mappingVersion,
                     targetIndex == null ? TargetIndexStatus.UNAVAILABLE_NO_TARGET_CLASSPATH
                             : TargetIndexStatus.AVAILABLE,
-                    configFindings, classFindings, targetFindings, memberFindings,
+                    configFindings, classFindings, targetFindings, memberFindings, injectorFindings,
                     warnings.stream().distinct().sorted().toList());
         }
     }
@@ -632,6 +692,299 @@ public final class Forge1201MixinAnalyzer {
             }
         }
         return findings;
+    }
+
+    private static List<InjectorFinding> readInjectorAnnotations(
+            String archivePath, String configPath, String section, String mixinClassName,
+            List<ParsedTarget> parsedTargets, ClassNode mixin, boolean pluginDependent, boolean mixinRemap) {
+        List<String> targets = parsedTargets.stream().map(ParsedTarget::selector).distinct().sorted().toList();
+        List<InjectorFinding> findings = new ArrayList<>();
+        if (mixin.fields != null) {
+            for (FieldNode field : mixin.fields) {
+                for (List<AnnotationNode> annotations : annotationLists(
+                        field.visibleAnnotations, field.invisibleAnnotations)) {
+                    for (AnnotationNode annotation : annotations) {
+                        InjectorAnnotationKind kind = injectorAnnotationKind(annotation.desc);
+                        if (kind != null) findings.add(createInjectorFinding(archivePath, configPath, section,
+                                mixinClassName, targets, kind, MemberElementKind.FIELD, field.name, field.desc,
+                                annotation, pluginDependent, mixinRemap));
+                    }
+                }
+            }
+        }
+        if (mixin.methods != null) {
+            for (MethodNode method : mixin.methods) {
+                for (List<AnnotationNode> annotations : annotationLists(
+                        method.visibleAnnotations, method.invisibleAnnotations)) {
+                    for (AnnotationNode annotation : annotations) {
+                        InjectorAnnotationKind kind = injectorAnnotationKind(annotation.desc);
+                        if (kind != null) findings.add(createInjectorFinding(archivePath, configPath, section,
+                                mixinClassName, targets, kind, MemberElementKind.METHOD, method.name, method.desc,
+                                annotation, pluginDependent, mixinRemap));
+                    }
+                }
+            }
+        }
+        return findings;
+    }
+
+    private static InjectorAnnotationKind injectorAnnotationKind(String descriptor) {
+        return switch (descriptor) {
+            case INJECT_ANNOTATION -> InjectorAnnotationKind.INJECT;
+            case REDIRECT_ANNOTATION -> InjectorAnnotationKind.REDIRECT;
+            case MODIFY_ARG_ANNOTATION -> InjectorAnnotationKind.MODIFY_ARG;
+            case MODIFY_ARGS_ANNOTATION -> InjectorAnnotationKind.MODIFY_ARGS;
+            case MODIFY_VARIABLE_ANNOTATION -> InjectorAnnotationKind.MODIFY_VARIABLE;
+            case MODIFY_CONSTANT_ANNOTATION -> InjectorAnnotationKind.MODIFY_CONSTANT;
+            default -> null;
+        };
+    }
+
+    private static InjectorFinding createInjectorFinding(
+            String archivePath, String configPath, String section, String mixinClassName,
+            List<String> targets, InjectorAnnotationKind kind, MemberElementKind elementKind,
+            String sourceName, String sourceDescriptor, AnnotationNode annotation,
+            boolean pluginDependent, boolean mixinRemap) {
+        List<String> warnings = new ArrayList<>();
+        List<InjectorTargetSelector> selectors = new ArrayList<>();
+        for (String raw : stringArrayValues(annotation, "method")) selectors.add(parseMethodSelector(raw));
+        for (AnnotationNode desc : annotationArrayValue(annotation, "target")) {
+            if (DESC_ANNOTATION.equals(desc.desc)) selectors.add(parseDescSelector(desc));
+            else selectors.add(new InjectorTargetSelector(InjectorSelectorSource.DESC_ANNOTATION, desc.desc,
+                    null, null, null, null, null, null, InjectorSelectorStatus.UNSUPPORTED_EXTENSION,
+                    "Unsupported nested selector annotation; not interpreted as Mixin @Desc."));
+        }
+
+        boolean placementValid = elementKind == MemberElementKind.METHOD;
+        boolean handlerValid = placementValid && isValidMethodDescriptor(sourceDescriptor);
+        if (!placementValid) warnings.add("Injector annotation is on a field; injector handlers must be methods.");
+        if (!handlerValid) warnings.add("Handler does not have a valid JVM method descriptor.");
+        if (selectors.isEmpty()) warnings.add("No method string or @Desc target selector was declared.");
+        if (selectors.stream().anyMatch(s -> s.status() == InjectorSelectorStatus.INVALID_SELECTOR
+                || s.status() == InjectorSelectorStatus.INVALID_DESCRIPTOR)) {
+            warnings.add("At least one target selector is malformed.");
+        }
+        if (selectors.stream().anyMatch(s -> s.status() == InjectorSelectorStatus.UNSUPPORTED_EXTENSION)) {
+            warnings.add("At least one selector extension is retained but not interpreted.");
+        }
+
+        boolean remap = booleanAnnotationValue(annotation, "remap", mixinRemap);
+        int atCount = annotationArrayValue(annotation, "at").size();
+        int sliceCount = annotationArrayValue(annotation, "slice").size();
+        Integer index = nullableIntegerAnnotationValue(annotation, "index");
+        Object cancellableValue = annotationValue(annotation, "cancellable");
+        Boolean cancellable = cancellableValue instanceof Boolean b ? b : null;
+        Object argsOnlyValue = annotationValue(annotation, "argsOnly");
+        Boolean argsOnly = argsOnlyValue instanceof Boolean b ? b : null;
+        int require = integerAnnotationValue(annotation, "require", -1);
+        int expect = integerAnnotationValue(annotation, "expect", 1);
+        int allow = integerAnnotationValue(annotation, "allow", -1);
+        String constraints = stringAnnotationValue(annotation, "constraints");
+
+        InjectorResolutionStatus status;
+        if (!placementValid) status = InjectorResolutionStatus.INVALID_ANNOTATION_PLACEMENT;
+        else if (!handlerValid) status = InjectorResolutionStatus.INVALID_HANDLER_DESCRIPTOR;
+        else if (selectors.isEmpty() || selectors.stream().anyMatch(s ->
+                s.status() == InjectorSelectorStatus.INVALID_SELECTOR
+                        || s.status() == InjectorSelectorStatus.INVALID_DESCRIPTOR)) {
+            status = InjectorResolutionStatus.INVALID_INJECTOR_SELECTOR;
+        } else if (selectors.stream().anyMatch(s ->
+                s.status() == InjectorSelectorStatus.UNSUPPORTED_EXTENSION)) {
+            status = InjectorResolutionStatus.UNSUPPORTED_SELECTOR_SYNTAX;
+        } else if (pluginDependent) status = InjectorResolutionStatus.PLUGIN_DEPENDENT;
+        else if (remap) status = InjectorResolutionStatus.INJECTOR_REMAP_UNRESOLVED;
+        else status = InjectorResolutionStatus.INJECTOR_REMAP_DISABLED_UNVERIFIED;
+
+        String evidence = switch (status) {
+            case INVALID_ANNOTATION_PLACEMENT -> "Injector handler annotation was found on a field.";
+            case INVALID_HANDLER_DESCRIPTOR -> "The annotated method has a malformed JVM handler descriptor.";
+            case INVALID_INJECTOR_SELECTOR -> "No valid statically readable target method selector is available.";
+            case UNSUPPORTED_SELECTOR_SYNTAX -> "Raw selector data is retained, but chained selector syntax is not interpreted.";
+            case PLUGIN_DEPENDENT -> "The config declares a Mixin plugin; it can alter target behavior. Plugin code was not executed.";
+            case INJECTOR_REMAP_UNRESOLVED -> "Source handler and target selectors were inventoried; no reviewed versioned member mapping was supplied, so target presence is not asserted.";
+            case INJECTOR_REMAP_DISABLED_UNVERIFIED -> "remap=false; source handler and target selectors were inventoried, but target presence and parity remain unverified.";
+        };
+        return new InjectorFinding(archivePath, configPath, section, mixinClassName, targets,
+                kind, elementKind, sourceName, sourceDescriptor, selectors, remap,
+                atCount, sliceCount, index, cancellable, argsOnly,
+                require, expect, allow, constraints, status, evidence, warnings);
+    }
+
+    private static InjectorTargetSelector parseMethodSelector(String raw) {
+        if (raw == null || raw.isBlank()) return invalidSelector(raw,
+                InjectorSelectorStatus.INVALID_SELECTOR, "Selector is empty.");
+        String compact = raw.replaceAll("\\s", "");
+        String tail = null;
+        int arrow = compact.indexOf("->");
+        if (arrow >= 0) {
+            tail = compact.substring(arrow + 2);
+            compact = compact.substring(0, arrow);
+        }
+        String descriptor = null;
+        int paren = compact.indexOf('(');
+        int colon = compact.indexOf(':');
+        if (paren >= 0) {
+            descriptor = compact.substring(paren);
+            compact = compact.substring(0, paren);
+        } else if (colon >= 0) {
+            descriptor = compact.substring(colon + 1);
+            compact = compact.substring(0, colon);
+        }
+
+        String owner = null;
+        String name = compact;
+        int semi = compact.indexOf(';');
+        if (compact.startsWith("L") && semi > 0) {
+            owner = compact.substring(1, semi).replace('.', '/');
+            name = compact.substring(semi + 1);
+        } else {
+            int dot = compact.lastIndexOf('.');
+            if (dot > 0) {
+                owner = compact.substring(0, dot).replace('.', '/');
+                name = compact.substring(dot + 1);
+            } else if (compact.contains("/")) {
+                owner = compact.replace('.', '/');
+                name = null;
+            }
+        }
+        String quantifier = "DEFAULT";
+        boolean invalidQuantifier = false;
+        if (name != null && name.endsWith("*")) {
+            quantifier = "ANY";
+            name = name.substring(0, name.length() - 1);
+        } else if (name != null && name.endsWith("+")) {
+            quantifier = "PLUS";
+            name = name.substring(0, name.length() - 1);
+        } else if (name != null && name.endsWith("}")) {
+            int brace = name.lastIndexOf('{');
+            String q = brace < 0 ? "" : name.substring(brace);
+            if (validQuantifier(q)) {
+                quantifier = q;
+                name = name.substring(0, brace);
+            } else invalidQuantifier = true;
+        } else if (name != null && name.contains("{")) invalidQuantifier = true;
+
+        boolean badDescriptor = descriptor != null && !isValidMethodDescriptor(descriptor);
+        InjectorSelectorStatus status;
+        if (badDescriptor) status = InjectorSelectorStatus.INVALID_DESCRIPTOR;
+        else if (invalidQuantifier || (name != null && name.isBlank())) status = InjectorSelectorStatus.INVALID_SELECTOR;
+        else if (tail != null && !tail.isBlank()) status = InjectorSelectorStatus.UNSUPPORTED_EXTENSION;
+        else if (name == null || name.isEmpty()) status = owner == null
+                ? InjectorSelectorStatus.INVALID_SELECTOR : InjectorSelectorStatus.OWNER_ONLY;
+        else if (!"DEFAULT".equals(quantifier)) status = InjectorSelectorStatus.WILDCARD;
+        else if (descriptor != null) status = InjectorSelectorStatus.METHOD_DESCRIPTOR;
+        else status = InjectorSelectorStatus.METHOD_NAME_ONLY;
+
+        String evidence = switch (status) {
+            case METHOD_NAME_ONLY -> "Method name selector captured without descriptor.";
+            case METHOD_DESCRIPTOR -> "Syntactically valid JVM method descriptor captured.";
+            case WILDCARD -> "Wildcard/quantifier retained without resolving matches.";
+            case OWNER_ONLY -> "Owner-only selector retained; method selection is unresolved.";
+            case INVALID_DESCRIPTOR -> "Selector has an invalid JVM method descriptor.";
+            case INVALID_SELECTOR -> "Selector name/quantifier syntax is invalid.";
+            case UNSUPPORTED_EXTENSION -> "Selector chain retained in raw input but not interpreted.";
+        };
+        return new InjectorTargetSelector(InjectorSelectorSource.METHOD_STRING, raw, owner, name,
+                descriptor, quantifier, null, null, status, evidence);
+    }
+
+    private static boolean validQuantifier(String value) {
+        if (value == null || value.length() < 3 || value.charAt(0) != '{'
+                || value.charAt(value.length() - 1) != '}') return false;
+        String body = value.substring(1, value.length() - 1);
+        int comma = body.indexOf(',');
+        if (comma < 0) return !body.isEmpty() && body.chars().allMatch(Character::isDigit);
+        if (body.indexOf(',', comma + 1) >= 0) return false;
+        String low = body.substring(0, comma), high = body.substring(comma + 1);
+        return (low.isEmpty() || low.chars().allMatch(Character::isDigit))
+                && (high.isEmpty() || high.chars().allMatch(Character::isDigit))
+                && !(low.isEmpty() && high.isEmpty());
+    }
+
+    private static InjectorTargetSelector parseDescSelector(AnnotationNode desc) {
+        Object rawName = annotationValue(desc, "value");
+        String name = rawName instanceof String s ? s : null;
+        Object rawOwner = annotationValue(desc, "owner");
+        Type ownerType = rawOwner == null ? Type.VOID_TYPE : rawOwner instanceof Type t ? t : null;
+        String owner = null;
+        boolean invalid = name == null || name.isBlank() || ownerType == null;
+        if (ownerType != null && ownerType.getSort() != Type.VOID && ownerType.getSort() != Type.OBJECT) invalid = true;
+        else if (ownerType != null && ownerType.getSort() == Type.OBJECT) owner = ownerType.getInternalName();
+
+        Object rawReturn = annotationValue(desc, "ret");
+        Type returnType = rawReturn == null ? Type.VOID_TYPE : rawReturn instanceof Type t ? t : null;
+        if (returnType == null || returnType.getSort() == Type.METHOD) invalid = true;
+        Object rawArgs = annotationValue(desc, "args");
+        List<Type> args = new ArrayList<>();
+        if (rawArgs instanceof List<?> values) {
+            for (Object value : values) {
+                if (value instanceof Type t && t.getSort() != Type.VOID && t.getSort() != Type.METHOD) args.add(t);
+                else invalid = true;
+            }
+        } else if (rawArgs != null) invalid = true;
+
+        String descriptor = null;
+        if (!invalid) {
+            descriptor = Type.getMethodDescriptor(returnType, args.toArray(Type[]::new));
+            invalid = !isValidMethodDescriptor(descriptor);
+        }
+        int min = integerAnnotationValue(desc, "min", 0);
+        int max = integerAnnotationValue(desc, "max", Integer.MAX_VALUE);
+        if (min < 0 || max < 1 || min > max) invalid = true;
+        String raw = "@Desc(owner=" + (owner == null ? "<mixin-target>" : owner)
+                + ", value=" + name + ", descriptor=" + descriptor + ", min=" + min + ", max=" + max + ")";
+        InjectorSelectorStatus status = invalid ? InjectorSelectorStatus.INVALID_SELECTOR
+                : InjectorSelectorStatus.METHOD_DESCRIPTOR;
+        return new InjectorTargetSelector(InjectorSelectorSource.DESC_ANNOTATION, raw, owner,
+                name, descriptor, "DESC", min, max, status,
+                invalid ? "Invalid @Desc owner/name/signature/match range."
+                        : "Normalized to an exact source-side JVM method descriptor.");
+    }
+
+    private static InjectorTargetSelector invalidSelector(
+            String raw, InjectorSelectorStatus status, String evidence) {
+        return new InjectorTargetSelector(InjectorSelectorSource.METHOD_STRING, raw,
+                null, null, null, null, null, null, status, evidence);
+    }
+
+    private static boolean isValidMethodDescriptor(String descriptor) {
+        try {
+            if (descriptor == null || !descriptor.startsWith("(")) return false;
+            Type method = Type.getMethodType(descriptor);
+            for (Type argument : method.getArgumentTypes()) {
+                if (argument.getSort() == Type.VOID || argument.getSort() == Type.METHOD) return false;
+            }
+            return method.getReturnType().getSort() != Type.METHOD;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private static List<String> stringArrayValues(AnnotationNode annotation, String key) {
+        Object value = annotationValue(annotation, key);
+        if (!(value instanceof List<?> values)) return List.of();
+        List<String> result = new ArrayList<>();
+        for (Object item : values) if (item instanceof String s) result.add(s);
+        return List.copyOf(result);
+    }
+
+    private static List<AnnotationNode> annotationArrayValue(AnnotationNode annotation, String key) {
+        Object value = annotationValue(annotation, key);
+        if (value instanceof AnnotationNode one) return List.of(one);
+        if (!(value instanceof List<?> values)) return List.of();
+        List<AnnotationNode> result = new ArrayList<>();
+        for (Object item : values) if (item instanceof AnnotationNode nested) result.add(nested);
+        return List.copyOf(result);
+    }
+
+    private static Integer nullableIntegerAnnotationValue(AnnotationNode annotation, String key) {
+        Object value = annotationValue(annotation, key);
+        return value instanceof Integer number ? number : null;
+    }
+
+    private static int integerAnnotationValue(AnnotationNode annotation, String key, int defaultValue) {
+        Integer value = nullableIntegerAnnotationValue(annotation, key);
+        return value == null ? defaultValue : value;
     }
 
     private static MemberAnnotationKind memberAnnotationKind(String descriptor) {
