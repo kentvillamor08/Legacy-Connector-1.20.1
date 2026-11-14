@@ -533,7 +533,8 @@ final class Forge1201MixinAnalyzerTest {
             String[] aliases,
             Boolean remap,
             boolean abstractMethod) {
-        int access = aliases != null && aliases.length > 0 ? Opcodes.ACC_PRIVATE : Opcodes.ACC_PUBLIC;
+        int access = SHADOW_DESC.equals(annotationDescriptor) && aliases != null && aliases.length > 0
+                ? Opcodes.ACC_PRIVATE : Opcodes.ACC_PUBLIC;
         if (abstractMethod) access |= Opcodes.ACC_ABSTRACT;
         MethodVisitor method = writer.visitMethod(access, name, descriptor, null, null);
         AnnotationVisitor annotation = method.visitAnnotation(annotationDescriptor, false);
