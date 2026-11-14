@@ -245,7 +245,7 @@ final class Forge1201ArchiveGraphTest {
         List<NeoDep> dependencies = List.of(
                 neoDep("optional_missing", "[1.0,)", "optional"),
                 neoDep("required_missing", "[1.0,)", "required"),
-                neoDep("default_required", "*", null),
+                neoDep("default_required", "*", null, false),
                 neoDep("incompatible_present", "*", "incompatible"),
                 neoDep("incompatible_absent", "*", "incompatible"),
                 neoDep("discouraged_present", "*", "discouraged"),
@@ -430,6 +430,9 @@ final class Forge1201ArchiveGraphTest {
             if (dependency.type() != null) {
                 toml.append("type=\"").append(dependency.type()).append("\"\n");
             }
+            if (dependency.legacyMandatory() != null) {
+                toml.append("mandatory=").append(dependency.legacyMandatory()).append('\n');
+            }
             toml.append("versionRange=\"").append(dependency.range()).append("\"\n")
                     .append("ordering=\"NONE\"\nside=\"BOTH\"\n");
         }
@@ -437,7 +440,11 @@ final class Forge1201ArchiveGraphTest {
     }
 
     private static NeoDep neoDep(String id, String range, String type) {
-        return new NeoDep(id, range, type);
+        return neoDep(id, range, type, null);
+    }
+
+    private static NeoDep neoDep(String id, String range, String type, Boolean legacyMandatory) {
+        return new NeoDep(id, range, type, legacyMandatory);
     }
 
     private static Dep dep(String id, String range, boolean mandatory) {
@@ -445,7 +452,7 @@ final class Forge1201ArchiveGraphTest {
     }
 
     private record Dep(String id, String range, boolean mandatory) {}
-    private record NeoDep(String id, String range, String type) {}
+    private record NeoDep(String id, String range, String type, Boolean legacyMandatory) {}
 
     private static String jarJarMetadata(String... values) {
         StringBuilder json = new StringBuilder("{\"jars\":[");
