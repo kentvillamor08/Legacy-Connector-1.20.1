@@ -1,3 +1,9 @@
+**Current checkpoint — 2026-11-14:** Slice 4 Mixin preflight has passed the user-forced loader test gate through Schema 1.7 at commit 267db731f7b16b30498f3402daf83bcb340849d1 (BUILD SUCCESSFUL in 39s; 14/14 actionable tasks executed). Schema 1.8 adds source-side @Slice from/to boundary inventory, explicit/default provenance, and JSON/text reporting. Its implementation is committed at 0dc6ae5b7d4497e341ef2968040f08ef124bdb3a; local Gradle verification is pending. This is source metadata capture only: no target instruction order, slice validity, or injection success is asserted.
+
+**Historical status notes below describe earlier checkpoints. The newest dated entries at the end of this file control the current status.**
+
+---
+
 **Status:** Slices 1–3 are implemented and validated. Slice 4 is in progress: the shared TargetIndex API/tests passed at `246002c6fcc1af371bb11a716483dd1df23a2dbe` (`BUILD SUCCESSFUL in 1m 40s`, 14/14 tasks), and the bounded outer-JAR `Forge1201MixinAnalyzer` plus its synthetic ZIP/ASM tests passed at `90daa1ee78d2de73ff44e27ffd01ba6e126858f4` (`BUILD SUCCESSFUL in 57s`, 14/14 tasks). Remaining Slice 4 work includes automatic config declaration integration, nested archive provenance, descriptor-aware member/injector/selector analysis, and unified preflight reporting.
 
 **Status:** Slices 1 and 2 are implemented and validated. The first Slice 3 dynamic-reference batch passed the user's forced focused loader test gate at `4457199a4109d774b25a428e7c68e23b4ec3b4ce` (`BUILD SUCCESSFUL in 24s`, 12/12 tasks executed). The nested-bytecode/SRG integration was committed as a494d20a3be797abd3de563fa3672df69e2276da; its stale limitation assertion was corrected in 3c6febb075c32391b6879b0f3ef00c5856e80d51; and test runtime mapping-resource wiring was added in 0c7c55b72033c986d94f1cba5d836dfce26e95a0. The test/runtime wiring checkpoint is 0c7c55b72033c986d94f1cba5d836dfce26e95a0; the branch may include a later documentation-only commit. Use the exact remote tip in the testbench handoff for the guarded pull. Structural reference coverage remains under audit.
@@ -921,3 +927,46 @@ A review correction preserves the valid owner-only `@At.target` selector form us
 The first user-run Schema 1.7 test execution compiled successfully and completed 471 tests with one failure at `Forge1201MixinAnalyzerTest.java:350`. The failed assertion expected three `@At` entries, but the same synthetic fixture now contains four (`FIELD`, `INVOKE`, `HEAD`, and the added owner-only `NEW` target). This was a stale test expectation, not a production parser/compiler failure.
 
 Fixed by changing the expected `atHandler.injectionPoints().size()` from `3` to `4` in commit `fbe5b9e5739561bd561819ef26f05224c1baed2d`. The user's next validation must rerun the forced loader test gate at that exact commit. Schema 1.7 remains **pending** until it passes.
+
+---
+
+## 2026-11-14 — Schema 1.7 validated; Schema 1.8 @Slice boundary inventory implemented (tests pending)
+
+### Schema 1.7 user validation
+
+The user verified the Universal branch at commit 267db731f7b16b30498f3402daf83bcb340849d1. Branch, exact local HEAD, clean-worktree, remote SHA, fast-forward, and post-pull guards passed. The user then ran:
+
+```powershell
+.\gradlew.bat :loader:clean :loader:test --no-daemon --console=plain --rerun-tasks
+```
+
+Result: **BUILD SUCCESSFUL in 39s; 14 actionable tasks, all 14 executed.** This confirms the Schema 1.7 loader test suite, including the corrected four-entry @At fixture assertion. It does not establish Mixin application or runtime compatibility in a real game.
+
+### Schema 1.8 source increment
+
+The analyzer now inventories each declared core-injector @Slice entry as a SliceFinding, preserving:
+
+- Slice index, ID, and nested annotation descriptor.
+- Separate from and to SliceBoundaryFinding records.
+- Whether each boundary was explicitly declared or materialized from the Mixin 0.8.5 annotation default.
+- The nested @At metadata using the existing source-side At parser, including value, target/descriptor, opcode, ordinal, shift/by, args, remap, id, warnings, and syntax states.
+- Unsupported nested annotation types, wrong value types, and malformed nested @At data as explicit findings instead of silently discarding them.
+
+When omitted, Mixin 0.8.5 defaults are represented as from=@At("HEAD") and to=@At("TAIL"). A captured boundary does not prove that its selector resolves, that the selected instructions exist, that from precedes to, or that the resulting slice is valid for the target method.
+
+Schema/analyzer versions advance to 1.8 / 1.8.0. Unified JSON includes mixinAnalysis.injectors[].slices; the text report prints each slice and both boundary findings. Mixin plugin code remains unexecuted; nested source JAR configs/classes remain outside the current outer-archive analyzer scope.
+
+Implementation commit: 0dc6ae5b7d4497e341ef2968040f08ef124bdb3a.
+
+### Synthetic coverage added — pending user verification
+
+- Explicit from/to @At values, owner/member/method descriptor, ordinal and shift.
+- Omitted from/to defaults, including explicit default provenance and HEAD/TAIL values.
+- Unsupported nested annotation on a boundary, with preserved descriptor and an explicit review status.
+- JSON and human-readable preflight report output containing the new slice inventory.
+
+**Validation status: pending.** The Schema 1.8 source/test batch must pass the forced loader test gate before being marked green. Runtime and gameplay validation remain separate later gates.
+
+### Exact next action
+
+The user's last confirmed local Universal checkout is expected clean at 267db731f7b16b30498f3402daf83bcb340849d1. Verify branch, local HEAD, clean worktree, remote SHA, and then fast-forward exactly to the current feature-branch tip before running the forced loader gate. Do not run the full clean build as a substitute for this focused gate.

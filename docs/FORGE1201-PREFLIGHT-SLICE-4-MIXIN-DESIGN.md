@@ -1,7 +1,8 @@
 # Forge 1.20.1 Preflight Analyzer — Slice 4 Mixin Analysis Design
 
-Status: Slice 4 is in progress. The user validated the initial unified Schema 1.4 Mixin target analysis with a forced loader test pass and a full clean root/loader/testmods build at `afdf5c0b8b4410d0deb401683e60b0255843c58d`. A new Schema 1.5 increment now captures source-side `@Shadow`, `@Overwrite`, `@Accessor`, and `@Invoker` member annotations with exact descriptors and explicit uncertainty states. This new increment is committed on `feat/forge1201-preflight-analyzer` but has **not yet been run by the user**; its forced loader test gate is pending. Injector handlers, `@At` / `@Slice`, semantic refmap handling, and nested config/class analysis remain future increments.
+Status (2026-11-14): Slice 4 remains in progress. Schema 1.7 @At/@Constant source inventory passed the user's forced loader test gate at 267db731f7b16b30498f3402daf83bcb340849d1 (BUILD SUCCESSFUL in 39s; 14/14 actionable tasks executed). Schema 1.8 now captures @Slice from/to boundaries, distinguishing explicit declarations from Mixin 0.8.5 HEAD/TAIL defaults. The Schema 1.8 implementation and synthetic test updates are committed at 0dc6ae5b7d4497e341ef2968040f08ef124bdb3a; the forced loader test gate is pending. Boundary capture does not establish target instruction ordering or injection success.
 
+Historical implementation checkpoints below remain useful context; the latest dated checkpoint at the end controls current status.
 ## Goal
 
 Turn the existing offline Mixin triage utility into a reusable, deterministic analyzer that contributes machine-readable findings to the unified Forge 1.20.1 -> NeoForge 1.21.1 preflight report.
@@ -329,3 +330,17 @@ A review correction preserves the valid owner-only `@At.target` selector form us
 ### Validation follow-up — corrected @At finding count
 
 The first Schema 1.7 local loader run compiled successfully; 470 of 471 tests passed. The only failure was a stale expected count of three @At findings at `Forge1201MixinAnalyzerTest.java:350`. The fixture now contains four points: FIELD, INVOKE, HEAD, and owner-only NEW. Commit `fbe5b9e5739561bd561819ef26f05224c1baed2d` corrects the expected count to four. No production-code change was needed for this failure. The full Schema 1.7 test gate remains pending.
+
+---
+
+## 2026-11-14 — Schema 1.7 validation and Schema 1.8 @Slice boundary inventory
+
+The user confirmed the Schema 1.7 forced loader test gate at commit 267db731f7b16b30498f3402daf83bcb340849d1: **BUILD SUCCESSFUL in 39s; 14 actionable tasks, all 14 executed.** The single earlier failure was a stale fixture count (expected three @At entries after a fourth owner-only NEW fixture was added); the assertion was corrected to four. No production parser defect was found in that failed run.
+
+Schema 1.8 extends InjectorFinding with immutable SliceFinding entries. Each valid @Slice retains its index/ID and separate from/to boundaries. Each boundary records whether it was explicit or defaulted, the source annotation descriptor, its parsed AtFinding, status, evidence, and warnings. Omitted boundaries are materialized according to Mixin 0.8.5 defaults: from=@At("HEAD"), to=@At("TAIL").
+
+Wrong nested annotation types, malformed boundary metadata, and unexpected value types are surfaced explicitly. The existing createAtFinding logic is reused; no second selector parser is introduced. Unified JSON serializes mixinAnalysis.injectors[].slices, and text output prints the slice and boundary records.
+
+**Evidence limit:** the analyzer does not inspect target method instructions, infer their order, resolve selectors through refmaps/member mappings, or establish that a slice or injector will apply. It does not execute plugins and remains outer-source-JAR-only. Nested config/class provenance still needs to reuse Forge1201ArchiveGraph.
+
+Synthetic tests cover explicit from/to selector metadata, omitted HEAD/TAIL defaults and provenance, unsupported nested boundary annotations, and JSON/text reporting. **The Schema 1.8 forced loader test gate is pending user execution.**
