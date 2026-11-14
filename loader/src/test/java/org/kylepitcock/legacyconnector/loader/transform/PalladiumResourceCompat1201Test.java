@@ -830,7 +830,14 @@ class PalladiumResourceCompat1201Test {
         assertEquals(1, PalladiumResourceCompat1201.apply(resources));
         String migrated = get(resources, PalladiumResourceCompat1201.ALIEN_EVO_POWER_UI);
         assertTrue(migrated.contains("hexTextBox.render(e.guiGraphics, mouseX, mouseY, e.partialTick);"));
-        assertTrue(migrated.contains("EditBox input is ticked by the 1.21.1 screen; no manual tick() call."));
+        assertTrue(migrated.contains(
+                "Nickname EditBox input is ticked by the 1.21.1 screen; no manual tick() call."));
+        assertTrue(migrated.contains(
+                "HEX EditBox input is ticked by the 1.21.1 screen; no manual tick() call."));
+        assertEquals(1, occurrences(migrated,
+                "Nickname EditBox input is ticked by the 1.21.1 screen; no manual tick() call."));
+        assertEquals(1, occurrences(migrated,
+                "HEX EditBox input is ticked by the 1.21.1 screen; no manual tick() call."));
         assertFalse(migrated.contains("hexTextBox.tick()"));
         assertFalse(migrated.contains("nickTextBox.tick()"));
         assertTrue(migrated.contains("rawTextboxValue.replaceAll(\"[^0-9A-Fa-f]\", \"\")"));
