@@ -525,6 +525,29 @@ class PalladiumResourceCompat1201Test {
         assertEquals(0, PalladiumResourceCompat1201.apply(resources));
     }
 
+
+    @Test
+    void rechargeClearsTheFinalOneTickCooldownAndIsIdempotent() {
+        Map<String, byte[]> resources = new HashMap<>();
+        put(resources, PalladiumResourceCompat1201.ALIEN_EVO_RECHARGE, """
+                let currentTime = palladium.scoreboard.getScore(entity, TIMER_OBJECTIVE, 0);
+                if (currentTime > 1) {
+                    palladium.scoreboard.subtractScore(entity, TIMER_OBJECTIVE, RECHARGE_RATE);
+                    let newTime = palladium.scoreboard.getScore(entity, TIMER_OBJECTIVE, 0);
+                    if (newTime <= 1) {
+                        palladium.scoreboard.setScore(entity, TIMER_OBJECTIVE, 0);
+                        palladium.setProperty(entity, 'watch_state', "default");
+                    }
+                }
+                """);
+
+        assertEquals(1, PalladiumResourceCompat1201.apply(resources));
+        String recharge = get(resources, PalladiumResourceCompat1201.ALIEN_EVO_RECHARGE);
+        assertTrue(recharge.contains("if (currentTime > 0) {"));
+        assertFalse(recharge.contains("if (currentTime > 1) {"));
+        assertEquals(0, PalladiumResourceCompat1201.apply(resources));
+    }
+
     @Test
     void migratesAlienEvoStatAbilityServerAccessAndIsIdempotent() {
         Map<String, byte[]> resources = new HashMap<>();

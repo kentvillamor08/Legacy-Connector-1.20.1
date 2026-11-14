@@ -75,6 +75,7 @@ final class PalladiumResourceCompat1201 {
                     + "}\n\n";
     private static final String ALIEN_EVO_CYCLE = "addon/alienevo/kubejs_scripts/cycle_sounds.js";
     private static final String ALIEN_EVO_DETRANSFORM = "addon/alienevo/kubejs_scripts/detransform.js";
+    static final String ALIEN_EVO_RECHARGE = "addon/alienevo/kubejs_scripts/recharge.js";
     private static final String ALIEN_EVO_FLATTEN = "addon/alienevo/kubejs_scripts/flatten.js";
     private static final String ALIEN_EVO_DECOUPLE = "addon/alienevo/kubejs_scripts/decouple.js";
     static final String ALIEN_EVO_CORE_REMOVAL = "addon/alienevo/kubejs_scripts/core_removal.js";
@@ -229,6 +230,7 @@ final class PalladiumResourceCompat1201 {
         rewriteOmnitrixPacketPlayerAccess(resources);
         rewriteOmnitrixPacketStringValues(resources);
         rewriteAlienEvoXpDeathPlayerAccess(resources);
+        rewriteAlienEvoRechargeCooldown(resources);
         rewriteAlienEvoStatAbilityOperation(resources);
         // Both ScriptableAbility callbacks receive the active entity; KubeJS 7 no longer exposes Utils.server.
         rewrite(resources, ALIEN_EVO_STAT_ABILITY, new String[][] {
@@ -939,6 +941,18 @@ final class PalladiumResourceCompat1201 {
         String migrated = "let player = source ? source.getEntity() : null;" + lineEnding
                 + "    if (player && player.isPlayer()) {";
         return rewrite(resources, path, new String[][] {{legacy, migrated, "1"}});
+    }
+
+    /**
+     * AlienEvo's recharge callback skipped the final cooldown tick when the
+     * scoreboard reached exactly 1. The transform ability remains locked while
+     * AlienEvo.Timer is 1..3000, so that off-by-one leaves the Omnitrix disabled
+     * indefinitely. Permit the final decrement to clear a one-tick cooldown.
+     */
+    private static int rewriteAlienEvoRechargeCooldown(Map<String, byte[]> resources) {
+        return rewrite(resources, ALIEN_EVO_RECHARGE, new String[][] {{
+                "if (currentTime > 1) {", "if (currentTime > 0) {", "1"
+        }});
     }
 
     /**
