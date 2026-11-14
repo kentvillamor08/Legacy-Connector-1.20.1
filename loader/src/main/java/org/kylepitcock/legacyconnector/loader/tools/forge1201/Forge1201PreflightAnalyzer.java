@@ -34,8 +34,8 @@ import java.util.zip.ZipFile;
  * inspect them, validate mixin injection semantics, or prove runtime compatibility.</p>
  */
 public final class Forge1201PreflightAnalyzer {
-    public static final String SCHEMA_VERSION = "1.6";
-    public static final String ANALYZER_VERSION = "1.6.0";
+    public static final String SCHEMA_VERSION = "1.7";
+    public static final String ANALYZER_VERSION = "1.7.0";
     public static final String TARGET_MINECRAFT_VERSION = "1.21.1";
     public static final String TARGET_NEOFORGE_VERSION = "21.1.258";
     private static final int MAX_MIXIN_JSON_BYTES = 1024 * 1024;
@@ -383,7 +383,7 @@ public final class Forge1201PreflightAnalyzer {
                 "Source Minecraft SRG member names are normalized to 1.20.1 Mojang names where the generated mapping table has an entry; missing entries remain explicitly UNMAPPED. This source-name normalization is not a 1.21.1 target API or semantic compatibility verdict.",
                 "Nested archive traversal is bounded by depth, archive count, per-archive size, and total inflated-byte limits. Class capture is bounded to 8 MiB per class, 16 MiB per nested archive, 128 MiB aggregate nested class bytes submitted, and 64 MiB aggregate outer class bytes. Archives/classes skipped by a limit or rejected as unsafe/corrupt remain explicit findings.",
                 "Mixin configs discovered by the manifest and outer-archive resource heuristics are parsed in the current preflight schema. Target-class presence is checked only when the root project's resolved target compile classpath is supplied; no 1.20.1-to-1.21.1 Minecraft class identity mapping is assumed.",
-                "Mixin analysis currently covers outer-archive configs, mixin class entries, statically readable @Mixin class targets, source-side member annotations, and source-side handler/selector inventories for the six core Mixin 0.8.5 injector annotations. Target member mapping/presence, target-descriptor comparison, handler-contract validation, @At/@Constant/@Slice semantics, and semantic refmap remapping are not yet implemented. Source-nested JAR config/class provenance remains a future increment. Mixin plugin classes are inventoried as resources but never executed.",
+                "Mixin analysis currently covers outer-archive configs, mixin class entries, statically readable @Mixin class targets, source-side member annotations, and source-side handler/selector inventories for the six core Mixin 0.8.5 injector annotations. Schema 1.7 additionally preserves detailed source-side @At values/targets and typed @ModifyConstant discriminators. It does not resolve those selectors against target bytecode, validate injector handler stack contracts, interpret @Slice from/to boundaries, compare target member descriptors, or apply semantic refmap remapping. Source-nested JAR config/class provenance remains a future increment. Mixin plugin classes are inventoried as resources but never executed.",
                 "Reflection/resource string candidates remain heuristic and are not treated as confirmed bytecode references.",
                 "Installed provider discovery records top-level and nested archive paths, mod IDs, and declared versions. A provider ID/version match does not establish API or behavioral compatibility; installed version ranges and API compatibility are not verified.",
                 "Maven-style version ranges with numeric dotted versions are evaluated conservatively. Qualified or otherwise unsupported version strings remain explicitly unverified.",
@@ -508,6 +508,30 @@ public final class Forge1201PreflightAnalyzer {
                     .append("] selectors=").append(finding.targetSelectors())
                     .append(" source-targets=").append(finding.sourceTargetInternalNames())
                     .append(" — ").append(finding.evidence()).append('\n');
+            for (Forge1201MixinAnalyzer.AtFinding at : finding.injectionPoints()) {
+                out.append("    @At[").append(at.index()).append("] value=").append(at.value())
+                        .append(" kind=").append(at.valueKind()).append(" target=").append(at.rawTarget())
+                        .append(" parsed-target=").append(at.targetSelector())
+                        .append(" desc=").append(at.descSelector())
+                        .append(" opcode=").append(at.opcode()).append(" ordinal=").append(at.ordinal())
+                        .append(" shift=").append(at.shift()).append(" by=").append(at.shiftBy())
+                        .append(" slice=").append(at.sliceId()).append(" args=").append(at.args())
+                        .append(" remap=").append(at.remap()).append(" id=").append(at.id())
+                        .append(" [").append(at.status()).append("] — ").append(at.evidence()).append('\n');
+                at.warnings().forEach(warning -> out.append("      warning: ").append(warning).append('\n'));
+            }
+            for (Forge1201MixinAnalyzer.ConstantFinding constant : finding.constants()) {
+                out.append("    @Constant[").append(constant.index()).append("] declared=")
+                        .append(constant.declared()).append(" null=").append(constant.nullValue())
+                        .append(" int=").append(constant.intValue()).append(" float=").append(constant.floatValue())
+                        .append(" long=").append(constant.longValue()).append(" double=").append(constant.doubleValue())
+                        .append(" string=").append(constant.stringValue()).append(" class=")
+                        .append(constant.classValueDescriptor()).append(" ordinal=").append(constant.ordinal())
+                        .append(" slice=").append(constant.sliceId()).append(" expandZeroConditions=")
+                        .append(constant.expandZeroConditions()).append(" log=").append(constant.log())
+                        .append(" [").append(constant.status()).append("] — ").append(constant.evidence()).append('\n');
+                constant.warnings().forEach(warning -> out.append("      warning: ").append(warning).append('\n'));
+            }
             finding.warnings().forEach(warning -> out.append("    warning: ").append(warning).append('\n'));
         }
         mixins.warnings().forEach(warning -> out.append("  warning: ").append(warning).append('\n'));
