@@ -347,7 +347,7 @@ final class Forge1201MixinAnalyzerTest {
         var atHandler = result.injectors().stream()
                 .filter(finding -> finding.sourceMemberName().equals("atMetadata"))
                 .findFirst().orElseThrow();
-        assertEquals(3, atHandler.injectionPoints().size());
+        assertEquals(4, atHandler.injectionPoints().size());
 
         var fieldAt = atHandler.injectionPoints().getFirst();
         assertEquals("FIELD", fieldAt.value());
