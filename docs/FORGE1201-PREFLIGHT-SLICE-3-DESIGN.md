@@ -1,6 +1,6 @@
-Status: The Slice 3 implementation and planned forced loader test gate are complete at source checkpoint `b0d2b7b68915137aed44ef9153fdfa304fa5819` (BUILD SUCCESSFUL, 14/14 tasks executed). The real Symbiote Schema 1.3 / Analyzer 1.3.0 report has been generated and inspected from report-generation checkout `340805e8a1bb93bf1994645981c3246fd46298ea`. All 278 source-JAR classes were scanned; no Jar-in-Jar paths exist in this source JAR, so there are no source-nested archive class entries to scan. The report inventories 443 API types, 1,156 dynamic references, and 1,076/1,076 mapped source SRG member references. Static findings are not a target API or gameplay compatibility verdict.# Forge 1.20.1 Preflight Analyzer — Slice 3 Design
+# Forge 1.20.1 Preflight Analyzer — Slice 3 Design
 
-Status: nested source-archive bytecode scanning and SRG-to-1.20.1 Mojang-name normalization passed the user's forced clean loader test gate at 43f6db7726c3e023b331d714cbc3ccb6452e7564 (BUILD SUCCESSFUL, 14/14 tasks executed). A follow-up ClassRemapper audit added annotation-value visitors, null-safe contextual ordering and structural ASM fixtures; these newest changes are committed but still require the next forced loader test gate. The Symbiote Schema 1.3 report remains blocked until that gate passes.
+Status: Slice 3 implementation, focused forced loader tests, real Symbiote Schema 1.3 report generation/inspection, and the consolidated clean build have all passed. The forced loader test checkpoint is `b0d2b7b68915137aed44ef9153fdfa304fa5819`; the report-generation checkout was `340805e8a1bb93bf1994645981c3246fd46298ea`; the consolidated build passed after the user fast-forwarded to `3e1291494b6c10cc58b2c54be8978df972e6cd68`. The report is static evidence only. Slice 4 Mixin analysis is now the next analyzer milestone.
 
 ## Goal
 
@@ -291,4 +291,27 @@ The first actual report from `symbiote-1.1.3.jar` is now generated, parsed, and 
 The report has no Mixin config candidates, no source Jar-in-Jar paths, and no coremod class. It still contains package references under `org/spongepowered/asm`; the absence of a detected config is not Mixin target validation. The report does not validate target class/member existence, injection targets/handler descriptors/slices/refmaps/plugins, provider bytecode, translated resources, initialization, rendering, networking behavior, or gameplay. The 78 package-relocation candidates remain provisional until target verification; the 28 manual-adapter types require semantic review.
 
 The JSON and text summaries were compared and agree on source identity, schema, archive/provider/dependency totals, class counts, API/member/call-site totals, dynamic references, normalized SRG rows, and warnings. All Slice 3 test gates and the real report generation are complete. The next build gate is the consolidated clean root/loader/test-mod build; then begin Slice 4 Mixin analysis.
+
+## Slice 3 consolidated clean build gate — 2026-11-14
+
+The user fast-forwarded the Universal branch to `3e1291494b6c10cc58b2c54be8978df972e6cd68` and ran:
+
+```text
+:clean :loader:clean :testmods:clean :build :loader:build :testmods:assemble --no-daemon --console=plain
+BUILD SUCCESSFUL in 1m 23s
+33 actionable tasks: 24 executed, 9 from cache
+```
+
+Observed generated outputs:
+- SRG-to-Mojang Minecraft 1.20.1 mapping table: 64,225 members.
+- Shim index: 5,258 classes.
+- Beta 1.7.3 mapping output: 9,243 rows.
+- Legacy API stubs: 1,848 generated.
+- Legacy 1.7.10 test mod reobfuscation: 16 classes.
+- Loader/root/test-mod clean build, build, and assembly tasks completed.
+- `:loader:test` and root `:test` were `FROM-CACHE` during this consolidated build; they were separately forced and passed earlier at Slice 3 source checkpoint `b0d2b7b...` (`:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks`, 14/14 tasks executed).
+- Gradle emitted its non-fatal deprecated-feature / Gradle 9 compatibility warning. No failure occurred.
+
+This completes the planned Slice 3 source-test and consolidated build gates. It does not imply a NeoForge client/server launch or gameplay validation.
+
 
