@@ -669,6 +669,7 @@ public final class Forge1201MixinAnalyzer {
 
         boolean validPlacement = kind == MemberAnnotationKind.SHADOW
                 || elementKind == MemberElementKind.METHOD;
+        boolean invalidAnnotationValue = false;
         if (!validPlacement) {
             warnings.add(kind + " is expected on a method, but was found on a field.");
         }
@@ -678,7 +679,6 @@ public final class Forge1201MixinAnalyzer {
         }
 
         boolean validDescriptor = isValidMemberDescriptor(elementKind, sourceDescriptor);
-        boolean invalidAnnotationValue = false;
         if (!validDescriptor) {
             warnings.add("Member descriptor is not a valid JVM " + elementKind.name().toLowerCase() + " descriptor.");
         }
