@@ -70,7 +70,13 @@ final class Forge1201PreflightAnalyzerTest {
                 reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.INVOKEDYNAMIC_SITE));
         assertTrue(first.dynamicReferences().stream().anyMatch(reference ->
                 reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.METHOD_HANDLE
+                        && reference.context().equals("invokedynamic-bootstrap")));
+        assertTrue(first.dynamicReferences().stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.METHOD_HANDLE
                         && reference.context().equals("invokedynamic-argument-1")));
+        assertTrue(first.dynamicReferences().stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.METHOD_HANDLE
+                        && reference.context().equals("ldc")));
         assertTrue(first.dynamicReferences().stream().anyMatch(reference ->
                 reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.FIELD_HANDLE
                         && reference.context().equals("ldc")));
@@ -86,6 +92,8 @@ final class Forge1201PreflightAnalyzerTest {
                         && reference.instructionOrdinal() >= 0));
 
         assertEquals(Forge1201PreflightAnalyzer.toJson(first), Forge1201PreflightAnalyzer.toJson(second));
+        assertTrue(Forge1201PreflightAnalyzer.toJson(first).contains("\"dynamicReferences\""));
+        assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("Dynamic / bootstrap references:"));
         assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("not a compatibility approval"));
         assertTrue(first.limitations().stream().anyMatch(value -> value.contains("outer JAR only")));
         assertTrue(first.limitations().stream().anyMatch(value -> value.contains("API compatibility are not verified")));
@@ -246,6 +254,8 @@ final class Forge1201PreflightAnalyzerTest {
                 false);
         method.visitLdcInsn(new org.objectweb.asm.Handle(
                 Opcodes.H_GETFIELD, "net/minecraft/world/entity/Entity", "f_123_", "I", false));
+        method.visitLdcInsn(new org.objectweb.asm.Handle(
+                Opcodes.H_INVOKEVIRTUAL, "net/minecraft/world/entity/Entity", "m_789_", "()V", false));
         method.visitLdcInsn(org.objectweb.asm.Type.getType("Lnet/minecraft/world/entity/Entity;"));
         method.visitLdcInsn(org.objectweb.asm.Type.getMethodType("()Lnet/minecraft/world/entity/Entity;"));
         method.visitInvokeDynamicInsn(
