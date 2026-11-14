@@ -843,3 +843,16 @@ The user must fast-forward the clean local checkout from its last tested base `a
 
 The forced loader gate is the first validation. If it fails, diagnose and fix the actual compiler/test failure before any broader build. If it passes, update this plan and handoff with the new checkpoint; the next appropriate integration checkpoint is a full `clean build`. Do not claim Schema 1.5 is validated until the user supplies a successful Gradle output.
 
+
+
+### Follow-up contract corrections — latest code/test commit `a118a81b69f6d94f81d02840c258ab26a84e7249`
+
+Before handing this increment to the user, the Mixin inventory was tightened against the upstream annotation contracts:
+
+- `@Accessor` and `@Invoker` methods must be abstract; concrete methods are now marked `INVALID_ANNOTATION_VALUE`.
+- The private-member alias restriction is applied to `@Shadow` aliases only. `@Overwrite` aliases remain captured and are not incorrectly marked invalid merely because the overwrite method is public.
+- ASM-generated test mixin classes are abstract when they contain Accessor/Invoker methods. A separate concrete Accessor fixture tests the new invalid-value state.
+- The prior documented behavior remains: class-level `@Mixin(remap)` is the default for member annotations, member override wins, Shadow prefixes apply to methods only, and no target member mapping/presence claim is made.
+
+**No Gradle test has yet been run against this Schema 1.5 batch.** The last green user-run build is still the Schema 1.4 checkpoint `afdf5c0b8b4410d0deb401683e60b0255843c58d`. The exact current code/test head is `a118a81b69f6d94f81d02840c258ab26a84e7249`; after documentation updates, verify the final remote branch head before giving the guarded pull command.
+
