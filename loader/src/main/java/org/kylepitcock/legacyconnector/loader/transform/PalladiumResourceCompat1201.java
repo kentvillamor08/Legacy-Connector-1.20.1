@@ -291,7 +291,7 @@ final class PalladiumResourceCompat1201 {
 
     /**
      * KubeJS 1.20.1 used BlockEntityInfo.serverTick(frequency, offset, callback).
-     * KubeJS 7 splits the ticker setup from the targeted BlockEvents callback.
+     * KubeJS 7 splits ticker setup from the targeted BlockEvents callback.
      * Preserve the original 2500/250 cadence for both temporary crystal blocks.
      */
     private static int rewriteAlienEvoTemporaryCrystalBlockTicks(Map<String, byte[]> resources) {
@@ -299,13 +299,7 @@ final class PalladiumResourceCompat1201 {
         if (original == null) return 0;
 
         String script = new String(original, StandardCharsets.UTF_8);
-        String lineEnding = script.contains("\\r\\n") ? "\\r\\n" : "\\n";
-        String legacy = "blockEntity.serverTick(2500, 250, entity => {" + lineEnding
-                + "                entity.level.destroyBlock(entity.blockPos, false)" + lineEnding
-                + "            })";
-        String migrated = "blockEntity.serverTicking();" + lineEnding
-                + "            blockEntity.tickFrequency(2500);" + lineEnding
-                + "            blockEntity.tickOffset(250);";
+        String lineEnding = script.contains("\r\n") ? "\r\n" : "\n";
         String marker = "// Legacy Connector: AlienEvo temporary crystal expiry on KubeJS 7";
         String handlers = marker + lineEnding
                 + "BlockEvents.blockEntityTick('alienevo:crystal_block', event => {" + lineEnding
@@ -315,8 +309,10 @@ final class PalladiumResourceCompat1201 {
                 + "    event.level.destroyBlock(event.block.pos, false);" + lineEnding
                 + "});" + lineEnding;
 
-        int legacyCount = occurrences(script, legacy);
-        int migratedCount = occurrences(script, migrated);
+        String legacyStart = "blockEntity.serverTick(2500, 250, entity => {";
+        String migratedOffset = "blockEntity.tickOffset(250);";
+        int legacyCount = occurrences(script, legacyStart);
+        int migratedCount = occurrences(script, migratedOffset);
         boolean hasHandlers = script.contains(marker);
         if (legacyCount == 0 && migratedCount == 2 && hasHandlers) return 0;
         if (legacyCount != 2 || migratedCount != 0 || hasHandlers) {
@@ -326,8 +322,31 @@ final class PalladiumResourceCompat1201 {
                             + migratedCount + " migrated; event handlers present=" + hasHandlers);
         }
 
-        String migratedScript = script.replace(legacy, migrated) + lineEnding + handlers;
-        resources.put(ALIEN_EVO_BLOCKS, migratedScript.getBytes(StandardCharsets.UTF_8));
+        java.util.regex.Pattern pattern = java.util.regex.Pattern.compile(
+                "(?m)^([\\t ]*)blockEntity\\.serverTick\\(2500, 250, entity => \\{\\R"
+                        + "[\\t ]*entity\\.level\\.destroyBlock\\(entity\\.blockPos, false\\)\\R"
+                        + "[\\t ]*\\}\\)");
+        java.util.regex.Matcher matcher = pattern.matcher(script);
+        StringBuffer migrated = new StringBuffer();
+        int replacements = 0;
+        while (matcher.find()) {
+            String indent = matcher.group(1);
+            String replacement = indent + "blockEntity.serverTicking();" + lineEnding
+                    + indent + "blockEntity.tickFrequency(2500);" + lineEnding
+                    + indent + "blockEntity.tickOffset(250);";
+            matcher.appendReplacement(migrated, java.util.regex.Matcher.quoteReplacement(replacement));
+            replacements++;
+        }
+        matcher.appendTail(migrated);
+        if (replacements != 2) {
+            throw new IllegalStateException(
+                    "AlienEvo blocks.js expected two complete legacy temporary crystal callbacks, found "
+                            + replacements);
+        }
+
+        resources.put(
+                ALIEN_EVO_BLOCKS,
+                (migrated.toString() + lineEnding + handlers).getBytes(StandardCharsets.UTF_8));
         return 1;
     }
 
