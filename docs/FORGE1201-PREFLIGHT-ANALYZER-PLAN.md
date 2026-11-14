@@ -1,4 +1,4 @@
-# Forge 1.20.1 Preflight Compatibility Analyzer
+**Status:** Slice 1 and 2 are implemented and validated. Slice 3 nested source-archive bytecode scanning and SRG-to-Mojang normalization passed the user's forced clean loader test gate at 43f6db7726c3e023b331d714cbc3ccb6452e7564 (BUILD SUCCESSFUL, 14/14 tasks executed). A follow-up ClassRemapper annotation/context audit and synthetic fixture matrix are now committed on feat/forge1201-preflight-analyzer; those newest commits are pending the next user-run forced loader test gate. Do not generate the Symbiote Schema 1.3 report until that newest gate passes.
 
 **Status:** Slices 1 and 2 are implemented and validated. The first Slice 3 dynamic-reference batch passed the user's forced focused loader test gate at `4457199a4109d774b25a428e7c68e23b4ec3b4ce` (`BUILD SUCCESSFUL in 24s`, 12/12 tasks executed). The nested-bytecode/SRG integration was committed as a494d20a3be797abd3de563fa3672df69e2276da; its stale limitation assertion was corrected in 3c6febb075c32391b6879b0f3ef00c5856e80d51; and test runtime mapping-resource wiring was added in 0c7c55b72033c986d94f1cba5d836dfce26e95a0. The test/runtime wiring checkpoint is 0c7c55b72033c986d94f1cba5d836dfce26e95a0; the branch may include a later documentation-only commit. Use the exact remote tip in the testbench handoff for the guarded pull. Structural reference coverage remains under audit.
 
@@ -430,3 +430,53 @@ Commit 0c7c55b72033c986d94f1cba5d836dfce26e95a0 updates loader/build.gradle so t
 ## 2026-11-14 — Oversized nested-class summary warning regression
 
 The user pulled commit `1c403bcc93f3e2c1d57215aea7e41419f29e1ed3` and ran the forced clean loader test gate. JUnit completed 454 tests with one failure at `Forge1201PreflightAnalyzerTest.java:144`, in `reportsOversizedNestedClassEntriesAsExplicitlySkipped()`. The oversized class was correctly counted as skipped and the archive snapshot correctly emitted the limit warning, but the per-archive `ClassScanSummary.warnings()` did not include snapshot class-entry warnings. The fix is committed in `54afdec3350bd31cf0ca8f5df63017f45a0e8af0`; the accompanying Slice 3 design documentation is committed in `0c22c684f984f20e8404f91cadcf65dcbd75818b`. Current branch tip after these commits: `0c22c684f984f20e8404f91cadcf65dcbd75818b`. User test gate for this fix is pending. Do not generate the Symbiote Schema 1.3 report before it passes.
+
+## CURRENT CONTINUATION UPDATE — 2026-11-14 — ClassRemapper structural/annotation audit batch committed
+
+### Verified test gate immediately before this batch
+
+The user confirmed the Universal worktree was at the expected prior tip 43f6db7726c3e023b331d714cbc3ccb6452e7564 and ran:
+
+    :loader:clean :loader:test --no-daemon --console=plain --rerun-tasks
+    BUILD SUCCESSFUL in 52s
+    14 actionable tasks: 14 executed
+
+This validates the nested oversized-class warning-summary fix. The console excerpt did not show a JUnit count. The PSReadLine 2.0.0 warning is unrelated. The checkout was already at the expected remote SHA when the guard reported a stale local expected SHA; the subsequent fast-forward-only pull correctly reported Already up to date.
+
+### New untested code/test batch on the Universal branch
+
+Repository: kentvillamor08/Legacy-Connector-1.20.1
+Branch: feat/forge1201-preflight-analyzer
+Latest code/test commit before this documentation update: 3c01dc6d6361d7140324265d30df8f1eb5880a6f
+
+Key source changes:
+
+- Forge1201ApiUsageAnalyzer now returns recording annotation visitors for class, field, record-component, method, parameter, type, instruction, try/catch, local-variable and annotation-default scopes.
+- Nested annotation values and arrays are recursively traversed. ASM Type values in annotations become class-literal dynamic-reference rows with archive/class/caller provenance; nested enum type descriptors remain captured through the ClassRemapper's normal remapping callbacks.
+- Instruction type-annotation values retain the preceding instruction ordinal. Class/member metadata annotations use ordinal -1.
+- Dynamic-reference display output now handles class/member contexts that have no method name/descriptor.
+- Dynamic-reference ordering now treats null caller-method/descriptor keys safely and deterministically.
+
+New synthetic test:
+
+- Distinct class references prove coverage from class superclass/interfaces/generic bounds; field and method descriptors/signatures; declared exceptions; try/catch types; stack-map frames; local-variable descriptors/signatures; NEW type instructions; multi-dimensional array descriptors; and record-component descriptors/signatures.
+- Annotation contexts include class/class-type, field/field-type, method/method-return-type, parameter, instruction, try/catch, local-variable, record-component, and nested annotation/array/enum/class-literal values.
+- The new test runs byte arrays through Inventory.scanNestedClass; it does not load or define the synthetic classes.
+
+The latest source/test batch is NOT yet compile/test validated by the user. Do not claim these changes pass until the next forced test output is supplied.
+
+### Exact next action
+
+First pull the latest remote branch tip with repository, branch, current local HEAD and clean-worktree checks. The user's current local worktree was confirmed at 43f6db7726c3e023b331d714cbc3ccb6452e7564; the remote tip has moved after that checkpoint. Resolve the exact remote SHA using git ls-remote origin refs/heads/$branch, then use git pull --ff-only origin $branch and verify the pulled HEAD equals the SHA returned by ls-remote. Run:
+
+    Push-Location $repo
+    .\gradlew.bat :loader:clean :loader:test --no-daemon --console=plain --rerun-tasks
+    $testExit = $LASTEXITCODE
+    Pop-Location
+    if ($testExit -ne 0) { throw "Slice 3 ClassRemapper structural/annotation test gate failed." }
+
+Review the complete output. Do not generate the new Symbiote report before this test gate passes.
+
+After a green gate: review/finish duplicate raw-ZIP-entry and deep nested ConstantDynamic/depth-limit tests; generate a new uniquely suffixed Symbiote Schema 1.3 JSON/text report (never overwrite Slice 2 run-3); inspect all nested/SRG/annotation evidence; then run the consolidated clean build. Runtime launch/gameplay compatibility remains unverified.
+
+Keep Palladium + Alien Evolution paused and isolated from this Universal branch. Preserve the goal of a reusable, modpack-ready Forge 1.20.1-to-NeoForge 1.21.1 compatibility platform, not one-off mod-specific hacks.
