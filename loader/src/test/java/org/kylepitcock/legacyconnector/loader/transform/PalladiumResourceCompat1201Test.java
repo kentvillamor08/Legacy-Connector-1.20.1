@@ -526,6 +526,38 @@ class PalladiumResourceCompat1201Test {
     }
 
 
+
+    @Test
+    void detransformRestoresWatchStateWhenNoCooldownRemainsAndIsIdempotent() {
+        Map<String, byte[]> resources = new HashMap<>();
+        put(resources, "addon/alienevo/kubejs_scripts/detransform.js", """
+                if (!hasMasterControl) {
+                    palladium.setProperty(entity, 'watch_state', "timeout");
+                }
+                if (!hasMasterControl) {
+                    let scoreboardManager = entity.server.scoreboard;
+                    let timerObjective = scoreboardManager.getObjective('AlienEvo.Timer');
+                    let playerTimerScore = scoreboardManager.getOrCreatePlayerScore(playerUsername, timerObjective);
+                    let currentTimerValue = playerTimerScore.getScore();
+                    entity.server.runCommandSilent(`execute as ${playerUsername} at @s run scoreboard players set @s AlienEvo.Timer ${Math.floor(currentTimerValue / 2)}`);
+                }
+                """);
+
+        assertEquals(1, PalladiumResourceCompat1201.apply(resources));
+        String detransform = get(resources, "addon/alienevo/kubejs_scripts/detransform.js");
+        assertTrue(detransform.contains("if (timerObjective != null) {"));
+        assertTrue(detransform.contains("if (currentTimerValue <= 1) {"));
+        assertTrue(detransform.contains(
+                "palladium.setProperty(entity, 'watch_state', \"default\");"));
+        assertTrue(detransform.contains("} else {"));
+        assertEquals(2, occurrences(detransform,
+                "palladium.setProperty(entity, 'watch_state', \"default\");"));
+        assertTrue(detransform.contains(
+                "Math.floor(currentTimerValue / 2)"));
+        assertFalse(detransform.contains("getScore()"));
+        assertEquals(0, PalladiumResourceCompat1201.apply(resources));
+    }
+
     @Test
     void rechargeClearsTheFinalOneTickCooldownAndIsIdempotent() {
         Map<String, byte[]> resources = new HashMap<>();

@@ -1042,7 +1042,10 @@ final class PalladiumResourceCompat1201 {
         String indent = script.substring(lineStart, declarationIndex);
         String lineEnding = declarationEnd > 0 && script.charAt(declarationEnd - 2) == '\r' ? "\r\n" : "\n";
         String guard = indent + "if (timerObjective != null) {";
-        if (script.startsWith(guard, declarationEnd)) return script;
+        String noCooldownMarker = indent + "    if (currentTimerValue <= 1) {";
+        String noObjectiveMarker = indent + "} else {" + lineEnding
+                + indent + "    palladium.setProperty(entity, 'watch_state', \"default\");";
+        if (script.contains(noCooldownMarker) && script.contains(noObjectiveMarker)) return script;
 
         String timerWrite = "entity.server.runCommandSilent(`execute as ${playerUsername} at @s run scoreboard players set @s AlienEvo.Timer ${Math.floor(currentTimerValue / 2)}`);";
         int timerWriteIndex = script.indexOf(timerWrite, declarationEnd);
@@ -1052,11 +1055,43 @@ final class PalladiumResourceCompat1201 {
         int timerWriteEnd = script.indexOf('\n', timerWriteIndex);
         if (timerWriteEnd < 0) timerWriteEnd = script.length();
         else timerWriteEnd++;
+
+        String timerStatements = script.substring(declarationEnd, timerWriteEnd);
+        String indentedStatements = indentScriptBlock(timerStatements, indent, "    ");
+        String resetDefault = indent + "    palladium.setProperty(entity, 'watch_state', \"default\");";
+        String migratedBlock = guard + lineEnding
+                + indentedStatements
+                + indent + "    if (currentTimerValue <= 1) {" + lineEnding
+                + resetDefault + lineEnding
+                + indent + "    }" + lineEnding
+                + indent + "} else {" + lineEnding
+                + resetDefault + lineEnding
+                + indent + "}" + lineEnding;
+
         return script.substring(0, declarationEnd)
-                + guard + lineEnding
-                + script.substring(declarationEnd, timerWriteEnd)
-                + indent + "}" + lineEnding
+                + migratedBlock
                 + script.substring(timerWriteEnd);
+    }
+
+    /** Adds one indentation level to each nonblank line in a script block. */
+    private static String indentScriptBlock(String block, String baseIndent, String additionalIndent) {
+        StringBuilder indented = new StringBuilder(block.length() + 32);
+        int start = 0;
+        while (start < block.length()) {
+            int newline = block.indexOf('\n', start);
+            int end = newline < 0 ? block.length() : newline + 1;
+            String line = block.substring(start, end);
+            if (!line.isBlank() && line.startsWith(baseIndent)) {
+                indented.append(baseIndent).append(additionalIndent)
+                        .append(line.substring(baseIndent.length()));
+            } else if (!line.isBlank()) {
+                indented.append(additionalIndent).append(line);
+            } else {
+                indented.append(line);
+            }
+            start = end;
+        }
+        return indented.toString();
     }
 
     private static boolean isAlienEvoKubeJsScript(String path) {
