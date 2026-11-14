@@ -32,8 +32,8 @@ import java.util.zip.ZipFile;
  * inspect them, validate mixin injection semantics, or prove runtime compatibility.</p>
  */
 public final class Forge1201PreflightAnalyzer {
-    public static final String SCHEMA_VERSION = "1.2";
-    public static final String ANALYZER_VERSION = "1.2.0";
+    public static final String SCHEMA_VERSION = "1.3";
+    public static final String ANALYZER_VERSION = "1.3.0";
     public static final String TARGET_MINECRAFT_VERSION = "1.21.1";
     public static final String TARGET_NEOFORGE_VERSION = "21.1.258";
     private static final int MAX_MIXIN_JSON_BYTES = 1024 * 1024;
@@ -117,6 +117,7 @@ public final class Forge1201PreflightAnalyzer {
             List<ApiMemberFinding> fieldReferences,
             List<ApiMethodCallSite> methodCallSites,
             List<ApiFieldCallSite> fieldCallSites,
+            List<Forge1201ApiUsageAnalyzer.ApiDynamicReference> dynamicReferences,
             List<String> observedNativeModIds,
             List<String> limitations,
             Forge1201ArchiveGraph.Result archiveGraph) {
@@ -137,6 +138,7 @@ public final class Forge1201PreflightAnalyzer {
             fieldReferences = List.copyOf(fieldReferences);
             methodCallSites = List.copyOf(methodCallSites);
             fieldCallSites = List.copyOf(fieldCallSites);
+            dynamicReferences = List.copyOf(dynamicReferences);
             observedNativeModIds = List.copyOf(observedNativeModIds);
             limitations = List.copyOf(limitations);
         }
@@ -205,6 +207,7 @@ public final class Forge1201PreflightAnalyzer {
         List<ApiMemberFinding> fieldReferences = new ArrayList<>();
         List<ApiMethodCallSite> methodCallSites = new ArrayList<>();
         List<ApiFieldCallSite> fieldCallSites = new ArrayList<>();
+        List<Forge1201ApiUsageAnalyzer.ApiDynamicReference> dynamicReferences = new ArrayList<>();
         int classCount = 0;
         AnalysisStatus analysisStatus = AnalysisStatus.BYTECODE_INVENTORY_SKIPPED_METADATA_NOT_RECOGNIZED;
         ForgeMetadata forgeMetadata = null;
@@ -286,6 +289,7 @@ public final class Forge1201PreflightAnalyzer {
                             .thenComparing(ApiFieldCallSite::targetName)
                             .thenComparing(ApiFieldCallSite::targetDescriptor)
                             .thenComparingInt(ApiFieldCallSite::opcode)).toList());
+            dynamicReferences.addAll(usage.dynamicReferences());
             analysisStatus = AnalysisStatus.BYTECODE_INVENTORY_RAN_FOR_RECOGNIZED_OUTER_JAR;
         }
 
@@ -307,10 +311,10 @@ public final class Forge1201PreflightAnalyzer {
         List<String> observedNativeIds = nativeIds.stream().sorted().toList();
         List<String> limitations = List.of(
                 "This is static preflight evidence only; it does not prove initialization, gameplay, client rendering, synchronization, or stability.",
-                "Slice 2 recursively inventories bounded nested archives and metadata, but bytecode references are still scanned in the outer JAR only; nested bytecode analysis is deferred to Slice 3.",
+                "Slice 3 currently records contextual invokedynamic sites, bootstrap handles/arguments, LDC handles/types, and nested ConstantDynamic values in the outer JAR; nested archive class bytecode and source SRG-to-Mojang name normalization remain pending.",
                 "Nested archive traversal is bounded by depth, archive count, per-archive size, and total inflated-byte limits. Archives skipped by a limit or rejected as unsafe/corrupt remain explicit findings.",
-                "Mixin discovery uses manifest declarations and resource path/content heuristics. Injection targets, handler descriptors, slices, refmaps, and dynamic plugins are not validated in Slice 2.",
-                "The current bytecode inventory is not exhaustive for every reflection, method-handle, invokedynamic, or constant-dynamic reference.",
+                "Mixin discovery uses manifest declarations and resource path/content heuristics. Injection targets, handler descriptors, slices, refmaps, and dynamic plugins are not validated in Slice 3.",
+                "Reflection/resource string candidates remain heuristic and are not treated as confirmed bytecode references.",
                 "Installed provider discovery records top-level and nested archive paths, mod IDs, and declared versions. A provider ID/version match does not establish API or behavioral compatibility; installed version ranges and API compatibility are not verified.",
                 "Maven-style version ranges with numeric dotted versions are evaluated conservatively. Qualified or otherwise unsupported version strings remain explicitly unverified.",
                 "Target class/member verification, shim behavior checks, translated-resource comparison, and runtime feedback are later analyzer slices."
@@ -323,7 +327,7 @@ public final class Forge1201PreflightAnalyzer {
                 archiveEntries.size(), archiveEntries, resourceNamespaces.stream().toList(), manifest,
                 mixinCandidates, coreModClass, jarInJarPaths.stream().toList(), classCount, entrypoints,
                 packageReferences, apiTypes, methodReferences, fieldReferences, methodCallSites, fieldCallSites,
-                observedNativeIds, limitations, archiveGraph);
+                dynamicReferences, observedNativeIds, limitations, archiveGraph);
     }
 
     public static String toJson(PreflightResult result) {
@@ -446,7 +450,12 @@ public final class Forge1201PreflightAnalyzer {
         out.append("Method references: ").append(result.methodReferences().size())
                 .append(" | field references: ").append(result.fieldReferences().size()).append('\n')
                 .append("Method call sites: ").append(result.methodCallSites().size())
-                .append(" | field call sites: ").append(result.fieldCallSites().size()).append('\n');
+                .append(" | field call sites: ").append(result.fieldCallSites().size()).append('\n')
+                .append("Dynamic / bootstrap references: ").append(result.dynamicReferences().size()).append('\n');
+        for (Forge1201ApiUsageAnalyzer.ApiDynamicReference reference : result.dynamicReferences()) {
+            out.append("  ").append(reference.display()).append(" (x")
+                    .append(reference.count()).append(") tag=").append(reference.handleTag()).append('\n');
+        }
         if (!result.metadataWarnings().isEmpty()) {
             out.append("\nMetadata warnings:\n");
             result.metadataWarnings().forEach(warning -> out.append("  - ").append(warning).append('\n'));
