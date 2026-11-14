@@ -1,0 +1,162 @@
+# Forge 1.20.1 Preflight Analyzer — Slice 4 Mixin Analysis Design
+
+Status: Design checkpoint only. No Slice 4 analyzer source changes are claimed yet. Slice 3 and its consolidated clean build passed; this document defines the next bounded implementation.
+
+## Goal
+
+Turn the existing offline Mixin triage utility into a reusable, deterministic analyzer that contributes machine-readable findings to the unified Forge 1.20.1 -> NeoForge 1.21.1 preflight report.
+
+The analyzer must do more than count missing classes or members. It must preserve the provenance from each config to each mixin class, target, shadow/accessor/invoker, injector selector, `@At` selector, slice boundary, refmap, and plugin. It must distinguish a confirmed structural miss from incomplete information, unsupported selector syntax, remapping uncertainty, plugin-dependent behavior, and semantic/runtime validation.
+
+Mixin analysis remains static. It must never load or initialize classes from the mod, instantiate a Mixin plugin, apply a mixin, or claim that an injection will succeed at runtime.
+
+## Existing implementation audit
+
+The current implementation is `loader/src/main/java/org/kylepitcock/legacyconnector/loader/tools/Mixin1201Triage.java`. Source review at Universal branch `3e1291494b6c10cc58b2c54be8978df972e6cd68` found these concrete limitations:
+
+1. It is a CLI-only utility. Its result is a mutable `Stats` accumulator and a text file; there is no reusable per-run result model for `Forge1201PreflightAnalyzer` or JSON consumers.
+2. Target indexes and rename tables are static mutable maps (`MC_INDEX`, `CLASS_RENAMES`, `MEMBER_RENAMES`). They can leak state between analyses and are not safe for independent/repeated runs.
+3. Its CLI requires a merged target JAR and optional external rename-table directory. The target class index stores member names but not descriptors, and the lookup checks name presence rather than exact owner/name/descriptor signatures.
+4. Config discovery is based on JSON path/content heuristics inside each scanned JAR. The unified preflight already discovers manifest `MixinConfigs` declarations and heuristic candidates, but the triage utility does not consume that unified provenance. Forge TOML mixin declarations are not currently exposed by `Forge1201JarInspector`.
+5. A config whose declared mixin class is not found in the source archive is silently skipped. Malformed candidate JSON is swallowed. These cases therefore do not become explicit report findings.
+6. `@Mixin` targets are read only from invisible class annotations. The implementation should support both visible and invisible annotations and both class-literal and string targets.
+7. Member checks are mostly name-only. They do not consistently compare descriptors, distinguish inherited/incomplete hierarchies, or preserve every selector as a structured finding.
+8. Injection annotations and some `@At` strings are recognized, but full selector parsing, exact descriptor verification, slices (`from`/`to`), opcode/ordinal/shift constraints, and handler-descriptor semantics are incomplete.
+9. Refmaps are not parsed or validated. A config plugin is counted but never checked as a class resource and is never executed (execution must remain prohibited).
+10. Dynamic targets, plugin-provided targets, unsupported selectors, and missing target-index data are not represented with sufficiently precise uncertainty states.
+
+These are implementation gaps to correct, not grounds to discard the existing tool. Preserve useful CLI compatibility by making the CLI a thin wrapper over the new result API.
+
+## Architecture
+
+### 1. A state-free analysis API
+
+Introduce a dedicated `Forge1201MixinAnalyzer` (name may be adjusted to match repository conventions) with an immutable `analyze` entry point. Inputs should be explicit and per invocation:
+
+- a safe source-archive view that exposes entry names, bounded entry streams/bytes, archive identity, and provenance path;
+- the discovered config declarations and their discovery sources;
+- a read-only target class/member index for the selected Minecraft/NeoForge target;
+- source-to-target class/member rename data, with its version/source identified;
+- limits and target profile.
+
+No static mutable analysis state. Repeated calls with different fixtures must not share cached classes, mappings, counters, or findings. Any cache must be owned by one analyzer invocation and keyed by the exact target/mapping profile.
+
+Retain `Mixin1201Triage` as a command-line compatibility layer that builds the inputs, invokes the reusable API, and formats a legacy text summary. It must not contain a second implementation of selector analysis.
+
+### 2. Result model and provenance
+
+Add immutable records (or equivalent repository-standard result types) for:
+
+- **Config finding:** archive path, config resource path, discovery source(s), parse state, package, required/minimum version/compatibility level, plugin class, refmap path, injector defaults, and config-level warnings.
+- **Mixin class finding:** config path, declared section (`mixins`, `client`, or `server`), fully resolved class name, source class-entry path, class presence, annotation parse state, and plugin/dynamic flags.
+- **Mixin target finding:** original selector, source owner, mapped target owner, target status, selector form (class literal or string), remap flag, and evidence.
+- **Member finding:** annotation kind, source mixin class/member, target owner/member, source and target descriptors, member kind (method/field), match state, alias/prefix evidence, and whether the check is inherited.
+- **Injection finding:** injector annotation, target selector(s), handler signature, parsed `@At` selectors, slice `from`/`to` boundaries, ordinal/opcode/shift/constraints where present, and a conservative validation state.
+- **Plugin/refmap finding:** declared resource/class, existence and parse checks, remap information, and reasons static analysis cannot resolve behavior.
+- **Warning/limitation:** stable code, severity, evidence level, source location, and an explanatory message.
+
+Every finding must point back to its config and source archive/class entry. Do not reduce the result to counters or a string key like `owner.name`. Sorting must be stable and independent of ZIP entry order.
+
+### 3. Config discovery and safe parsing
+
+Combine these sources while retaining how each path was discovered:
+
+1. Manifest `MixinConfigs` declarations (authoritative declared paths).
+2. Supported Forge metadata declarations, where the metadata reader explicitly recognizes them. Extend the partial TOML inspector for the actual supported declaration form rather than guessing from arbitrary text. Unsupported/multiline/ambiguous metadata must remain a warning and must not be silently treated as absent.
+3. Resource-path and content heuristics (candidate only, never promoted to a confirmed declaration solely because a filename contains “mixin”).
+
+Normalize and validate every config path. Reject absolute paths, parent traversal, NULs, and ambiguous duplicate ZIP entries. Missing declared configs, invalid JSON, oversized configs, and heuristic false positives must have explicit result states.
+
+Parse standard config fields without instantiating any plugin: `package`, `required`, `minVersion`, `compatibilityLevel`, `plugin`, `refmap`, `mixins`, `client`, `server`, and `injectors.defaultRequire` (plus other known scalar/list values only when supported). Resolve each entry relative to the config package using the exact config/archive context. A missing class named in a config is a finding, not a silently ignored entry.
+
+Use bounded JSON sizes, bounded config counts, bounded aggregate bytes, and safe ZIP entry reads. Nested source archives must use the existing `Forge1201ArchiveGraph` traversal and its established depth/archive/size/inflated-byte budgets; do not create a second unbounded archive walker. If a source-nested archive cannot be inspected because a limit or archive error was reached, report the omitted analysis explicitly.
+
+### 4. Target class/member index
+
+Reuse or refactor the structural class metadata work already present in `Forge1201TargetApiVerifier`. Mixin validation needs exact class hierarchy, method descriptor, and field descriptor information, not only member names.
+
+The target index should be read-only and expose:
+- class presence, superclass, interfaces, and whether hierarchy resolution is complete;
+- methods by name plus descriptor, including constructor/static initializer distinctions;
+- fields by name plus descriptor;
+- inherited lookup with a trace of the hierarchy considered;
+- missing target class vs incomplete target index vs a confirmed absent member.
+
+Use the pinned target profile (Minecraft 1.21.1 / NeoForge 21.1.258) and identify the exact target source/index used. Any source 1.20.1 -> target class/member renames must come from a named, versioned mapping input. Do not silently assume that a class/package rename table is complete. Unavailable mapping data yields an explicit unresolved/remapping-required state.
+
+Do not treat a matching name alone as a verified member. Exact descriptor checks are required where the annotation/selector provides enough descriptor information. If Mixin's selector language or an event/plugin alters the resolved target, mark it as requiring additional validation rather than fabricating a match.
+
+### 5. Annotation and selector coverage
+
+At minimum, inspect annotations on the mixin class, fields, and methods, including visible and invisible annotations.
+
+- `@Mixin`: class-literal and string targets, multiple targets, remap/pseudo flags, and missing/ambiguous target declarations.
+- `@Shadow`: default name, prefix, aliases, remap flags, field vs method, and descriptor.
+- `@Overwrite`: exact method signature, inherited/target state, and overwrite constraints when statically observable.
+- `@Accessor` / `@Invoker`: explicit value or inferred target name, getter/setter/invoker shape, target field/method kind, and descriptor compatibility.
+- Injection annotations: `@Inject`, `@Redirect`, `@ModifyArg`, `@ModifyArgs`, `@ModifyVariable`, `@ModifyConstant`, `@ModifyExpressionValue`, `@ModifyReceiver`, `@ModifyReturnValue`, `@WrapOperation`, `@WrapWithCondition`, `@WrapMethod`, and other known injector annotations. Unknown Mixin annotation types must remain visible as unclassified findings.
+- `@At`: preserve `value`, `target`, `args`, `ordinal`, `opcode`, `shift`, and `by`. Parse method and field selectors including owners and descriptors. Distinguish codes such as `HEAD`, `TAIL`, `RETURN`, `INVOKE`, `INVOKE_ASSIGN`, `FIELD`, `NEW`, and `CONSTANT`; unsupported codes/args must be marked unresolved rather than guessed.
+- `@Slice`: analyze both `from` and `to` `@At` boundaries, retaining each boundary separately.
+
+Validate target existence structurally where an exact selector is resolvable. Do not claim that a structurally present target proves a valid injection point or correct handler stack semantics. Handler argument/return compatibility should be checked only for rules that can be stated precisely; all other forms remain explicitly semantic/runtime validation.
+
+### 6. Refmaps and plugins
+
+- Check whether the declared refmap resource exists in the same archive context; parse its JSON under limits and preserve its mapping sections/data. Missing or malformed refmaps are findings.
+- Do not assume names are already in target namespace merely because a refmap is absent. Report source mapping/remap ambiguity.
+- Check whether the declared plugin class exists in the archive (or an explicitly identified dependency/source archive). Never load, instantiate, initialize, or call it.
+- Any config plugin that can provide dynamic mixin lists/targets, a dynamic selector, or runtime decisions must make affected findings `PLUGIN_DEPENDENT` / `RUNTIME_VALIDATION_REQUIRED`. Static target guesses must not be marked verified.
+
+### 7. Integration and reporting
+
+Extend `Forge1201PreflightAnalyzer.PreflightResult` with a versioned, immutable Mixin analysis result. Keep the report's deterministic sorting and explicit limitation policy. Include per-config summaries in text output but preserve all structured per-target/member/injection findings in JSON.
+
+Keep Slice 4 separate from target API migration decisions. A Mixin finding may consume the shared target class index and class/member rename maps, but must not invent new compatibility adapters or rewrite the mod. Later slices can join these findings with bridge/shim coverage and runtime feedback.
+
+## Finding-state vocabulary
+
+Use states with distinct meanings; adapt names to existing repository enums if a compatible vocabulary exists:
+
+- `DECLARED_CONFIG`: path came from a recognized declaration.
+- `HEURISTIC_CONFIG_CANDIDATE`: resource heuristic only.
+- `CONFIG_MISSING`, `CONFIG_INVALID`, `CONFIG_LIMIT_EXCEEDED`, `CONFIG_DUPLICATE_ENTRY`.
+- `MIXIN_CLASS_PRESENT`, `MIXIN_CLASS_MISSING`.
+- `TARGET_CLASS_PRESENT`, `TARGET_CLASS_MISSING`, `TARGET_HIERARCHY_INCOMPLETE`, `TARGET_REMAP_UNRESOLVED`.
+- `MEMBER_VERIFIED`, `MEMBER_MISSING`, `MEMBER_DESCRIPTOR_MISMATCH`, `MEMBER_HIERARCHY_INCOMPLETE`.
+- `SELECTOR_VERIFIED_STRUCTURALLY`, `SELECTOR_UNRESOLVED`, `SELECTOR_UNSUPPORTED`.
+- `PLUGIN_DEPENDENT`, `REFMAP_MISSING`, `REFMAP_INVALID`, `RUNTIME_VALIDATION_REQUIRED`.
+
+A static “verified” state applies only to the specific structural fact checked. It does not mean the whole mixin applies, the injector succeeds, or game behavior is correct.
+
+## Regression test matrix
+
+Use small synthetic ZIPs and ASM-generated class files; do not load or execute the fixture classes.
+
+1. Manifest config path, heuristic-only path, metadata declaration, duplicate path, traversal path, missing declared file, malformed JSON, oversized config, and bounded-count/aggregate-byte limits.
+2. Config package resolution and separate `mixins` / `client` / `server` class lists; missing class must be reported.
+3. `@Mixin` visible/invisible annotations, multiple class-literal targets, string targets, remap=false, missing class, and mapping-not-found.
+4. `@Shadow` field/method, prefix and aliases; `@Overwrite` descriptor match/mismatch; `@Accessor` getter/setter and `@Invoker` method with exact descriptor.
+5. Each supported injector annotation; multiple target selectors; descriptor selectors and wildcard/quantifier syntax; explicit unsupported selector.
+6. `@At` method and field selectors, target descriptor, opcode, ordinal, shift, args, owner mapping, and non-member codes such as HEAD/RETURN/CONSTANT.
+7. `@Slice` from/to selectors and missing/unsupported boundaries.
+8. Refmap present/absent/malformed and plugin present/absent. Assert plugin code is never loaded or executed.
+9. Inherited members, exact descriptors, overloaded methods, incomplete hierarchy, absent target classes, and deterministic repeated analyses with isolated caches.
+10. Nested source archive config and class provenance, duplicate nested resource entries, and archive traversal budget/unsafe-entry outcomes.
+11. JSON/text consistency, stable ordering across differently ordered ZIP entries, and preservation of every warning/unknown state.
+
+## Exit gates
+
+1. Reusable state-free analyzer API and immutable result records exist; CLI delegates to that API.
+2. Every discovered config is either parsed or represented by an explicit finding; no silent skip/swallow behavior.
+3. Class/method/field target checks compare descriptors and preserve incomplete hierarchy separately from confirmed absence.
+4. Supported annotation/selector cases have synthetic regression tests; unsupported/dynamic/plugin cases remain explicit.
+5. Refmap/plugin resources are checked without executing plugin code.
+6. Unified JSON/text preflight includes deterministic per-config findings and limitations.
+7. Forced `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks` passes.
+8. Consolidated root/loader/test-mod clean build passes; runtime validation remains a separate gate.
+
+## Exact next action
+
+Before editing source, inspect the existing `Mixin1201Triage`, `Forge1201TargetApiVerifier`, archive traversal interfaces, target mapping inputs, and current test conventions against this design. Reuse the existing target verifier where possible; avoid cloning its hierarchy logic or creating another ZIP walker. Then implement the smallest state-free result API and synthetic tests first, wire it into the preflight result only after the API's isolated tests pass.
+
+Keep the universal, reusable, modpack-ready connector vision. Palladium + Alien Evolution remain paused and isolated.
