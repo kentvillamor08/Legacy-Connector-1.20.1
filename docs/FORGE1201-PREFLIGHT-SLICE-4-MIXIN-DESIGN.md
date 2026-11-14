@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Analyzer — Slice 4 Mixin Analysis Design
 
-Status: Design checkpoint only. No Slice 4 analyzer source changes are claimed yet. Slice 3 and its consolidated clean build passed; this document defines the next bounded implementation.
+Status: Slice 4 implementation has started. The existing target verifier now exposes a reusable per-run target index with exact descriptor and inherited-member lookup; focused synthetic ASM tests have been added but still require the user's forced loader test run. The Mixin analyzer/result model and report integration are not implemented yet.
 
 ## Goal
 
@@ -127,6 +127,20 @@ Use states with distinct meanings; adapt names to existing repository enums if a
 - `PLUGIN_DEPENDENT`, `REFMAP_MISSING`, `REFMAP_INVALID`, `RUNTIME_VALIDATION_REQUIRED`.
 
 A static “verified” state applies only to the specific structural fact checked. It does not mean the whole mixin applies, the injector succeeds, or game behavior is correct.
+
+## Implementation checkpoint — reusable target index (2026-11-14)
+
+The first Slice 4 source increment is committed on `feat/forge1201-preflight-analyzer`:
+
+- `Forge1201TargetApiVerifier.TargetIndex` is created with `createIndex(ClassBytesProvider)`. Each instance owns its own target-class cache.
+- `classInfo` exposes immutable target class metadata (superclass, interfaces, and exact method/field name+descriptor signatures).
+- `lookupMethod` and `lookupField` reuse the existing verifier's hierarchy traversal and return `FOUND`, `MISSING`, or `INCOMPLETE_HIERARCHY`, plus the classes visited.
+- This is a public read-only view over the existing verifier; it does not create a second hierarchy implementation or claim semantic/runtime compatibility.
+
+Source commit: `e3aa921d01d8ee134de3a71d3aa1016d249dbaf1`.
+Focused synthetic ASM tests: `69a93e13183466e51a6bab8023eecb0bb906e5e9`.
+
+The tests cover exact descriptor matching, inherited methods and fields, missing classes, incomplete hierarchy, and isolation between index instances. They are authored but **not yet executed** in the user's Windows/Gradle environment. No reusable Mixin analyzer, config parser, selector analysis, refmap parser, or preflight integration is claimed yet.
 
 ## Regression test matrix
 
