@@ -66,6 +66,24 @@ final class Forge1201PreflightAnalyzerTest {
         assertEquals("net/neoforged/fml/ModList", modListType.candidateTargetInternalName());
         assertTrue(first.methodCallSites().stream().anyMatch(call ->
                 call.targetOwner().equals("net/minecraftforge/fml/ModList") && call.targetName().equals("get")));
+        assertTrue(first.dynamicReferences().stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.INVOKEDYNAMIC_SITE));
+        assertTrue(first.dynamicReferences().stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.METHOD_HANDLE
+                        && reference.context().equals("invokedynamic-argument-1")));
+        assertTrue(first.dynamicReferences().stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.FIELD_HANDLE
+                        && reference.context().equals("ldc")));
+        assertTrue(first.dynamicReferences().stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CLASS_LITERAL));
+        assertTrue(first.dynamicReferences().stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.METHOD_TYPE));
+        assertTrue(first.dynamicReferences().stream().anyMatch(reference ->
+                reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CONSTANT_DYNAMIC));
+        assertTrue(first.dynamicReferences().stream().allMatch(reference ->
+                reference.archivePath().equals("source/sample.jar")
+                        && reference.classEntryPath().equals("sample/AlphaMod.class")
+                        && reference.instructionOrdinal() >= 0));
 
         assertEquals(Forge1201PreflightAnalyzer.toJson(first), Forge1201PreflightAnalyzer.toJson(second));
         assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("not a compatibility approval"));
@@ -220,6 +238,32 @@ final class Forge1201PreflightAnalyzerTest {
         method.visitCode();
         method.visitMethodInsn(Opcodes.INVOKESTATIC, "net/minecraftforge/fml/ModList",
                 "get", "()Lnet/minecraftforge/fml/ModList;", false);
+        org.objectweb.asm.Handle bootstrap = new org.objectweb.asm.Handle(
+                Opcodes.H_INVOKESTATIC,
+                "net/minecraft/world/entity/Entity",
+                "bootstrap",
+                "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/Class;)Ljava/lang/Object;",
+                false);
+        method.visitLdcInsn(new org.objectweb.asm.Handle(
+                Opcodes.H_GETFIELD, "net/minecraft/world/entity/Entity", "f_123_", "I", false));
+        method.visitLdcInsn(org.objectweb.asm.Type.getType("Lnet/minecraft/world/entity/Entity;"));
+        method.visitLdcInsn(org.objectweb.asm.Type.getMethodType("()Lnet/minecraft/world/entity/Entity;"));
+        method.visitInvokeDynamicInsn(
+                "createEntity",
+                "()Ljava/lang/Object;",
+                bootstrap,
+                org.objectweb.asm.Type.getType("Lnet/minecraft/world/entity/Entity;"),
+                new org.objectweb.asm.Handle(
+                        Opcodes.H_INVOKEVIRTUAL,
+                        "net/minecraft/world/entity/Entity",
+                        "m_456_",
+                        "()V",
+                        false),
+                new org.objectweb.asm.ConstantDynamic(
+                        "entityConstant",
+                        "Lnet/minecraft/world/entity/Entity;",
+                        bootstrap,
+                        org.objectweb.asm.Type.getType("Lnet/minecraft/world/entity/Entity;")));
         method.visitInsn(Opcodes.POP);
         method.visitInsn(Opcodes.RETURN);
         method.visitMaxs(1, 0);
