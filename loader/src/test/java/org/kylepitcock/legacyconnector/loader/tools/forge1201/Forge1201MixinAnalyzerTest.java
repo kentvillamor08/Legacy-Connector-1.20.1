@@ -336,21 +336,21 @@ final class Forge1201MixinAnalyzerTest {
 
         addInjectorMethod(writer, "onTick", "(L" + targetInternalName + ";I)V", INJECT_DESC,
                 new String[] {"tick()V", "L" + targetInternalName + ";hurt(D)Z"},
-                false, true, true, 1, null, false);
+                false, true, 1, null, true);
         addInjectorMethod(writer, "redirectHurt", "(L" + targetInternalName + ";D)Z", REDIRECT_DESC,
-                new String[] {"redirectTarget(I)V"}, null, true, true, null, null, false);
+                new String[] {"redirectTarget(I)V"}, null, true, null, null, false);
         addDescSelectorMethod(writer, "redirectHurtDesc", targetInternalName);
         addInjectorMethod(writer, "modifyOverload", "(I)I", MODIFY_ARG_DESC,
-                new String[] {"overloaded()V", "overloaded(I)V"}, null, true, false, 1, null, false);
+                new String[] {"overloaded()V", "overloaded(I)V"}, null, false, null, 1, false);
         addInjectorMethod(writer, "modifyArgsBundle",
                 "(Lorg/spongepowered/asm/mixin/injection/invoke/arg/Args;)V", MODIFY_ARGS_DESC,
-                new String[] {"send(I)V"}, null, true, false, null, null, false);
+                new String[] {"send(I)V"}, null, false, null, null, false);
         addInjectorMethod(writer, "modifyWildcard", "(I)I", MODIFY_VARIABLE_DESC,
-                new String[] {"tick*()V"}, null, true, false, null, 2, false);
+                new String[] {"tick*()V"}, null, false, null, 2, false);
         addInjectorMethod(writer, "modifyConstant", "(I)I", MODIFY_CONSTANT_DESC,
-                new String[] {"update()V"}, null, false, true, null, null, false);
+                new String[] {"update()V"}, null, true, null, null, false);
         addInjectorMethod(writer, "badSelector", "()V", INJECT_DESC,
-                new String[] {"tick(I"}, null, true, false, null, null, false);
+                new String[] {"tick(I"}, null, false, null, null, false);
 
         FieldVisitor field = writer.visitField(Opcodes.ACC_PRIVATE, "invalidInjectorField", "I", null, null);
         AnnotationVisitor invalid = field.visitAnnotation(INJECT_DESC, false);
@@ -380,7 +380,9 @@ final class Forge1201MixinAnalyzerTest {
         desc.visit("max", 1);
         desc.visitEnd();
         targetArray.visitEnd();
-        annotation.visitAnnotation("at", AT_DESC).visit("value", "INVOKE");
+        AnnotationVisitor at = annotation.visitAnnotation("at", AT_DESC);
+        at.visit("value", "INVOKE");
+        at.visitEnd();
         annotation.visitEnd();
         emitInjectorMethodBody(method, handlerDescriptor);
     }
@@ -420,7 +422,9 @@ final class Forge1201MixinAnalyzerTest {
                 slice.visitEnd();
                 slices.visitEnd();
             } else {
-                annotation.visitAnnotation("slice", SLICE_DESC).visit("id", "sliceFixture");
+                AnnotationVisitor slice = annotation.visitAnnotation("slice", SLICE_DESC);
+                slice.visit("id", "sliceFixture");
+                slice.visitEnd();
             }
         }
         annotation.visitEnd();
