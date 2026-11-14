@@ -387,6 +387,12 @@ final class Forge1201MixinAnalyzerTest {
         assertEquals(0, headAt.shiftBy());
         assertTrue(headAt.remap());
 
+        var newAt = atHandler.injectionPoints().get(3);
+        assertEquals("NEW", newAt.value());
+        assertEquals(SOURCE_ENTITY, newAt.targetSelector().ownerInternalName());
+        assertEquals(Forge1201MixinAnalyzer.AtTargetSelectorStatus.OWNER_ONLY,
+                newAt.targetSelector().status());
+
         var constants = result.injectors().stream()
                 .filter(finding -> finding.sourceMemberName().equals("modifyTypedConstants"))
                 .findFirst().orElseThrow().constants();
@@ -467,6 +473,11 @@ final class Forge1201MixinAnalyzerTest {
         AnnotationVisitor headAt = atArray.visitAnnotation(null, AT_DESC);
         headAt.visit("value", "HEAD");
         headAt.visitEnd();
+
+        AnnotationVisitor newAt = atArray.visitAnnotation(null, AT_DESC);
+        newAt.visit("value", "NEW");
+        newAt.visit("target", "L" + targetInternalName + ";");
+        newAt.visitEnd();
         atArray.visitEnd();
 
         AnnotationVisitor slices = inject.visitArray("slice");
