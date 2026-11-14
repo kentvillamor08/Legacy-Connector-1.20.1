@@ -215,3 +215,10 @@ The first unified integration increment is now committed on `feat/forge1201-pref
 - Existing fixture checks merged manifest/heuristic provenance, heuristic-only provenance, parsed config entries, explicit missing mixin-class findings, schema 1.4, and unavailable index through the compatibility overload.
 
 **Validation boundary:** the preceding user green checkpoint is still `90daa1ee78d2de73ff44e27ffd01ba6e126858f4` (`BUILD SUCCESSFUL in 57s`, 14/14 tasks executed). The current integration commits through `97d35ae727ecb63142bce9cdde714f4e4af98e6b` have not yet been locally pulled, compiled, or tested by the user. Run the forced loader test gate before adding further selector/member functionality.
+
+
+### Scope corrections after the first integration commit
+
+- The preflight limitations now distinguish the implemented mapped `@Mixin` target-class presence check from the still-future general source-API member verification, shim behavior checks, translated-resource comparison, and runtime feedback.
+- The analyzer class comment now states that unified preflight consumes the result API; nested archive resources, member annotations, injection selectors, and semantic refmap remapping remain later work.
+- Latest branch update for these corrections is `58d614608a105bb7daa53d0a576f20a0e69d2acb`; no user build/test has yet validated the Schema 1.4 code batch.
