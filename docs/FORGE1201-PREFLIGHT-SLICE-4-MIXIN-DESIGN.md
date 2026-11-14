@@ -195,3 +195,23 @@ Use small synthetic ZIPs and ASM-generated class files; do not load or execute t
 Before editing source, inspect the existing `Mixin1201Triage`, `Forge1201TargetApiVerifier`, archive traversal interfaces, target mapping inputs, and current test conventions against this design. Reuse the existing target verifier where possible; avoid cloning its hierarchy logic or creating another ZIP walker. Then implement the smallest state-free result API and synthetic tests first, wire it into the preflight result only after the API's isolated tests pass.
 
 Keep the universal, reusable, modpack-ready connector vision. Palladium + Alien Evolution remain paused and isolated.
+
+
+## Implementation update — 2026-11-14 — first unified preflight integration
+
+The first unified integration increment is now committed on `feat/forge1201-preflight-analyzer`:
+
+1. **Discovery provenance:** `Forge1201PreflightAnalyzer` retains all sources for a config path. The standard manifest `MixinConfigs` value maps to `MANIFEST`; outer-archive path/content candidates map to `RESOURCE_HEURISTIC`. Duplicate discoveries merge instead of overwriting. `FORGE_METADATA` remains reserved until a reliable metadata declaration source is implemented; the existing partial Forge TOML reader does not expose a Mixin declaration.
+2. **Unified result:** `PreflightResult.mixinAnalysis` embeds `Forge1201MixinAnalyzer.Result`. Schema/analyzer versions are `1.4` / `1.4.0`. The deterministic text report prints Mixin config states, mixin-class findings, target selector findings, target-index availability, class-mapping version, and warnings. JSON includes the same immutable result.
+3. **No-target-index behavior:** A null index is an explicit supported input. If a Forge/NeoForge target can be mapped but no target classpath was passed, the result is `TARGET_INDEX_UNAVAILABLE` and index status is `UNAVAILABLE_NO_TARGET_CLASSPATH`. It must never be mislabeled as a missing target class.
+4. **Target classpath source:** The root `preflight1201` Gradle task passes the resolved root `sourceSets.main.compileClasspath` through a generated path-list file (4 MiB / 4,096 entry bounds and path validation). ModDevGradle's source-set compile dependency wiring places its Minecraft/NeoForge compile dependencies on that source set. The Java analyzer creates a per-run `URLClassLoader` with the platform loader as parent and reads only `.class` resources through `getResourceAsStream`. It never calls `loadClass`, defines, initializes, or executes target/mod/plugin classes. This compile classpath can also include other declared compile-only dependencies; the analyzer currently checks only the platform namespaces that its selector resolver recognizes.
+5. **Mapping remains conservative:** No Minecraft 1.20.1-to-1.21.1 class mapping table is supplied in this increment. Minecraft/Mojang target selectors remain `TARGET_REMAP_UNRESOLVED`. Reviewed Forge-to-NeoForge mapping catalog entries can be resolved and their target class presence queried. No same-name identity mapping is inferred.
+6. **Nested archive boundary:** Config discovery and Mixin class resource analysis are still outer-source-JAR only. Nested JAR traversal/config discovery is not implemented yet; it must reuse `Forge1201ArchiveGraph` snapshots and path provenance rather than adding a second ZIP walker.
+
+### New tests (pending user Gradle verification)
+
+- No classpath: mapped target status is `TARGET_INDEX_UNAVAILABLE`.
+- Preflight integration: a synthetic manifest config and Forge `@Mixin(targets=...)` entry map `net/minecraftforge/fml/ModList` to `net/neoforged/fml/ModList`; a synthetic target class resource on the supplied compile-classpath directory produces `TARGET_CLASS_PRESENT`.
+- Existing fixture checks merged manifest/heuristic provenance, heuristic-only provenance, parsed config entries, explicit missing mixin-class findings, schema 1.4, and unavailable index through the compatibility overload.
+
+**Validation boundary:** the preceding user green checkpoint is still `90daa1ee78d2de73ff44e27ffd01ba6e126858f4` (`BUILD SUCCESSFUL in 57s`, 14/14 tasks executed). The current integration commits through `97d35ae727ecb63142bce9cdde714f4e4af98e6b` have not yet been locally pulled, compiled, or tested by the user. Run the forced loader test gate before adding further selector/member functionality.
