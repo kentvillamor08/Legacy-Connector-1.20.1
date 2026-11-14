@@ -95,7 +95,7 @@ public final class Forge1201MixinAnalyzer {
     public enum PluginStatus {
         NOT_DECLARED,
         PRESENT_NOT_EXECUTED,
-        MISSING,
+        MISSING_FROM_SOURCE_ARCHIVE,
         INVALID_CLASS_NAME,
         DUPLICATE_ENTRY
     }
@@ -365,6 +365,14 @@ public final class Forge1201MixinAnalyzer {
                             continue;
                         }
 
+                        if (!classEntryPath.equals(mixin.name + ".class")) {
+                            classFindings.add(new MixinClassFinding(
+                                    archivePath, configPath, section, mixinName, classEntryPath,
+                                    MixinClassStatus.INVALID_CLASS, false,
+                                    List.of("Class internal name does not match its config-resolved archive path.")));
+                            continue;
+                        }
+
                         List<ParsedTarget> parsedTargets = readMixinTargets(mixin);
                         boolean hasMixinAnnotation = hasMixinAnnotation(mixin);
                         List<String> classWarnings = new ArrayList<>();
@@ -453,7 +461,7 @@ public final class Forge1201MixinAnalyzer {
         String path = classResourcePath(pluginClass);
         if (path == null) return PluginStatus.INVALID_CLASS_NAME;
         IndexedEntry entry = entries.get(path);
-        if (entry == null) return PluginStatus.MISSING;
+        if (entry == null) return PluginStatus.MISSING_FROM_SOURCE_ARCHIVE;
         if (entry.occurrences() != 1) return PluginStatus.DUPLICATE_ENTRY;
         // Static analysis intentionally does not load, instantiate, or execute the plugin.
         return PluginStatus.PRESENT_NOT_EXECUTED;
@@ -539,7 +547,9 @@ public final class Forge1201MixinAnalyzer {
         String evidence;
         boolean platformTarget = isPlatformTarget(source);
 
-        if (source.startsWith("net/minecraftforge/")) {
+        if (!remap && !source.startsWith("net/neoforged/")) {
+            evidence = "The @Mixin annotation disables remapping; this source selector is not assumed to be a 1.21.1 target name.";
+        } else if (source.startsWith("net/minecraftforge/")) {
             Forge1201MappingCatalog.Decision decision = Forge1201MappingCatalog.classify(source);
             if (decision.targetInternalName() != null
                     && (decision.kind() == Forge1201MappingCatalog.Kind.PACKAGE_RELOCATION_CANDIDATE
