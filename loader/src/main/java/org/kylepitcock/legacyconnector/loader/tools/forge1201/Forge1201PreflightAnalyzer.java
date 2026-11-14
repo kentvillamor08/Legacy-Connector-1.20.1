@@ -32,8 +32,10 @@ import java.util.zip.ZipFile;
  * inspect them, validate mixin injection semantics, or prove runtime compatibility.</p>
  */
 public final class Forge1201PreflightAnalyzer {
-    public static final String SCHEMA_VERSION = "1.1";
-    public static final String ANALYZER_VERSION = "1.1.0";
+    public static final String SCHEMA_VERSION = "1.2";
+    public static final String ANALYZER_VERSION = "1.2.0";
+    public static final String TARGET_MINECRAFT_VERSION = "1.21.1";
+    public static final String TARGET_NEOFORGE_VERSION = "21.1.258";
     private static final int MAX_MIXIN_JSON_BYTES = 1024 * 1024;
     private static final Gson GSON = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
 
@@ -209,7 +211,7 @@ public final class Forge1201PreflightAnalyzer {
 
         Set<String> nativeIds = Forge1201DependencyResolver.findNativeModIds(modDirectories);
         Forge1201ArchiveGraph.Result archiveGraph = Forge1201ArchiveGraph.analyze(
-                jar, jarInfo, modDirectories, "1.21.1");
+                jar, jarInfo, modDirectories, TARGET_MINECRAFT_VERSION, TARGET_NEOFORGE_VERSION);
         if (jarInfo != null) {
             forgeMetadata = new ForgeMetadata(
                     jarInfo.modLoader(), jarInfo.loaderVersion(),
@@ -316,7 +318,7 @@ public final class Forge1201PreflightAnalyzer {
 
         return new PreflightResult(
                 SCHEMA_VERSION, ANALYZER_VERSION, jar.getFileName().toString(), Files.size(jar), sha256(jar),
-                "1.21.1", "21.1.258", forgeMetadata, metadataStatus, analysisStatus,
+                TARGET_MINECRAFT_VERSION, TARGET_NEOFORGE_VERSION, forgeMetadata, metadataStatus, analysisStatus,
                 metadataWarnings.stream().distinct().sorted().toList(), mods, duplicateModIds, dependencies,
                 archiveEntries.size(), archiveEntries, resourceNamespaces.stream().toList(), manifest,
                 mixinCandidates, coreModClass, jarInJarPaths.stream().toList(), classCount, entrypoints,
@@ -403,13 +405,15 @@ public final class Forge1201PreflightAnalyzer {
             out.append("  ").append(edge.declaringArchivePath()).append(" :: ")
                     .append(edge.declaringModId()).append(" -> ").append(edge.dependencyModId())
                     .append(" ").append(edge.versionRange())
-                    .append(edge.mandatory() ? " [required" : " [optional")
+                    .append(" [").append(edge.dependencyType().name().toLowerCase(Locale.ROOT))
                     .append(", ").append(edge.ordering()).append(", ").append(edge.side())
                     .append("] ").append(edge.status())
                     .append(" provider-range=").append(edge.providerRangeStatus());
             if (!edge.providerArchivePaths().isEmpty()) {
-                out.append(" providers=").append(edge.providerArchivePaths())
-                        .append(" versions=").append(edge.providerVersions());
+                out.append(" providers=").append(edge.providerArchivePaths());
+            }
+            if (!edge.providerVersions().isEmpty()) {
+                out.append(" versions=").append(edge.providerVersions());
             }
             out.append('\n');
         }
