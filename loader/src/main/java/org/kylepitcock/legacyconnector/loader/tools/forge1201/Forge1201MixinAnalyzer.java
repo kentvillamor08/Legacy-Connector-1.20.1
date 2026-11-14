@@ -58,6 +58,8 @@ public final class Forge1201MixinAnalyzer {
     private static final String MODIFY_VARIABLE_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/ModifyVariable;";
     private static final String MODIFY_CONSTANT_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/ModifyConstant;";
     private static final String DESC_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/Desc;";
+    private static final String AT_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/At;";
+    private static final String CONSTANT_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/Constant;";
 
     private Forge1201MixinAnalyzer() {}
 
@@ -255,18 +257,71 @@ public final class Forge1201MixinAnalyzer {
             Integer minimumMatches, Integer maximumMatches,
             InjectorSelectorStatus status, String evidence) {}
 
+    public enum AtTargetDescriptorKind { NONE, METHOD, FIELD }
+
+    public enum AtTargetSelectorStatus {
+        NOT_DECLARED, MEMBER_NAME_ONLY, METHOD_DESCRIPTOR, FIELD_DESCRIPTOR,
+        OWNER_ONLY, INVALID_DESCRIPTOR, INVALID_SELECTOR, UNSUPPORTED_SYNTAX
+    }
+
+    /** Parsed At.target selector syntax only; it never asserts a target member exists. */
+    public record AtTargetSelector(
+            String rawSelector, String ownerInternalName, String memberName,
+            String descriptor, AtTargetDescriptorKind descriptorKind,
+            AtTargetSelectorStatus status, String evidence) {}
+
+    public enum AtValueKind { BUILT_IN, CUSTOM_OR_UNKNOWN }
+
+    public enum AtFindingStatus {
+        CAPTURED, INVALID_REQUIRED_VALUE, INVALID_TARGET_SELECTOR, INVALID_DESC_SELECTOR
+    }
+
+    /** One source-side @At declaration, including effective Mixin 0.8.5 defaults. */
+    public record AtFinding(
+            int index, String value, AtValueKind valueKind, String rawTarget,
+            AtTargetSelector targetSelector, InjectorTargetSelector descSelector,
+            int opcode, int ordinal, String shift, int shiftBy, String sliceId,
+            List<String> args, boolean remap, String id,
+            AtFindingStatus status, String evidence, List<String> warnings) {
+        public AtFinding {
+            args = List.copyOf(args);
+            warnings = List.copyOf(warnings);
+        }
+    }
+
+    public enum ConstantFindingStatus {
+        MATCH_HANDLER_RETURN_TYPE, EXPLICIT_TYPED_DISCRIMINATOR,
+        CONFLICTING_DISCRIMINATORS, INVALID_ENUM_VALUE, UNSUPPORTED_NESTED_ANNOTATION
+    }
+
+    /** One @ModifyConstant discriminator; declared=false represents Mixin's implicit default. */
+    public record ConstantFinding(
+            int index, boolean declared, Boolean nullValue, Integer intValue,
+            Float floatValue, Long longValue, Double doubleValue, String stringValue,
+            String classValueDescriptor, int ordinal, String sliceId,
+            List<String> expandZeroConditions, Boolean log,
+            ConstantFindingStatus status, String evidence, List<String> warnings) {
+        public ConstantFinding {
+            expandZeroConditions = List.copyOf(expandZeroConditions);
+            warnings = List.copyOf(warnings);
+        }
+    }
+
     /** Source-side injector metadata; no target mapping or injection success is implied. */
     public record InjectorFinding(
             String archivePath, String configPath, String section, String mixinClassName,
             List<String> sourceTargetInternalNames, InjectorAnnotationKind annotationKind,
             MemberElementKind elementKind, String sourceMemberName, String sourceMemberDescriptor,
-            List<InjectorTargetSelector> targetSelectors, boolean remap,
+            List<InjectorTargetSelector> targetSelectors, List<AtFinding> injectionPoints,
+            List<ConstantFinding> constants, boolean remap,
             int atAnnotationCount, int sliceAnnotationCount, Integer index,
             Boolean cancellable, Boolean argsOnly, int require, int expect, int allow,
             String constraints, InjectorResolutionStatus status, String evidence, List<String> warnings) {
         public InjectorFinding {
             sourceTargetInternalNames = List.copyOf(sourceTargetInternalNames);
             targetSelectors = List.copyOf(targetSelectors);
+            injectionPoints = List.copyOf(injectionPoints);
+            constants = List.copyOf(constants);
             warnings = List.copyOf(warnings);
         }
     }
@@ -769,7 +824,9 @@ public final class Forge1201MixinAnalyzer {
         }
 
         boolean remap = booleanAnnotationValue(annotation, "remap", mixinRemap);
-        int atCount = annotationArrayValue(annotation, "at").size();
+        List<AtFinding> injectionPoints = readAtFindings(annotation);
+        List<ConstantFinding> constants = readConstantFindings(annotation, kind);
+        int atCount = injectionPoints.size();
         int sliceCount = annotationArrayValue(annotation, "slice").size();
         Integer index = nullableIntegerAnnotationValue(annotation, "index");
         Object cancellableValue = annotationValue(annotation, "cancellable");
@@ -805,9 +862,292 @@ public final class Forge1201MixinAnalyzer {
             case INJECTOR_REMAP_DISABLED_UNVERIFIED -> "remap=false; source handler and target selectors were inventoried, but target presence and parity remain unverified.";
         };
         return new InjectorFinding(archivePath, configPath, section, mixinClassName, targets,
-                kind, elementKind, sourceName, sourceDescriptor, selectors, remap,
+                kind, elementKind, sourceName, sourceDescriptor, selectors, injectionPoints, constants, remap,
                 atCount, sliceCount, index, cancellable, argsOnly,
                 require, expect, allow, constraints, status, evidence, warnings);
+    }
+
+
+    private static List<AtFinding> readAtFindings(AnnotationNode injector) {
+        List<AtFinding> findings = new ArrayList<>();
+        List<AnnotationNode> annotations = annotationArrayValue(injector, "at");
+        for (int i = 0; i < annotations.size(); i++) {
+            findings.add(createAtFinding(i, annotations.get(i)));
+        }
+        return List.copyOf(findings);
+    }
+
+    private static AtFinding createAtFinding(int index, AnnotationNode annotation) {
+        List<String> warnings = new ArrayList<>();
+        String value = stringAnnotationValue(annotation, "value");
+        AtValueKind valueKind = isBuiltInAtValue(value) ? AtValueKind.BUILT_IN : AtValueKind.CUSTOM_OR_UNKNOWN;
+        String rawTarget = stringAnnotationValue(annotation, "target");
+        if (rawTarget == null) rawTarget = "";
+        AtTargetSelector targetSelector = parseAtTargetSelector(rawTarget);
+        Object rawDesc = annotationValue(annotation, "desc");
+        InjectorTargetSelector descSelector = null;
+        boolean invalidDesc = false;
+        if (rawDesc instanceof AnnotationNode nested) {
+            if (DESC_ANNOTATION.equals(nested.desc)) {
+                descSelector = parseDescSelector(nested);
+                invalidDesc = descSelector.status() == InjectorSelectorStatus.INVALID_SELECTOR;
+            } else {
+                descSelector = new InjectorTargetSelector(InjectorSelectorSource.DESC_ANNOTATION,
+                        nested.desc, null, null, null, null, null, null,
+                        InjectorSelectorStatus.UNSUPPORTED_EXTENSION,
+                        "The nested At.desc annotation is not the Mixin 0.8.5 @Desc type.");
+                warnings.add("At.desc uses an unsupported nested annotation type.");
+            }
+        }
+        if (value == null || value.isBlank()) {
+            warnings.add("@At.value is required but is absent or blank.");
+        }
+        if (targetSelector.status() == AtTargetSelectorStatus.INVALID_DESCRIPTOR
+                || targetSelector.status() == AtTargetSelectorStatus.INVALID_SELECTOR
+                || targetSelector.status() == AtTargetSelectorStatus.UNSUPPORTED_SYNTAX) {
+            warnings.add("The @At target selector is malformed or uses syntax not interpreted by this inventory.");
+        }
+        if (invalidDesc) warnings.add("The nested @At.desc selector is malformed.");
+        if (descSelector != null && !rawTarget.isBlank()) {
+            warnings.add("Both @At.target and @At.desc are declared; both raw selector forms are retained without choosing one.");
+        }
+
+        String baseValue = value == null ? "" : value.split(":", 2)[0];
+        if (Set.of("INVOKE", "INVOKE_ASSIGN", "INVOKE_STRING", "FIELD", "NEW").contains(baseValue)
+                && rawTarget.isBlank() && descSelector == null) {
+            warnings.add("@At.value commonly requires a member target for this injection-point kind; no target is declared.");
+        }
+
+        AtFindingStatus status;
+        if (value == null || value.isBlank()) status = AtFindingStatus.INVALID_REQUIRED_VALUE;
+        else if (targetSelector.status() == AtTargetSelectorStatus.INVALID_DESCRIPTOR
+                || targetSelector.status() == AtTargetSelectorStatus.INVALID_SELECTOR
+                || targetSelector.status() == AtTargetSelectorStatus.UNSUPPORTED_SYNTAX) {
+            status = AtFindingStatus.INVALID_TARGET_SELECTOR;
+        } else if (invalidDesc) status = AtFindingStatus.INVALID_DESC_SELECTOR;
+        else status = AtFindingStatus.CAPTURED;
+
+        String evidence = switch (status) {
+            case INVALID_REQUIRED_VALUE -> "The required @At.value element is missing or blank.";
+            case INVALID_TARGET_SELECTOR -> "The raw @At.target is preserved, but its selector syntax could not be safely parsed.";
+            case INVALID_DESC_SELECTOR -> "The nested @At.desc data is preserved as a finding but its source signature is malformed.";
+            case CAPTURED -> "Source-side @At metadata and effective Mixin 0.8.5 defaults were captured; target bytecode matching is not evaluated.";
+        };
+
+        return new AtFinding(
+                index, value, valueKind, rawTarget, targetSelector, descSelector,
+                integerAnnotationValue(annotation, "opcode", -1),
+                integerAnnotationValue(annotation, "ordinal", -1),
+                enumAnnotationValue(annotation, "shift", "NONE"),
+                integerAnnotationValue(annotation, "by", 0),
+                stringAnnotationValue(annotation, "slice") == null ? "" : stringAnnotationValue(annotation, "slice"),
+                stringArrayValues(annotation, "args"),
+                booleanAnnotationValue(annotation, "remap", true),
+                stringAnnotationValue(annotation, "id") == null ? "" : stringAnnotationValue(annotation, "id"),
+                status, evidence, warnings);
+    }
+
+    private static boolean isBuiltInAtValue(String value) {
+        if (value == null || value.isBlank()) return false;
+        String base = value.split(":", 2)[0];
+        return Set.of("HEAD", "RETURN", "TAIL", "INVOKE", "INVOKE_ASSIGN", "FIELD",
+                "NEW", "INVOKE_STRING", "JUMP", "CONSTANT").contains(base);
+    }
+
+    private static AtTargetSelector parseAtTargetSelector(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return new AtTargetSelector(raw == null ? "" : raw, null, null, null,
+                    AtTargetDescriptorKind.NONE, AtTargetSelectorStatus.NOT_DECLARED,
+                    "No @At.target string was declared.");
+        }
+        String compact = raw.replaceAll("\\s", "");
+        if (compact.contains("->")) {
+            return new AtTargetSelector(raw, null, null, null, AtTargetDescriptorKind.NONE,
+                    AtTargetSelectorStatus.UNSUPPORTED_SYNTAX,
+                    "Chained selector syntax is retained raw and not interpreted.");
+        }
+
+        String owner = null;
+        String memberAndDescriptor = compact;
+        if (compact.startsWith("L")) {
+            int semi = compact.indexOf(';');
+            if (semi <= 1) {
+                return new AtTargetSelector(raw, null, null, null, AtTargetDescriptorKind.NONE,
+                        AtTargetSelectorStatus.INVALID_SELECTOR, "Owner-qualified selector has no valid Lowner; prefix.");
+            }
+            owner = compact.substring(1, semi).replace('.', '/');
+            memberAndDescriptor = compact.substring(semi + 1);
+        } else {
+            int signatureStart = firstPositive(compact.indexOf('('), compact.indexOf(':'));
+            String head = signatureStart < 0 ? compact : compact.substring(0, signatureStart);
+            int split = head.lastIndexOf('.');
+            if (split < 0) split = head.lastIndexOf('/');
+            if (split > 0 && split < head.length() - 1) {
+                owner = head.substring(0, split).replace('.', '/');
+                memberAndDescriptor = head.substring(split + 1)
+                        + (signatureStart < 0 ? "" : compact.substring(signatureStart));
+            }
+        }
+
+        int methodStart = memberAndDescriptor.indexOf('(');
+        int fieldSeparator = memberAndDescriptor.indexOf(':');
+        String name;
+        String descriptor = null;
+        AtTargetDescriptorKind descriptorKind = AtTargetDescriptorKind.NONE;
+        AtTargetSelectorStatus status;
+        if (methodStart >= 0) {
+            name = memberAndDescriptor.substring(0, methodStart);
+            descriptor = memberAndDescriptor.substring(methodStart);
+            descriptorKind = AtTargetDescriptorKind.METHOD;
+            status = isValidMethodDescriptor(descriptor)
+                    ? AtTargetSelectorStatus.METHOD_DESCRIPTOR : AtTargetSelectorStatus.INVALID_DESCRIPTOR;
+        } else if (fieldSeparator >= 0) {
+            name = memberAndDescriptor.substring(0, fieldSeparator);
+            descriptor = memberAndDescriptor.substring(fieldSeparator + 1);
+            descriptorKind = AtTargetDescriptorKind.FIELD;
+            status = isValidFieldDescriptor(descriptor)
+                    ? AtTargetSelectorStatus.FIELD_DESCRIPTOR : AtTargetSelectorStatus.INVALID_DESCRIPTOR;
+        } else {
+            name = memberAndDescriptor;
+            status = name.isBlank() && owner != null
+                    ? AtTargetSelectorStatus.OWNER_ONLY : AtTargetSelectorStatus.MEMBER_NAME_ONLY;
+        }
+
+        if (name != null && (name.isBlank() || name.contains("*") || name.contains("+")
+                || name.contains("{") || name.contains("}") || name.contains("->"))) {
+            status = AtTargetSelectorStatus.UNSUPPORTED_SYNTAX;
+        }
+        if (owner != null && (owner.isBlank() || owner.startsWith("/") || owner.endsWith("/")
+                || owner.contains("//") || owner.contains("..") || owner.indexOf(';') >= 0)) {
+            status = AtTargetSelectorStatus.INVALID_SELECTOR;
+        }
+        if (name != null && (name.contains("/") || name.contains(";") || name.contains(":"))) {
+            status = AtTargetSelectorStatus.INVALID_SELECTOR;
+        }
+        String evidence = switch (status) {
+            case NOT_DECLARED -> "No target is required for several built-in injection-point codes.";
+            case MEMBER_NAME_ONLY -> "Member name captured without an explicit owner or descriptor.";
+            case METHOD_DESCRIPTOR -> "Owner/name and an exact JVM method descriptor were captured.";
+            case FIELD_DESCRIPTOR -> "Owner/name and an exact JVM field descriptor were captured.";
+            case OWNER_ONLY -> "Owner-only selector captured; a target member is not specified.";
+            case INVALID_DESCRIPTOR -> "The target descriptor is not a valid canonical JVM method or field descriptor.";
+            case INVALID_SELECTOR -> "The owner/member selector has invalid syntax.";
+            case UNSUPPORTED_SYNTAX -> "The raw selector was retained, but wildcard, quantifier, or chain syntax is not interpreted.";
+        };
+        return new AtTargetSelector(raw, owner, name, descriptor, descriptorKind, status, evidence);
+    }
+
+    private static int firstPositive(int first, int second) {
+        if (first < 0) return second;
+        if (second < 0) return first;
+        return Math.min(first, second);
+    }
+
+    private static boolean isValidFieldDescriptor(String descriptor) {
+        try {
+            if (descriptor == null || descriptor.isBlank()) return false;
+            Type type = Type.getType(descriptor);
+            return type.getSort() != Type.VOID && type.getSort() != Type.METHOD
+                    && type.getSort() != Type.VOID && type.getDescriptor().equals(descriptor);
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
+
+    private static List<ConstantFinding> readConstantFindings(AnnotationNode injector, InjectorAnnotationKind kind) {
+        List<ConstantFinding> findings = new ArrayList<>();
+        List<AnnotationNode> annotations = annotationArrayValue(injector, "constant");
+        for (int i = 0; i < annotations.size(); i++) {
+            AnnotationNode annotation = annotations.get(i);
+            if (CONSTANT_ANNOTATION.equals(annotation.desc)) {
+                findings.add(createConstantFinding(i, annotation));
+            } else {
+                findings.add(new ConstantFinding(i, true, null, null, null, null, null, null,
+                        null, -1, "", List.of(), null,
+                        ConstantFindingStatus.UNSUPPORTED_NESTED_ANNOTATION,
+                        "A nested annotation with an unsupported type was found in @ModifyConstant.constant.",
+                        List.of("Expected Mixin 0.8.5 @Constant but found " + annotation.desc + ".")));
+            }
+        }
+        if (kind == InjectorAnnotationKind.MODIFY_CONSTANT && findings.isEmpty()) {
+            findings.add(new ConstantFinding(0, false, null, null, null, null, null, null,
+                    null, -1, "", List.of(), null,
+                    ConstantFindingStatus.MATCH_HANDLER_RETURN_TYPE,
+                    "No @Constant discriminator was declared; Mixin matches constants using the handler return type.",
+                    List.of()));
+        }
+        return List.copyOf(findings);
+    }
+
+    private static ConstantFinding createConstantFinding(int index, AnnotationNode annotation) {
+        List<String> warnings = new ArrayList<>();
+        Boolean nullValue = nullableBooleanAnnotationValue(annotation, "nullValue");
+        Integer intValue = nullableIntegerAnnotationValue(annotation, "intValue");
+        Object rawFloat = annotationValue(annotation, "floatValue");
+        Float floatValue = rawFloat instanceof Float number ? number : null;
+        Object rawLong = annotationValue(annotation, "longValue");
+        Long longValue = rawLong instanceof Long number ? number : null;
+        Object rawDouble = annotationValue(annotation, "doubleValue");
+        Double doubleValue = rawDouble instanceof Double number ? number : null;
+        Object rawString = annotationValue(annotation, "stringValue");
+        String stringValue = rawString instanceof String text ? text : null;
+        Object rawClass = annotationValue(annotation, "classValue");
+        String classValueDescriptor = rawClass instanceof Type type ? type.getDescriptor() : null;
+        int ordinal = integerAnnotationValue(annotation, "ordinal", -1);
+        String sliceId = stringAnnotationValue(annotation, "slice");
+        if (sliceId == null) sliceId = "";
+        List<String> conditions = enumArrayAnnotationValues(annotation, "expandZeroConditions");
+        List<String> validConditions = List.of("LESS_THAN_ZERO", "LESS_THAN_OR_EQUAL_TO_ZERO",
+                "GREATER_THAN_OR_EQUAL_TO_ZERO", "GREATER_THAN_ZERO");
+        List<String> invalidConditions = conditions.stream().filter(value -> !validConditions.contains(value)).toList();
+        if (!invalidConditions.isEmpty()) warnings.add("Unsupported expandZeroConditions enum values: " + invalidConditions);
+
+        Set<String> discriminators = new LinkedHashSet<>();
+        if (Boolean.TRUE.equals(nullValue)) discriminators.add("NULL");
+        if (intValue != null || !conditions.isEmpty()) discriminators.add("INT");
+        if (floatValue != null) discriminators.add("FLOAT");
+        if (longValue != null) discriminators.add("LONG");
+        if (doubleValue != null) discriminators.add("DOUBLE");
+        if (stringValue != null) discriminators.add("STRING");
+        if (classValueDescriptor != null) discriminators.add("CLASS");
+        ConstantFindingStatus status;
+        if (!invalidConditions.isEmpty()) status = ConstantFindingStatus.INVALID_ENUM_VALUE;
+        else if (discriminators.size() > 1) status = ConstantFindingStatus.CONFLICTING_DISCRIMINATORS;
+        else if (discriminators.isEmpty()) status = ConstantFindingStatus.MATCH_HANDLER_RETURN_TYPE;
+        else status = ConstantFindingStatus.EXPLICIT_TYPED_DISCRIMINATOR;
+
+        String evidence = switch (status) {
+            case MATCH_HANDLER_RETURN_TYPE -> "No explicit constant type/value discriminator was encoded; Mixin uses the handler return type.";
+            case EXPLICIT_TYPED_DISCRIMINATOR -> "Explicit constant discriminator values were captured; target bytecode constants are not searched.";
+            case CONFLICTING_DISCRIMINATORS -> "More than one constant type discriminator is declared; Mixin's typed matching contract may reject this annotation.";
+            case INVALID_ENUM_VALUE -> "At least one expandZeroConditions enum value is not recognized by Mixin 0.8.5.";
+            case UNSUPPORTED_NESTED_ANNOTATION -> "The nested annotation type is not Mixin 0.8.5 @Constant.";
+        };
+        return new ConstantFinding(index, true, nullValue, intValue, floatValue, longValue, doubleValue,
+                stringValue, classValueDescriptor, ordinal, sliceId, conditions,
+                nullableBooleanAnnotationValue(annotation, "log"), status, evidence, warnings);
+    }
+
+    private static Boolean nullableBooleanAnnotationValue(AnnotationNode annotation, String key) {
+        Object value = annotationValue(annotation, key);
+        return value instanceof Boolean bool ? bool : null;
+    }
+
+    private static String enumAnnotationValue(AnnotationNode annotation, String key, String defaultValue) {
+        Object value = annotationValue(annotation, key);
+        if (value instanceof String[] enumValue && enumValue.length >= 2) return enumValue[1];
+        return defaultValue;
+    }
+
+    private static List<String> enumArrayAnnotationValues(AnnotationNode annotation, String key) {
+        Object value = annotationValue(annotation, key);
+        if (!(value instanceof List<?> values)) return List.of();
+        List<String> result = new ArrayList<>();
+        for (Object item : values) {
+            if (item instanceof String[] enumValue && enumValue.length >= 2) result.add(enumValue[1]);
+            else result.add(String.valueOf(item));
+        }
+        return List.copyOf(result);
     }
 
     private static InjectorTargetSelector parseMethodSelector(String raw) {
