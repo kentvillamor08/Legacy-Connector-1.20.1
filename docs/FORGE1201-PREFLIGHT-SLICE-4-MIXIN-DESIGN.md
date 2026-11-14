@@ -323,3 +323,6 @@ Preflight schema/analyzer versions are now `1.7 / 1.7.0`. JSON includes the nest
 Synthetic ASM tests cover a field target and exact field descriptor, opcode, ordinal, BY shift, shift amount, named arguments, slice ID, remap override, custom ID, nested @Desc method target, built-in HEAD defaults, each supported constant value type, implicit constant matching, and conflicting discriminators.
 
 **Validation remains pending.** The user previously confirmed Schema 1.6 loader tests pass at `b661313f41460321845f617b4b81684f314eb614` (14/14 tasks, 50s). Schema 1.7 source and test changes have not yet been run locally. Do not treat this increment as green until the forced loader test output is reviewed.
+### Schema 1.7 parser follow-up
+
+A review correction preserves the valid owner-only `@At.target` selector form used by construction injection points. The parser no longer rejects the absent member name when an owner is present, and a synthetic ASM regression assertion covers this case. This source/test correction is included in the current Schema 1.7 validation batch; Gradle verification remains pending.
