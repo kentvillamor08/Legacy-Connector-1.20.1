@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Analyzer — Slice 4 Mixin Analysis Design
 
-Status: Slice 4 is in progress. The shared TargetIndex and its synthetic ASM tests passed at `246002c6fcc1af371bb11a716483dd1df23a2dbe` (`BUILD SUCCESSFUL`, 14/14 tasks). The bounded outer-archive Mixin analyzer API and its synthetic ZIP/ASM tests passed at `90daa1ee78d2de73ff44e27ffd01ba6e126858f4` (`BUILD SUCCESSFUL in 57s`, 14/14 tasks). Member annotation/injector/selector analysis and unified preflight reporting remain future increments.
+Status: Slice 4 is in progress. The user validated the initial unified Schema 1.4 Mixin target analysis with a forced loader test pass and a full clean root/loader/testmods build at `afdf5c0b8b4410d0deb401683e60b0255843c58d`. A new Schema 1.5 increment now captures source-side `@Shadow`, `@Overwrite`, `@Accessor`, and `@Invoker` member annotations with exact descriptors and explicit uncertainty states. This new increment is committed on `feat/forge1201-preflight-analyzer` but has **not yet been run by the user**; its forced loader test gate is pending. Injector handlers, `@At` / `@Slice`, semantic refmap handling, and nested config/class analysis remain future increments.
 
 ## Goal
 
@@ -222,3 +222,57 @@ The first unified integration increment is now committed on `feat/forge1201-pref
 - The preflight limitations now distinguish the implemented mapped `@Mixin` target-class presence check from the still-future general source-API member verification, shim behavior checks, translated-resource comparison, and runtime feedback.
 - The analyzer class comment now states that unified preflight consumes the result API; nested archive resources, member annotations, injection selectors, and semantic refmap remapping remain later work.
 - Latest branch update for these corrections is `58d614608a105bb7daa53d0a576f20a0e69d2acb`; no user build/test has yet validated the Schema 1.4 code batch.
+
+
+---
+
+## Implementation checkpoint — descriptor-aware Mixin member annotation inventory (2026-11-14)
+
+### Current increment
+
+The reusable analyzer now emits an immutable `MemberAnnotationFinding` inventory for the four core Mixin member annotations:
+
+- `@Shadow` on fields and methods.
+- `@Overwrite` on methods.
+- `@Accessor` on methods.
+- `@Invoker` on methods.
+
+Each finding preserves source archive/config/section/class provenance, source target selectors, annotation kind, field-vs-method element kind, exact source member name and JVM descriptor, prefix, aliases, explicit annotation value, Overwrite constraints, effective remap flag, inferred/explicit target-name candidates, operation shape, validation state, evidence, and warnings. Visible and invisible annotations are inspected on both fields and methods.
+
+The current implementation deliberately **does not claim target member presence or target descriptor compatibility**. No complete versioned Forge 1.20.1 → NeoForge 1.21.1 member mapping is supplied. Remappable members remain `MEMBER_REMAP_UNRESOLVED`; `remap=false` is `MEMBER_REMAP_DISABLED_UNVERIFIED`; plugin-declared configurations produce `PLUGIN_DEPENDENT` where the annotation itself is otherwise structurally usable. Invalid element placement, descriptor, selector, or known annotation-value combinations are separate states.
+
+### Contract details preserved
+
+- A member annotation's remap default is inherited from class-level `@Mixin(remap=...)`, unless the member explicitly overrides it.
+- `@Shadow` prefix stripping applies to methods only. An explicitly supplied prefix on a shadow field is warned and marked as an invalid annotation value; the field name is not stripped.
+- Shadow/Overwrite aliases are retained and checked against the private-member restriction.
+- Accessor inference uses `get`, `is`, or `set` followed by an uppercase character. Invoker inference uses `call` or `invoke` followed by an uppercase character. Constructor invocation is represented from an explicit `<init>` or fully qualified target value, not inferred from a generic method name.
+- Accessor getter/setter shape is inventoried from its exact source descriptor; this is not a comparison to a target field descriptor.
+- `@Overwrite.constraints` is preserved as source annotation data.
+
+The report schema/analyzer were bumped to `1.5 / 1.5.0`. JSON exposes `mixinAnalysis.memberAnnotations`; text output prints every finding's descriptor, candidates, remap state, prefix/aliases/value/constraints, and warnings. The limitation text explicitly says member target mapping/presence/descriptor comparison is not implemented.
+
+### Synthetic fixtures added — pending user verification
+
+ASM-generated fixtures and assertions cover:
+- Shadow field and method, custom/default prefix data, aliases, and invalid explicit field prefix.
+- Overwrite method descriptor, aliases, remap=false, and constraints.
+- Accessor inferred getter, explicit setter, uninferrable name, uncapitalized prefix, and unsupported descriptor shape.
+- Invoker inferred method and explicit constructor.
+- Class-level `@Mixin(remap=false)` inheritance and a member-level `remap=true` override.
+- Plugin-declared configurations retain a plugin-dependent state; plugin code is never loaded or executed.
+- Schema 1.5 JSON/text report serialization and deterministic empty member findings in the base fixture.
+
+Current source feature-branch HEAD after these source/test changes: `e60447ed3769077ebf391d21d1a724cda4a64d40`. **No Gradle test or build has yet been run against this increment.** The last user-confirmed green checkpoint remains the Schema 1.4 build at `afdf5c0b8b4410d0deb401683e60b0255843c58d`.
+
+### Remaining Slice 4 work
+
+The four annotation inventory is not complete Mixin analysis. Next increments remain:
+1. Target member mapping and exact target descriptor/hierarchy checks when a reviewed versioned member-map source is available; otherwise keep the unresolved state.
+2. Injector annotations and handler descriptors/selectors.
+3. `@At` parsing including method/field selectors, args/opcode/ordinal/shift.
+4. `@Slice` from/to boundary analysis.
+5. Refmap data interpretation and remapping only with explicit versioned mappings.
+6. Dynamic/unknown Mixin annotations and plugin-provided decisions, without executing plugin code.
+7. Nested configs/classes by reusing `Forge1201ArchiveGraph` and its bounds/provenance; never add a second ZIP walker.
+
