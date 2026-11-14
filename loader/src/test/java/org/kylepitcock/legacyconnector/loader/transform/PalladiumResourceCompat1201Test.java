@@ -540,6 +540,8 @@ class PalladiumResourceCompat1201Test {
                     let playerTimerScore = scoreboardManager.getOrCreatePlayerScore(playerUsername, timerObjective);
                     let currentTimerValue = playerTimerScore.getScore();
                     entity.server.runCommandSilent(`execute as ${playerUsername} at @s run scoreboard players set @s AlienEvo.Timer ${Math.floor(currentTimerValue / 2)}`);
+                    entity.level.playSound(null, entity.x, entity.y, entity.z,
+                            `alienevo:${watchType}_detransform`, entity.getSoundSource(), 1.0, 1.0);
                 }
                 """);
 
