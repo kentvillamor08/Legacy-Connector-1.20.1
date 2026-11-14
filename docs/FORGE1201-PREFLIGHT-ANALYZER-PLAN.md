@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Compatibility Analyzer
 
-**Status:** Slice 1 implemented and archived; Slice 2 Schema 1.2 / Analyzer 1.2.0 host-provider and NeoForge dependency-type corrections are committed and the forced loader test gate passed at source HEAD `4ece76833d1614738bc626fe64dbde31e42b8941`; corrected real-JAR report and consolidated clean build remain pending
+**Status:** Slice 1 implemented and archived; Slice 2 Schema 1.2 / Analyzer 1.2.0 host-provider and NeoForge dependency-type corrections are committed, the forced loader test gate passed at code-bearing source HEAD `4ece76833d1614738bc626fe64dbde31e42b8941`, and the corrected Symbiote run-3 real-JAR report has been generated and reviewed. The consolidated clean build remains pending.
 
 **Report filename rule:** every analyzer output filename includes its slice number, e.g. `symbiote-1.1.3.jar-slice-2.json` and `symbiote-1.1.3.jar-slice-2.txt`. Repeated runs append a run number, e.g. `symbiote-1.1.3.jar-slice-2-run-2.json` and `.txt`. Use the root Gradle task's explicit `-PpreflightJson=<path>` and `-PpreflightText=<path>` options. Never overwrite the unsuffixed legacy root filenames or an earlier slice/run. The testbench archive index is `archive/preflight/README.md`.
   
@@ -177,31 +177,57 @@ Metadata warning: `mods.toml` line 10 starts a multiline string that the scalar 
 
 Both report files are present and internally consistent; however, the Gradle console transcript was not uploaded, so do not record the final console line as `BUILD SUCCESSFUL`. Report generation and JSON validity are confirmed by the uploaded artifacts. No runtime or gameplay compatibility is established.
 
-### Slice 2 implementation checkpoint — committed; local validation pending
+### Slice 2 implementation checkpoint — corrected, tested, and real-JAR report verified
 
-**Last code-bearing Slice 2 checkpoint:** `fdb4e111fab45b0f41c7f15cad26cefbbcf92f13` (the later branch commits in this checkpoint are documentation-only boundary/continuation updates).  
-**Working branch:** `feat/forge1201-preflight-analyzer`  
-**Implementation scope:** bounded nested archive inspection, provider provenance, dependency graph, target-range evaluation.  
-**Validation status:** user-confirmed `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks` passed at source HEAD `e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb` on 2026-11-14. The output reports `BUILD SUCCESSFUL` and 12 actionable tasks, all 12 executed. Compilation, archive-graph regression tests, and `genBetaMappings` completed.
+**Last code-bearing Slice 2 checkpoint:** 4ece76833d1614738bc626fe64dbde31e42b8941 (the two commits after this checkpoint are documentation-only updates to this plan).  
+**Current Universal branch:** feat/forge1201-preflight-analyzer  
+**Current branch tip before this plan update:** aa5f5d32ba865e7f056851b1dfd39c12fb8fcffc  
+**Implementation scope:** bounded nested archive inspection, provider provenance, dependency graph, Forge/NeoForge dependency-type interpretation, and target-range evaluation.
 
-**Real-JAR smoke report:** the latest root testbench uploads `symbiote-1.1.3.jar.json` and `.txt` are the Slice 2 run (Schema 1.1 / Analyzer 1.1.0), not a further report to generate. The JSON was fetched directly by Git blob SHA and parsed successfully; the text report matches it. Both identify source SHA-256 `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c`, target Minecraft 1.21.1 / NeoForge 21.1.258, and report 11 archives, 9 providers, 17 dependency edges, 5 target range findings, and one metadata warning. Symbiote's `[1.20.1,1.21)` range is correctly OUTSIDE_RANGE for 1.21.1. The root files are byte-identical Git blobs to the archived Slice 2 files. The exact successful Gradle console transcript was not supplied, so record the artifacts as generated and inspected, but do not claim a captured report-task exit code.
+**Focused validation:** the user-confirmed command :loader:clean :loader:test --no-daemon --console=plain --rerun-tasks passed at code-bearing source HEAD 4ece76833d1614738bc626fe64dbde31e42b8941 on 2026-11-14. Output: BUILD SUCCESSFUL in 40s; 12 actionable tasks, all 12 executed, including production/test compilation, genBetaMappings (9,243 rows), and :loader:test. The current branch tip aa5f5d32ba865e7f056851b1dfd39c12fb8fcffc is two documentation-only commits beyond that tested code checkpoint; GitHub comparison confirms only this plan file changed.
 
-**Slice 2 is not fully accepted yet:** dependency-graph host-provider findings need correction/review, and the consolidated clean build remains pending.
+**Corrected real-JAR report — generated and inspected:** the user generated the report using the corrected branch and uploaded both files to the testbench root in commit 9b89a4a1d10c89cb93f9399ac49b01ec93e1b1c7.
 
-Files changed:
-- `loader/src/main/java/org/kylepitcock/legacyconnector/loader/tools/forge1201/Forge1201ArchiveGraph.java` — new bounded archive graph analyzer.
-- `loader/src/main/java/org/kylepitcock/legacyconnector/loader/tools/forge1201/Forge1201JarInspector.java` — added in-memory metadata parsing helpers for embedded Forge 1.20.1 and NeoForge metadata.
-- `loader/src/main/java/org/kylepitcock/legacyconnector/loader/tools/forge1201/Forge1201PreflightAnalyzer.java` — schema/analyzer version bumped to 1.1 / 1.1.0; graph added to JSON/text result.
-- `loader/src/test/java/org/kylepitcock/legacyconnector/loader/tools/forge1201/Forge1201ArchiveGraphTest.java` — new synthetic nested/provider/range/safety test suite.
+- JSON: symbiote-1.1.3.jar-slice-2-run-3.json; Git blob f7c8200ea32c5a9927e6459ce19547a4831e986a.
+- Text: symbiote-1.1.3.jar-slice-2-run-3.txt; Git blob 8e6109e3f7401c9e56d96e81e15957e69a863ec7.
+- Schema 1.2; analyzer 1.2.0; source symbiote-1.1.3.jar; source SHA-256 e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c.
+- Target Minecraft 1.21.1; target NeoForge 21.1.258.
+- Inventory: 515 archive entries, 11 nested/embedded archive records, 9 installed/embedded providers, 17 dependency edges, 5 Minecraft target-range findings, 278 classes, 442 referenced API types, 1,110 method references, 352 field references, 5,369 method call-sites, and 1,196 field call-sites.
+- The JSON blob was fetched directly by Git blob SHA and parsed successfully; its structures and dependency edges agree with the text report. The ordinary file-content endpoint returned an empty body for this large JSON blob, so the blob fetch was used for validation.
+
+**Corrected graph results:**
+
+1. Forge and NeoForge metadata semantics are now reflected correctly. NeoForge minecraft / neoforge dependencies use host-bridge statuses rather than false REQUIRED_MISSING findings. Required / optional / incompatible dependency types are retained.
+2. Symbiote's own Minecraft range [1.20.1,1.21) is HOST_VERSION_MISMATCH / OUTSIDE_RANGE against target 1.21.1. This is a metadata-range finding, not a claim that the mod necessarily cannot run after translation.
+3. Installed NeoForge host ranges that the conservative parser supports match target 21.1.258 (including AzureLib, GeckoLib, KubeJS, Player Animator, and Better Advanced Tooltips). Architectury's qualified NeoForge range [21.0.110-beta,) remains UNPARSEABLE.
+4. KubeJS finds its nested Better Advanced Tooltips provider and installed Rhino provider. Their qualified version strings 2101.1.0-build.1 and 2101.2.8-build.91 remain UNPARSEABLE; provider presence is not upgraded into a proven version match or API-compatibility claim.
+5. KubeJS's EMI, JEI, and Roughly Enough Items dependencies are optional and absent in the scanned mods directory. GeckoLib declares geckoanimfix as incompatible; the report correctly records that incompatible provider as absent.
+6. Symbiote's Forge [47,) dependency is represented as a host bridge. Its target Minecraft range remains the single relevant host-version mismatch.
+
+**Warnings and evidence boundary:**
+
+- One metadata warning: mods.toml line 10 begins a multiline string that the scalar metadata inspector does not parse.
+- One archive-graph warning: Symbiote declares [1.20.1,1.21), excluding target 1.21.1.
+- No Mixin config candidates were found in this report.
+- This is static preflight evidence only. It does not prove class linking, startup, gameplay, client rendering, synchronization, or stability.
+- Slice 2 inventories nested archives and their metadata, but bytecode references are still scanned only in the outer source JAR; nested bytecode analysis is deferred to Slice 3.
+- The report explicitly preserves conservative handling of qualified version strings and the bounded nested-archive limits documented above.
+
+Files changed by Slice 2:
+- loader/src/main/java/org/kylepitcock/legacyconnector/loader/tools/forge1201/Forge1201ArchiveGraph.java — bounded archive graph analyzer.
+- loader/src/main/java/org/kylepitcock/legacyconnector/loader/tools/forge1201/Forge1201JarInfo.java — explicit Forge/NeoForge dependency-type model.
+- loader/src/main/java/org/kylepitcock/legacyconnector/loader/tools/forge1201/Forge1201JarInspector.java — in-memory metadata parsing helpers for embedded Forge 1.20.1 and NeoForge metadata.
+- loader/src/main/java/org/kylepitcock/legacyconnector/loader/tools/forge1201/Forge1201PreflightAnalyzer.java — schema/analyzer version 1.2 / 1.2.0 and graph output in JSON/text.
+- loader/src/test/java/org/kylepitcock/legacyconnector/loader/tools/forge1201/Forge1201ArchiveGraphTest.java — synthetic nested/provider/range/safety regression suite.
 
 Implemented behavior:
-1. Reads real nested JAR entries in memory (no extraction to persistent folders) using both Jar-in-Jar metadata paths and actual `META-INF/jarjar/` / `META-INF/jars/` archive entries.
+1. Reads real nested JAR entries in memory (no extraction to persistent folders) using both Jar-in-Jar metadata paths and actual META-INF/jarjar/ / META-INF/jars/ archive entries.
 2. Records source-root, installed top-level, source-nested, and installed-nested archive provenance, parent path, depth, size, SHA-256, Jar-in-Jar group/artifact/version range/artifact version where declared, detected loader family, archive classification, and contained mod IDs/versions.
 3. Distinguishes Forge 1.20.1 mods, NeoForge mods, library/unrecognized archives, corrupt ZIPs, unsafe paths, missing declared archive files, byte/entry/depth/archive-count limits, and duplicate content skipped by SHA-256 cycle protection.
-4. Discovers installed top-level NeoForge and Forge 1.20.1 providers and nested providers. A provider record links mod ID and declared version to the actual archive path and hash. The report still does not claim that ID/version equality proves API or behavioral compatibility.
-5. Builds dependency edges for source and nested/installed mods while preserving declaring mod/archive, dependency ID, range, required/optional flag, side, and ordering. It distinguishes host bridges, present providers, provider version mismatches, duplicate/ambiguous providers, required missing providers, and optional missing providers.
-6. Evaluates numeric dotted Maven-style ranges conservatively. Unsupported/qualified version strings remain `UNPARSEABLE`; they are never silently treated as matching.
-7. Adds explicit target Minecraft range findings. For Symbiote, `[1.20.1,1.21)` is correctly expected to exclude target `1.21.1`; the explanation calls this a possible metadata-range translation requirement, not an invented dependency or unconditional load-failure verdict.
+4. Discovers installed top-level NeoForge and Forge 1.20.1 providers and nested providers. A provider record links mod ID and declared version to the actual archive path and hash. An ID/version match does not establish API or behavioral compatibility.
+5. Builds dependency edges for source and nested/installed mods while preserving declaring mod/archive, dependency ID, range, required/optional/incompatible/discouraged type, side, and ordering. It distinguishes host bridges, present providers, provider version mismatches, duplicate/ambiguous providers, required missing providers, optional missing providers, and incompatible/discouraged provider states.
+6. Evaluates numeric dotted Maven-style ranges conservatively. Unsupported/qualified version strings remain UNPARSEABLE; they are never silently treated as matching.
+7. Adds explicit target Minecraft range findings. For Symbiote, [1.20.1,1.21) is correctly identified as excluding target 1.21.1; the explanation calls this a possible metadata-range translation requirement, not an invented dependency or unconditional load-failure verdict.
 8. Preserves deterministic ordering and exposes the archive graph in both JSON and text reports. Nested bytecode remains out of scope until Slice 3.
 
 Safety limits currently encoded:
@@ -217,51 +243,30 @@ Safety limits currently encoded:
 Synthetic coverage added:
 - Nested Forge mod vs ordinary library classification and Jar-in-Jar coordinate/hash provenance.
 - Installed top-level NeoForge and Forge 1.20.1 provider discovery plus installed nested NeoForge provider discovery.
-- Provider version match, out-of-range mismatch, duplicate/ambiguous mod IDs, required/optional missing dependencies.
+- Provider version match, out-of-range mismatch, duplicate/ambiguous mod IDs, required/optional missing dependencies, and NeoForge dependency-type handling.
 - Minecraft target mismatch, exact/numeric/union ranges, and unparseable qualified versions.
 - Missing declared JAR, corrupt archive, traversal path, duplicate archive content, maximum depth, per-archive size, and archive-count limits.
 
-The focused loader tests are confirmed passing as recorded above. Treat the real-JAR JSON/text artifacts as reviewed evidence, but do not infer runtime compatibility or a consolidated build pass.
+### Exact next action — run the consolidated clean build
 
-### Exact next action — generate the corrected Slice 2 report, then run the consolidated build
+The corrected Slice 2 source and regression tests passed the focused forced loader test gate, and the corrected Schema 1.2 / Analyzer 1.2.0 Symbiote run-3 report has been generated and inspected. The remaining local validation gate is the consolidated clean build. Do not begin Slice 3 or claim the current branch is fully build-validated until this succeeds.
 
-**Completed:** the corrected Schema 1.2 / Analyzer 1.2.0 source and regression tests passed the forced loader test gate at source HEAD `4ece76833d1614738bc626fe64dbde31e42b8941` on 2026-11-14. The user's output showed `BUILD SUCCESSFUL in 40s`, 12 actionable tasks (all 12 executed), including production/test compilation, `genBetaMappings` (9,243 rows), and `:loader:test`. The latest source change after that test is documentation-only.
-
-**Next: run the corrected real-JAR preflight.** Use the known local Symbiote JAR and installed NeoForge mods paths from the continuation handoff. The next free filename pair is `symbiote-1.1.3.jar-slice-2-run-3.json` and `.txt`; the earlier `run-2` pair was uploaded as duplicate old report blobs and must not be overwritten.
+Run this in the Universal worktree only. It pulls nothing and changes no branch; it first checks the exact worktree, branch, expected current tip, and clean state.
 
 ```powershell
 $repo = 'F:\Program\intellij-idea-portable\Legacy-Connector-1.20.1'
 $branch = 'feat/forge1201-preflight-analyzer'
-$actual = (git -C $repo branch --show-current).Trim()
-if ($actual -ne $branch) { throw "Wrong branch: expected $branch, found $actual" }
+$expectedHead = 'aa5f5d32ba865e7f056851b1dfd39c12fb8fcffc'
 
-$jar = 'C:\Users\Administrator\legacy-connector-testbench\symbiote-1.1.3.jar'
-$modsDir = 'E:\Games\PolyMC\instances\Neoforge tester\.minecraft\mods'
-$testbench = 'C:\Users\Administrator\legacy-connector-testbench'
-$json = Join-Path $testbench 'symbiote-1.1.3.jar-slice-2-run-3.json'
-$text = Join-Path $testbench 'symbiote-1.1.3.jar-slice-2-run-3.txt'
+$actualRepo = (git -C $repo rev-parse --show-toplevel).Trim()
+if ($actualRepo -ne $repo) { throw "Unexpected repository path: $actualRepo" }
+$actualBranch = (git -C $repo branch --show-current).Trim()
+if ($actualBranch -ne $branch) { throw "Wrong branch: expected $branch, found $actualBranch" }
+$actualHead = (git -C $repo rev-parse HEAD).Trim()
+if ($actualHead -ne $expectedHead) { throw "Unexpected HEAD: expected $expectedHead, found $actualHead" }
+$changes = @(git -C $repo status --porcelain)
+if ($changes.Count -gt 0) { $changes; throw "Worktree is not clean. Stop and inspect local changes." }
 
-if (!(Test-Path -LiteralPath $jar -PathType Leaf)) { throw "Symbiote JAR not found: $jar" }
-if (!(Test-Path -LiteralPath $modsDir -PathType Container)) { throw "Installed NeoForge mods directory not found: $modsDir" }
-$hash = (Get-FileHash -LiteralPath $jar -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($hash -ne 'e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c') { throw "Unexpected Symbiote JAR SHA-256: $hash" }
-if ((Test-Path -LiteralPath $json) -or (Test-Path -LiteralPath $text)) { throw "Run-3 output already exists; choose a new run number." }
-
-Push-Location $repo
-.\gradlew.bat preflight1201 "-PpreflightJar=$jar" "-PpreflightModsDirs=$modsDir" "-PpreflightJson=$json" "-PpreflightText=$text" --no-daemon --console=plain
-$reportExit = $LASTEXITCODE
-Pop-Location
-if ($reportExit -ne 0) { throw "Corrected Slice 2 preflight failed." }
-```
-
-Upload both `-slice-2-run-3` files to the testbench root. Verify the report is schema `1.2` / analyzer `1.2.0`, that NeoForge host dependencies are evaluated against `21.1.258` rather than reported missing, that Symbiote's Minecraft `[1.20.1,1.21)` range is outside target `1.21.1`, and that NeoForge dependency types are parsed as declared. Qualified versions such as Rhino `2101.2.8-build.91` and Better Advanced Tooltips `2101.1.0-build.1` must remain explicitly unverified.
-
-**After the corrected report is reviewed:** run the consolidated clean build in the Universal worktree:
-```powershell
-$repo = 'F:\Program\intellij-idea-portable\Legacy-Connector-1.20.1'
-$branch = 'feat/forge1201-preflight-analyzer'
-$actual = (git -C $repo branch --show-current).Trim()
-if ($actual -ne $branch) { throw "Wrong branch: expected $branch, found $actual" }
 Push-Location $repo
 .\gradlew.bat :clean :loader:clean :testmods:clean :build :loader:build :testmods:assemble --no-daemon --console=plain
 $buildExit = $LASTEXITCODE
@@ -269,14 +274,16 @@ Pop-Location
 if ($buildExit -ne 0) { throw "Universal consolidated build failed." }
 ```
 
-Keep the Palladium + Alien Evolution worktree/branch isolated. Do not merge into `master`. Do not claim runtime compatibility from preflight output.
+After success, capture the exact source HEAD and full build result in the testbench. Then proceed to Slice 3: nested bytecode scanning, complete reference-kind coverage, and SRG-to-1.20.1 Mojang-name normalization, with focused regression tests. Keep the Palladium + Alien Evolution worktree/branch isolated. Do not merge into master; do not infer runtime compatibility from static preflight output.
+
 
 ## Validation boundary
 
-User-confirmed validation on 2026-11-14 at source HEAD `9e1a1e14b597dd8ae690e9ae8c350809567dd1fc`:
+**Current code-bearing validation on 2026-11-14:**
 
-- `:loader:clean :loader:test --no-daemon --console=plain` — BUILD SUCCESSFUL; 12 actionable tasks, 1m 30s.
-- `:clean :loader:clean :testmods:clean :build :loader:build :testmods:assemble --no-daemon --console=plain` — BUILD SUCCESSFUL; 33 actionable tasks, 5m 32s.
-- Deprecation/removal warnings and Gradle 9.0 compatibility warnings were present but non-fatal.
+- At source code commit 4ece76833d1614738bc626fe64dbde31e42b8941, the user-confirmed command :loader:clean :loader:test --no-daemon --console=plain --rerun-tasks passed: BUILD SUCCESSFUL in 40s; 12 actionable tasks, all 12 executed.
+- The branch tip immediately after that validation was aa5f5d32ba865e7f056851b1dfd39c12fb8fcffc, exactly two commits ahead. GitHub compare confirms those two commits changed only this analyzer plan document; no production or test source changed after the passing test gate.
+- The corrected Schema 1.2 / Analyzer 1.2.0 Symbiote run-3 JSON/text artifacts have been generated, uploaded, and parsed/reviewed as documented above.
+- The consolidated clean build for the current Slice 2 code is still pending. Do not treat the older full-build result at source HEAD 9e1a1e14b597dd8ae690e9ae8c350809567dd1fc as validation of the later Slice 2 code: that build predates the subsequent implementation changes.
+- No Minecraft runtime or gameplay compatibility is established by these tests or static report artifacts.
 
-The analyzer code is compile/test/build validated at that exact source commit. The corrected real-JAR smoke artifacts are present and reviewed as described above; the final Gradle console result was not uploaded. This is static preflight evidence only and establishes no Minecraft runtime compatibility.
