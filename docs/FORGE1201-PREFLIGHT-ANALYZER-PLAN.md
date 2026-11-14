@@ -913,3 +913,6 @@ The synthetic ASM fixture checks:
 ### Next bounded increment after Schema 1.7 tests pass
 
 Implement `@Slice` boundary inventory using both `from` and `to` nested `@At` annotations. Preserve defaults and boundary provenance separately; do not infer instruction order or prove slice validity without target method bytecode and resolved selectors. Then proceed to semantic refmap interpretation using explicit versioned mapping inputs. Nested source-archive config/class discovery must continue to reuse `Forge1201ArchiveGraph`; no second ZIP walker. Runtime client/server tests remain a separate later gate.
+### Schema 1.7 parser follow-up
+
+A review correction preserves the valid owner-only `@At.target` selector form used by construction injection points. The parser no longer rejects the absent member name when an owner is present, and a synthetic ASM regression assertion covers this case. This source/test correction is included in the current Schema 1.7 validation batch; Gradle verification remains pending.
