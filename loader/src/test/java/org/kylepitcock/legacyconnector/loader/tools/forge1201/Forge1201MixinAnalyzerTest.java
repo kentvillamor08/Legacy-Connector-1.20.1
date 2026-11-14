@@ -41,6 +41,7 @@ final class Forge1201MixinAnalyzerTest {
     private static final String SLICE_DESC = "Lorg/spongepowered/asm/mixin/injection/Slice;";
     private static final String DESC_DESC = "Lorg/spongepowered/asm/mixin/injection/Desc;";
     private static final String CONSTANT_DESC = "Lorg/spongepowered/asm/mixin/injection/Constant;";
+    private static final String CONDITION_DESC = "Lorg/spongepowered/asm/mixin/injection/Constant$Condition;";
     private static final String SOURCE_ENTITY = "net/minecraft/world/entity/Entity";
     private static final String SOURCE_LIVING = "net/minecraft/world/entity/LivingEntity";
 
@@ -325,6 +326,226 @@ final class Forge1201MixinAnalyzerTest {
         assertEquals(1, modifyConstant.sliceAnnotationCount());
         assertTrue(result.injectors().stream().anyMatch(f ->
                 f.annotationKind() == Forge1201MixinAnalyzer.InjectorAnnotationKind.MODIFY_ARGS));
+    }
+
+
+    @Test
+    void inventoriesDetailedAtSelectorsAndTypedModifyConstantDiscriminators() throws Exception {
+        String configPath = "mixins.at-constants.json";
+        Path jar = writeJar("at-constants.jar", Map.of(
+                configPath, """
+                        {"package":"com.example.mixins","mixins":["AtConstantMixin"]}
+                        """.getBytes(StandardCharsets.UTF_8),
+                "com/example/mixins/AtConstantMixin.class",
+                atConstantMixinClass("com/example/mixins/AtConstantMixin", SOURCE_ENTITY)));
+
+        var result = Forge1201MixinAnalyzer.analyze(jar,
+                List.of(new Forge1201MixinAnalyzer.ConfigDeclaration(
+                        configPath, Forge1201MixinAnalyzer.DiscoverySource.MANIFEST)),
+                emptyTargetIndex(), Map.of(), "no-member-mapping-supplied");
+
+        var atHandler = result.injectors().stream()
+                .filter(finding -> finding.sourceMemberName().equals("atMetadata"))
+                .findFirst().orElseThrow();
+        assertEquals(3, atHandler.injectionPoints().size());
+
+        var fieldAt = atHandler.injectionPoints().getFirst();
+        assertEquals("FIELD", fieldAt.value());
+        assertEquals(Forge1201MixinAnalyzer.AtValueKind.BUILT_IN, fieldAt.valueKind());
+        assertEquals("L" + SOURCE_ENTITY + ";health:D", fieldAt.rawTarget());
+        assertEquals(SOURCE_ENTITY, fieldAt.targetSelector().ownerInternalName());
+        assertEquals("health", fieldAt.targetSelector().memberName());
+        assertEquals("D", fieldAt.targetSelector().descriptor());
+        assertEquals(Forge1201MixinAnalyzer.AtTargetDescriptorKind.FIELD,
+                fieldAt.targetSelector().descriptorKind());
+        assertEquals(Forge1201MixinAnalyzer.AtTargetSelectorStatus.FIELD_DESCRIPTOR,
+                fieldAt.targetSelector().status());
+        assertEquals(Opcodes.GETFIELD, fieldAt.opcode());
+        assertEquals(2, fieldAt.ordinal());
+        assertEquals("BY", fieldAt.shift());
+        assertEquals(-1, fieldAt.shiftBy());
+        assertEquals("segment", fieldAt.sliceId());
+        assertEquals(List.of("array=getter", "audit=fixture"), fieldAt.args());
+        assertFalse(fieldAt.remap());
+        assertEquals("healthLookup", fieldAt.id());
+
+        var descAt = atHandler.injectionPoints().get(1);
+        assertEquals("INVOKE", descAt.value());
+        assertEquals(SOURCE_ENTITY, descAt.descSelector().ownerInternalName());
+        assertEquals("hurt", descAt.descSelector().memberName());
+        assertEquals("(D)Z", descAt.descSelector().descriptor());
+        assertEquals(1, descAt.descSelector().minimumMatches());
+        assertEquals(1, descAt.descSelector().maximumMatches());
+
+        var headAt = atHandler.injectionPoints().get(2);
+        assertEquals("HEAD", headAt.value());
+        assertEquals(Forge1201MixinAnalyzer.AtTargetSelectorStatus.NOT_DECLARED,
+                headAt.targetSelector().status());
+        assertEquals(-1, headAt.opcode());
+        assertEquals(-1, headAt.ordinal());
+        assertEquals("NONE", headAt.shift());
+        assertEquals(0, headAt.shiftBy());
+        assertTrue(headAt.remap());
+
+        var constants = result.injectors().stream()
+                .filter(finding -> finding.sourceMemberName().equals("modifyTypedConstants"))
+                .findFirst().orElseThrow().constants();
+        assertEquals(7, constants.size());
+        assertEquals(Integer.valueOf(7), constants.get(0).intValue());
+        assertEquals(3, constants.get(0).ordinal());
+        assertEquals("segment", constants.get(0).sliceId());
+        assertEquals(List.of("GREATER_THAN_ZERO"), constants.get(0).expandZeroConditions());
+        assertEquals(Boolean.TRUE, constants.get(0).log());
+        assertEquals(Float.valueOf(1.25F), constants.get(1).floatValue());
+        assertEquals(Long.valueOf(9L), constants.get(2).longValue());
+        assertEquals(Double.valueOf(2.5D), constants.get(3).doubleValue());
+        assertEquals("hello", constants.get(4).stringValue());
+        assertEquals("Lcom/example/Thing;", constants.get(5).classValueDescriptor());
+        assertEquals(Boolean.TRUE, constants.get(6).nullValue());
+        assertTrue(constants.stream().allMatch(constant -> constant.declared()
+                && constant.status() == Forge1201MixinAnalyzer.ConstantFindingStatus.EXPLICIT_TYPED_DISCRIMINATOR));
+
+        var implicit = result.injectors().stream()
+                .filter(finding -> finding.sourceMemberName().equals("modifyImplicitConstant"))
+                .findFirst().orElseThrow().constants().getFirst();
+        assertFalse(implicit.declared());
+        assertEquals(Forge1201MixinAnalyzer.ConstantFindingStatus.MATCH_HANDLER_RETURN_TYPE, implicit.status());
+
+        var conflict = result.injectors().stream()
+                .filter(finding -> finding.sourceMemberName().equals("modifyConflictingConstant"))
+                .findFirst().orElseThrow().constants().getFirst();
+        assertEquals(Forge1201MixinAnalyzer.ConstantFindingStatus.CONFLICTING_DISCRIMINATORS, conflict.status());
+    }
+
+    private static byte[] atConstantMixinClass(String internalName, String targetInternalName) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                internalName, null, "java/lang/Object", null);
+        AnnotationVisitor mixin = writer.visitAnnotation(MIXIN_DESC, true);
+        AnnotationVisitor targets = mixin.visitArray("value");
+        targets.visit(null, Type.getObjectType(targetInternalName));
+        targets.visitEnd();
+        mixin.visitEnd();
+
+        MethodVisitor atMethod = writer.visitMethod(Opcodes.ACC_PRIVATE, "atMetadata", "()V", null, null);
+        AnnotationVisitor inject = atMethod.visitAnnotation(INJECT_DESC, false);
+        AnnotationVisitor methods = inject.visitArray("method");
+        methods.visit(null, "tick()V");
+        methods.visitEnd();
+
+        AnnotationVisitor atArray = inject.visitArray("at");
+        AnnotationVisitor fieldAt = atArray.visitAnnotation(null, AT_DESC);
+        fieldAt.visit("value", "FIELD");
+        fieldAt.visit("target", "L" + targetInternalName + ";health:D");
+        fieldAt.visit("opcode", Opcodes.GETFIELD);
+        fieldAt.visit("ordinal", 2);
+        fieldAt.visitEnum("shift", "Lorg/spongepowered/asm/mixin/injection/At$Shift;", "BY");
+        fieldAt.visit("by", -1);
+        fieldAt.visit("slice", "segment");
+        fieldAt.visit("remap", false);
+        fieldAt.visit("id", "healthLookup");
+        AnnotationVisitor fieldArgs = fieldAt.visitArray("args");
+        fieldArgs.visit(null, "array=getter");
+        fieldArgs.visit(null, "audit=fixture");
+        fieldArgs.visitEnd();
+        fieldAt.visitEnd();
+
+        AnnotationVisitor invokeAt = atArray.visitAnnotation(null, AT_DESC);
+        invokeAt.visit("value", "INVOKE");
+        AnnotationVisitor atDesc = invokeAt.visitAnnotation("desc", DESC_DESC);
+        atDesc.visit("owner", Type.getObjectType(targetInternalName));
+        atDesc.visit("value", "hurt");
+        atDesc.visit("ret", Type.BOOLEAN_TYPE);
+        AnnotationVisitor atDescArgs = atDesc.visitArray("args");
+        atDescArgs.visit(null, Type.DOUBLE_TYPE);
+        atDescArgs.visitEnd();
+        atDesc.visit("min", 1);
+        atDesc.visit("max", 1);
+        atDesc.visitEnd();
+        invokeAt.visitEnd();
+
+        AnnotationVisitor headAt = atArray.visitAnnotation(null, AT_DESC);
+        headAt.visit("value", "HEAD");
+        headAt.visitEnd();
+        atArray.visitEnd();
+
+        AnnotationVisitor slices = inject.visitArray("slice");
+        AnnotationVisitor slice = slices.visitAnnotation(null, SLICE_DESC);
+        slice.visit("id", "segment");
+        slice.visitEnd();
+        slices.visitEnd();
+        inject.visitEnd();
+        atMethod.visitCode();
+        atMethod.visitInsn(Opcodes.RETURN);
+        atMethod.visitMaxs(0, 0);
+        atMethod.visitEnd();
+
+        MethodVisitor constantsMethod = writer.visitMethod(
+                Opcodes.ACC_PRIVATE, "modifyTypedConstants", "(I)I", null, null);
+        AnnotationVisitor modify = constantsMethod.visitAnnotation(MODIFY_CONSTANT_DESC, false);
+        AnnotationVisitor targetMethods = modify.visitArray("method");
+        targetMethods.visit(null, "tick()V");
+        targetMethods.visitEnd();
+        AnnotationVisitor constants = modify.visitArray("constant");
+
+        AnnotationVisitor intConstant = constants.visitAnnotation(null, CONSTANT_DESC);
+        intConstant.visit("intValue", 7);
+        intConstant.visit("ordinal", 3);
+        intConstant.visit("slice", "segment");
+        intConstant.visit("log", true);
+        AnnotationVisitor zeroConditions = intConstant.visitArray("expandZeroConditions");
+        zeroConditions.visitEnum(null, CONDITION_DESC, "GREATER_THAN_ZERO");
+        zeroConditions.visitEnd();
+        intConstant.visitEnd();
+
+        AnnotationVisitor floatConstant = constants.visitAnnotation(null, CONSTANT_DESC);
+        floatConstant.visit("floatValue", 1.25F);
+        floatConstant.visitEnd();
+        AnnotationVisitor longConstant = constants.visitAnnotation(null, CONSTANT_DESC);
+        longConstant.visit("longValue", 9L);
+        longConstant.visitEnd();
+        AnnotationVisitor doubleConstant = constants.visitAnnotation(null, CONSTANT_DESC);
+        doubleConstant.visit("doubleValue", 2.5D);
+        doubleConstant.visitEnd();
+        AnnotationVisitor stringConstant = constants.visitAnnotation(null, CONSTANT_DESC);
+        stringConstant.visit("stringValue", "hello");
+        stringConstant.visitEnd();
+        AnnotationVisitor classConstant = constants.visitAnnotation(null, CONSTANT_DESC);
+        classConstant.visit("classValue", Type.getObjectType("com/example/Thing"));
+        classConstant.visitEnd();
+        AnnotationVisitor nullConstant = constants.visitAnnotation(null, CONSTANT_DESC);
+        nullConstant.visit("nullValue", true);
+        nullConstant.visitEnd();
+        constants.visitEnd();
+        modify.visitEnd();
+        emitInjectorMethodBody(constantsMethod, "(I)I");
+
+        MethodVisitor implicitMethod = writer.visitMethod(
+                Opcodes.ACC_PRIVATE, "modifyImplicitConstant", "(I)I", null, null);
+        AnnotationVisitor implicit = implicitMethod.visitAnnotation(MODIFY_CONSTANT_DESC, false);
+        AnnotationVisitor implicitMethods = implicit.visitArray("method");
+        implicitMethods.visit(null, "tick()V");
+        implicitMethods.visitEnd();
+        implicit.visitEnd();
+        emitInjectorMethodBody(implicitMethod, "(I)I");
+
+        MethodVisitor conflictMethod = writer.visitMethod(
+                Opcodes.ACC_PRIVATE, "modifyConflictingConstant", "(I)I", null, null);
+        AnnotationVisitor conflict = conflictMethod.visitAnnotation(MODIFY_CONSTANT_DESC, false);
+        AnnotationVisitor conflictMethods = conflict.visitArray("method");
+        conflictMethods.visit(null, "tick()V");
+        conflictMethods.visitEnd();
+        AnnotationVisitor conflictArray = conflict.visitArray("constant");
+        AnnotationVisitor conflictConstant = conflictArray.visitAnnotation(null, CONSTANT_DESC);
+        conflictConstant.visit("intValue", 2);
+        conflictConstant.visit("stringValue", "also-int");
+        conflictConstant.visitEnd();
+        conflictArray.visitEnd();
+        conflict.visitEnd();
+        emitInjectorMethodBody(conflictMethod, "(I)I");
+
+        writer.visitEnd();
+        return writer.toByteArray();
     }
 
     private static byte[] injectorMixinClass(String internalName, String targetInternalName) {
