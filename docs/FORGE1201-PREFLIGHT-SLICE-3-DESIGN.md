@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Analyzer — Slice 3 Design
 
-Status: implementation checkpoint. The dynamic/bootstrap reference batch is committed; nested source-archive bytecode scanning and SRG-to-1.20.1 Mojang-name normalization are committed in a494d20a3be797abd3de563fa3672df69e2276da; a follow-up stale-limitation assertion correction is committed in 3c6febb075c32391b6879b0f3ef00c5856e80d51. Structural-reference coverage audit and its broader fixture matrix remain in progress.
+Status: nested source-archive bytecode scanning and SRG-to-1.20.1 Mojang-name normalization passed the user's forced clean loader test gate at 43f6db7726c3e023b331d714cbc3ccb6452e7564 (BUILD SUCCESSFUL, 14/14 tasks executed). A follow-up ClassRemapper audit added annotation-value visitors, null-safe contextual ordering and structural ASM fixtures; these newest changes are committed but still require the next forced loader test gate. The Symbiote Schema 1.3 report remains blocked until that gate passes.
 
 ## Goal
 
@@ -191,3 +191,39 @@ Commit 0c7c55b72033c986d94f1cba5d836dfce26e95a0 updates loader/build.gradle so t
 The first forced test run against source commit `1c403bcc93f3e2c1d57215aea7e41419f29e1ed3` reached 454 tests with one failure: `reportsOversizedNestedClassEntriesAsExplicitlySkipped()`, line 144. The class entry was counted as skipped, and `snapshotFromBytes()` generated the expected oversized-class warning. However, `scanNestedClassEntries()` initialized the per-archive summary warning list as empty, so the warning was retained only in the graph-wide warnings and omitted from `ClassScanSummary.warnings()`. The regression assertion therefore exposed a reporting-provenance gap, not a failure to enforce the byte limit.
 
 The follow-up fix seeds each per-archive class summary with the class-specific snapshot warnings (unsafe class-entry paths, duplicate class entries, and class payload capture-limit skips). Non-class archive warnings remain in the graph-wide warning list and are not copied into the class summary. The user must pull the new commit and rerun the forced loader test gate; no passing result is claimed yet.
+
+## ClassRemapper structural/context audit — 2026-11-14
+
+### Confirmed by source inspection
+
+The scanner uses one ASM 9 ClassRemapper over the custom collector. The inherited remapping path already records aggregate type/member references through ApiReferenceCollector.map, mapMethodName, and mapFieldName for the following standard class-file structures:
+
+- class superclass, interfaces, generic class signatures, and type-annotation descriptors;
+- field descriptors and generic signatures;
+- method descriptors, generic signatures, declared exceptions, method/parameter/type-annotation descriptors;
+- instruction owner/type/array descriptors;
+- try/catch exception types, stack-map frame object types, local-variable descriptors/signatures;
+- record-component descriptors/signatures.
+
+The ClassRemapper path alone did not traverse nested annotation element values in most scopes because the downstream visitors returned null. Field and record-component visitors were also absent, preventing their annotation values from being visited. Therefore annotation class literals could be missing even when the annotation descriptor itself was counted.
+
+### Annotation-value correction
+
+The scanner now returns recording visitors for class, field, record-component, method, parameter, type, instruction, try/catch, local-variable, and annotation-default contexts. The visitors recurse through nested annotations and arrays. Annotation class literals and method types flow into the existing dynamic-reference result with archive/class provenance. Enum type descriptors continue to be captured by ASM's remapping callbacks. Instruction type-annotation values retain the ordinal of the instruction they annotate; metadata-level annotation values use instructionOrdinal = -1 and are formatted as non-code contexts in text output.
+
+Dynamic-reference sorting now treats class/field-level null caller-method and caller-descriptor values as empty sort keys. This is required for deterministic output once metadata-level references are present.
+
+### Synthetic fixture coverage added (pending user test)
+
+The new structural fixture distinguishes types used only in class headers/interfaces/generic bounds, field and method descriptors/signatures, declared exceptions, try/catch blocks, stack-map frames, local-variable descriptors/signatures, type instructions, multi-dimensional array descriptors, and record-component descriptors/signatures. It also covers class, class-type, field, field-type, method, method-return-type, parameter, instruction, try-catch, local-variable, record-component, and nested annotation values, including arrays, enum descriptors, and annotation class literals.
+
+The new code/test batch has not yet been run by the user. Do not claim compilation or test success for these newest commits. The previously green gate at 43f6db7726c3e023b331d714cbc3ccb6452e7564 validates the nested-class warning fix only.
+
+### Remaining Slice 3 work
+
+1. Pull the latest feat/forge1201-preflight-analyzer tip and run the complete forced :loader:clean :loader:test --no-daemon --console=plain --rerun-tasks gate.
+2. Fix any compile/runtime fixture failures before generating any real-mod report.
+3. Review whether a stable raw-ZIP duplicate-entry fixture can be added without depending on ZipOutputStream duplicate-entry rejection behavior.
+4. Add/confirm deep nested ConstantDynamic recursion and depth-limit coverage.
+5. After tests pass, generate a uniquely suffixed Symbiote Schema 1.3 JSON/text report; never overwrite Slice 2 run-3. Review nested archive class counts, annotation/dynamic references, SRG mapped/unmapped evidence and warnings.
+6. Run the consolidated clean build. Runtime launch/gameplay compatibility remains a separate unverified gate.
