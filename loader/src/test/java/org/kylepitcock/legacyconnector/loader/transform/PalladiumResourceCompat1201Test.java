@@ -908,7 +908,8 @@ class PalladiumResourceCompat1201Test {
         assertTrue(migrated.contains(
                 "if (firetick > 0 && targets[j] instanceof LivingEntity) {"));
         assertEquals(1, occurrences(migrated, "targets[j].setSecondsOnFire(firetick);"));
-        assertEquals(0, occurrences(migrated, "targets[j].setSecondsOnFire(firetick);\\n"));
+        assertTrue(migrated.indexOf("if (firetick > 0 && targets[j] instanceof LivingEntity) {")
+                < migrated.indexOf("targets[j].setSecondsOnFire(firetick);"));
         assertEquals(0, PalladiumResourceCompat1201.apply(resources));
         assertEquals(migrated, get(resources, PalladiumResourceCompat1201.AFOMNI_AOE_DAMAGE));
     }
