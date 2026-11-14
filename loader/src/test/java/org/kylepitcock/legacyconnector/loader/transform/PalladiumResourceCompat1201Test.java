@@ -553,14 +553,14 @@ class PalladiumResourceCompat1201Test {
         assertFalse(migrated.contains("entity.removeAttribute(attribute, uuid)"));
         assertFalse(migrated.contains("entity.modifyAttribute(attribute, uuid,"));
         assertTrue(migrated.contains("function legacyConnectorAttributeOperation(operation)"));
-        assertTrue(migrated.contains('case "addition": return "add_value";'));
-        assertTrue(migrated.contains('case "multiply_base": return "add_multiplied_base";'));
-        assertTrue(migrated.contains('case "multiply_total": return "add_multiplied_total";'));
+        assertTrue(migrated.contains("case \"addition\": return \"add_value\";"));
+        assertTrue(migrated.contains("case \"multiply_base\": return \"add_multiplied_base\";"));
+        assertTrue(migrated.contains("case \"multiply_total\": return \"add_multiplied_total\";"));
         assertEquals(2, occurrences(migrated,
                 "const attribute_mod = legacyConnectorAttributeOperation(entry.getPropertyByName('Attribute_Mod'));"));
         assertTrue(migrated.contains(
-                '.addProperty("Attribute_Mod", "string", "add_value", "add_value , add_multiplied_total , add_multiplied_base")'));
-        assertFalse(migrated.contains('case "addition": return "addition";'));
+                ".addProperty(\"Attribute_Mod\", \"string\", \"add_value\", \"add_value , add_multiplied_total , add_multiplied_base\")"));
+        assertFalse(migrated.contains("case \"addition\": return \"addition\";"));
         assertEquals(0, PalladiumResourceCompat1201.apply(resources));
         assertEquals(migrated, get(resources, PalladiumResourceCompat1201.ALIEN_EVO_STAT_ABILITY));
 
