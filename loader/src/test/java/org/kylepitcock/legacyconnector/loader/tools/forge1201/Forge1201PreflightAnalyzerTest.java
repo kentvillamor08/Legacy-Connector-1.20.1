@@ -48,8 +48,8 @@ final class Forge1201PreflightAnalyzerTest {
                         && candidate.discoveredBy().contains("manifest")));
         assertTrue(first.mixinConfigCandidates().stream().anyMatch(candidate ->
                 candidate.path().equals("config/feature.json")));
-        assertEquals("1.7", first.schemaVersion());
-        assertEquals("1.7.0", first.analyzerVersion());
+        assertEquals("1.8", first.schemaVersion());
+        assertEquals("1.8.0", first.analyzerVersion());
         assertEquals(Forge1201MixinAnalyzer.TargetIndexStatus.UNAVAILABLE_NO_TARGET_CLASSPATH,
                 first.mixinAnalysis().targetIndexStatus());
         assertTrue(first.mixinAnalysis().memberAnnotations().isEmpty());
@@ -181,8 +181,13 @@ final class Forge1201PreflightAnalyzerTest {
         var target = result.mixinAnalysis().targets().getFirst();
         assertEquals("net/neoforged/fml/ModList", target.targetInternalName());
         assertEquals(Forge1201MixinAnalyzer.TargetStatus.TARGET_CLASS_PRESENT, target.status());
+        assertEquals(1, result.mixinAnalysis().injectors().size());
+        assertEquals(1, result.mixinAnalysis().injectors().getFirst().slices().size());
+        assertTrue(Forge1201PreflightAnalyzer.toJson(result).contains("\"slices\""));
         assertTrue(Forge1201PreflightAnalyzer.toJson(result).contains("\"mixinAnalysis\""));
         assertTrue(Forge1201PreflightAnalyzer.toText(result).contains("Mixin analysis (1 configs, 1 mixin classes, 1 target selectors)"));
+        assertTrue(Forge1201PreflightAnalyzer.toText(result).contains("@Slice[0] id=preflight-slice"));
+        assertTrue(Forge1201PreflightAnalyzer.toText(result).contains("@Slice.from declared=true"));
     }
 
     @Test
@@ -550,6 +555,30 @@ final class Forge1201PreflightAnalyzerTest {
         targets.visit(null, targetName);
         targets.visitEnd();
         annotation.visitEnd();
+
+        MethodVisitor handler = writer.visitMethod(Opcodes.ACC_PRIVATE, "onTick", "()V", null, null);
+        AnnotationVisitor inject = handler.visitAnnotation(
+                "Lorg/spongepowered/asm/mixin/injection/Inject;", false);
+        AnnotationVisitor methods = inject.visitArray("method");
+        methods.visit(null, "tick()V");
+        methods.visitEnd();
+        AnnotationVisitor slices = inject.visitArray("slice");
+        AnnotationVisitor slice = slices.visitAnnotation(
+                null, "Lorg/spongepowered/asm/mixin/injection/Slice;");
+        slice.visit("id", "preflight-slice");
+        AnnotationVisitor from = slice.visitAnnotation(
+                "from", "Lorg/spongepowered/asm/mixin/injection/At;");
+        from.visit("value", "INVOKE");
+        from.visit("target", "L" + targetName.replace('.', '/') + ";tick()V");
+        from.visitEnd();
+        slice.visitEnd();
+        slices.visitEnd();
+        inject.visitEnd();
+        handler.visitCode();
+        handler.visitInsn(Opcodes.RETURN);
+        handler.visitMaxs(0, 0);
+        handler.visitEnd();
+
         writer.visitEnd();
         return writer.toByteArray();
     }

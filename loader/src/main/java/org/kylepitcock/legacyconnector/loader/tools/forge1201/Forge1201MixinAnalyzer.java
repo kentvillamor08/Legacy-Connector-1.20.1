@@ -33,9 +33,9 @@ import org.objectweb.asm.tree.MethodNode;
  * <p>This implementation analyzes the outer source archive only. It resolves declared config
  * resources and mixin class entries, reads visible/invisible @Mixin and member annotations, and
  * inventories source-side handler and selector data for core injectors, including detailed @At
- * metadata and typed @ModifyConstant discriminators. It checks mapped class targets through the shared
+ * metadata and typed @ModifyConstant discriminators, and @Slice from/to boundary metadata. It checks mapped class targets through the shared
  * target index but never loads or executes mod classes or Mixin plugins. Nested archive resources,
- * @Slice from/to boundary interpretation, semantic refmap remapping, target instruction resolution, and
+ * semantic refmap remapping, target instruction resolution, and
  * injector handler stack validation remain later increments. Unified preflight consumes this result API.</p>
  */
 public final class Forge1201MixinAnalyzer {
@@ -60,6 +60,7 @@ public final class Forge1201MixinAnalyzer {
     private static final String MODIFY_CONSTANT_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/ModifyConstant;";
     private static final String DESC_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/Desc;";
     private static final String AT_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/At;";
+    private static final String SLICE_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/Slice;";
     private static final String CONSTANT_ANNOTATION = "Lorg/spongepowered/asm/mixin/injection/Constant;";
 
     private Forge1201MixinAnalyzer() {}
@@ -290,6 +291,36 @@ public final class Forge1201MixinAnalyzer {
         }
     }
 
+    public enum SliceBoundaryKind { FROM, TO }
+
+    public enum SliceBoundaryStatus {
+        EXPLICIT_AT_CAPTURED, DEFAULT_AT_CAPTURED, INVALID_AT,
+        UNSUPPORTED_NESTED_ANNOTATION, INVALID_VALUE_TYPE
+    }
+
+    /** One @Slice boundary, with explicit-versus-Mixin-default provenance. */
+    public record SliceBoundaryFinding(
+            SliceBoundaryKind kind, boolean declared, String annotationDescriptor,
+            AtFinding at, SliceBoundaryStatus status, String evidence, List<String> warnings) {
+        public SliceBoundaryFinding {
+            warnings = List.copyOf(warnings);
+        }
+    }
+
+    public enum SliceFindingStatus {
+        CAPTURED, BOUNDARY_REQUIRES_REVIEW, UNSUPPORTED_NESTED_ANNOTATION, INVALID_NESTED_VALUE
+    }
+
+    /** Source-side @Slice declaration; capture does not prove instruction ordering or validity. */
+    public record SliceFinding(
+            int index, String id, String annotationDescriptor,
+            SliceBoundaryFinding from, SliceBoundaryFinding to,
+            SliceFindingStatus status, String evidence, List<String> warnings) {
+        public SliceFinding {
+            warnings = List.copyOf(warnings);
+        }
+    }
+
     public enum ConstantFindingStatus {
         MATCH_HANDLER_RETURN_TYPE, EXPLICIT_TYPED_DISCRIMINATOR,
         CONFLICTING_DISCRIMINATORS, INVALID_ENUM_VALUE, UNSUPPORTED_NESTED_ANNOTATION
@@ -314,7 +345,7 @@ public final class Forge1201MixinAnalyzer {
             List<String> sourceTargetInternalNames, InjectorAnnotationKind annotationKind,
             MemberElementKind elementKind, String sourceMemberName, String sourceMemberDescriptor,
             List<InjectorTargetSelector> targetSelectors, List<AtFinding> injectionPoints,
-            List<ConstantFinding> constants, boolean remap,
+            List<ConstantFinding> constants, List<SliceFinding> slices, boolean remap,
             int atAnnotationCount, int sliceAnnotationCount, Integer index,
             Boolean cancellable, Boolean argsOnly, int require, int expect, int allow,
             String constraints, InjectorResolutionStatus status, String evidence, List<String> warnings) {
@@ -323,6 +354,7 @@ public final class Forge1201MixinAnalyzer {
             targetSelectors = List.copyOf(targetSelectors);
             injectionPoints = List.copyOf(injectionPoints);
             constants = List.copyOf(constants);
+            slices = List.copyOf(slices);
             warnings = List.copyOf(warnings);
         }
     }
@@ -827,8 +859,9 @@ public final class Forge1201MixinAnalyzer {
         boolean remap = booleanAnnotationValue(annotation, "remap", mixinRemap);
         List<AtFinding> injectionPoints = readAtFindings(annotation);
         List<ConstantFinding> constants = readConstantFindings(annotation, kind);
+        List<SliceFinding> slices = readSliceFindings(annotation);
         int atCount = injectionPoints.size();
-        int sliceCount = annotationArrayValue(annotation, "slice").size();
+        int sliceCount = slices.size();
         Integer index = nullableIntegerAnnotationValue(annotation, "index");
         Object cancellableValue = annotationValue(annotation, "cancellable");
         Boolean cancellable = cancellableValue instanceof Boolean b ? b : null;
@@ -863,7 +896,7 @@ public final class Forge1201MixinAnalyzer {
             case INJECTOR_REMAP_DISABLED_UNVERIFIED -> "remap=false; source handler and target selectors were inventoried, but target presence and parity remain unverified.";
         };
         return new InjectorFinding(archivePath, configPath, section, mixinClassName, targets,
-                kind, elementKind, sourceName, sourceDescriptor, selectors, injectionPoints, constants, remap,
+                kind, elementKind, sourceName, sourceDescriptor, selectors, injectionPoints, constants, slices, remap,
                 atCount, sliceCount, index, cancellable, argsOnly,
                 require, expect, allow, constraints, status, evidence, warnings);
     }
@@ -1054,6 +1087,94 @@ public final class Forge1201MixinAnalyzer {
         } catch (RuntimeException exception) {
             return false;
         }
+    }
+
+    private static List<SliceFinding> readSliceFindings(AnnotationNode injector) {
+        Object raw = annotationValue(injector, "slice");
+        if (raw == null) return List.of();
+        List<?> entries = raw instanceof List<?> values ? values : List.of(raw);
+        List<SliceFinding> findings = new ArrayList<>();
+        for (int i = 0; i < entries.size(); i++) {
+            Object item = entries.get(i);
+            if (!(item instanceof AnnotationNode annotation)) {
+                findings.add(new SliceFinding(i, "", null, null, null,
+                        SliceFindingStatus.INVALID_NESTED_VALUE,
+                        "The @Slice array entry is not an annotation node and cannot be interpreted.",
+                        List.of("Unexpected @Slice array entry type: "
+                                + (item == null ? "null" : item.getClass().getName()) + ".")));
+            } else if (!SLICE_ANNOTATION.equals(annotation.desc)) {
+                String id = stringAnnotationValue(annotation, "id");
+                findings.add(new SliceFinding(i, id == null ? "" : id, annotation.desc, null, null,
+                        SliceFindingStatus.UNSUPPORTED_NESTED_ANNOTATION,
+                        "A nested annotation was retained, but it is not the Mixin 0.8.5 @Slice type.",
+                        List.of("Expected " + SLICE_ANNOTATION + " but found " + annotation.desc + ".")));
+            } else {
+                findings.add(createSliceFinding(i, annotation));
+            }
+        }
+        return List.copyOf(findings);
+    }
+
+    private static SliceFinding createSliceFinding(int index, AnnotationNode annotation) {
+        String id = stringAnnotationValue(annotation, "id");
+        if (id == null) id = "";
+        SliceBoundaryFinding from = createSliceBoundary(annotation, SliceBoundaryKind.FROM);
+        SliceBoundaryFinding to = createSliceBoundary(annotation, SliceBoundaryKind.TO);
+        List<String> warnings = new ArrayList<>();
+        warnings.addAll(from.warnings());
+        warnings.addAll(to.warnings());
+        boolean boundariesValid = (from.status() == SliceBoundaryStatus.EXPLICIT_AT_CAPTURED
+                || from.status() == SliceBoundaryStatus.DEFAULT_AT_CAPTURED)
+                && (to.status() == SliceBoundaryStatus.EXPLICIT_AT_CAPTURED
+                || to.status() == SliceBoundaryStatus.DEFAULT_AT_CAPTURED);
+        SliceFindingStatus status = boundariesValid
+                ? SliceFindingStatus.CAPTURED : SliceFindingStatus.BOUNDARY_REQUIRES_REVIEW;
+        String evidence = boundariesValid
+                ? "Explicit @Slice boundaries and Mixin 0.8.5 defaults were captured; target instruction ordering and slice validity are not evaluated."
+                : "The @Slice declaration was retained, but at least one boundary is malformed or unsupported; no instruction matching is attempted.";
+        return new SliceFinding(index, id, annotation.desc, from, to, status, evidence, warnings);
+    }
+
+    private static SliceBoundaryFinding createSliceBoundary(
+            AnnotationNode slice, SliceBoundaryKind kind) {
+        String key = kind == SliceBoundaryKind.FROM ? "from" : "to";
+        boolean declared = hasAnnotationValue(slice, key);
+        Object raw = annotationValue(slice, key);
+        if (!declared) {
+            AnnotationNode defaultAt = new AnnotationNode(AT_ANNOTATION);
+            defaultAt.visit("value", kind == SliceBoundaryKind.FROM ? "HEAD" : "TAIL");
+            defaultAt.visitEnd();
+            AtFinding at = createAtFinding(0, defaultAt);
+            String boundaryName = kind == SliceBoundaryKind.FROM ? "@Slice.from" : "@Slice.to";
+            String defaultValue = kind == SliceBoundaryKind.FROM ? "HEAD" : "TAIL";
+            return new SliceBoundaryFinding(kind, false, AT_ANNOTATION, at,
+                    SliceBoundaryStatus.DEFAULT_AT_CAPTURED,
+                    boundaryName + " was not explicitly declared; Mixin 0.8.5 defaults it to @At(\"" + defaultValue + "\").",
+                    List.of());
+        }
+        if (!(raw instanceof AnnotationNode nested)) {
+            return new SliceBoundaryFinding(kind, true, null, null,
+                    SliceBoundaryStatus.INVALID_VALUE_TYPE,
+                    "The declared " + key + " boundary is not an annotation value.",
+                    List.of("@Slice." + key + " must contain an @At annotation."));
+        }
+        if (!AT_ANNOTATION.equals(nested.desc)) {
+            return new SliceBoundaryFinding(kind, true, nested.desc, null,
+                    SliceBoundaryStatus.UNSUPPORTED_NESTED_ANNOTATION,
+                    "The declared " + key + " boundary uses an annotation type other than Mixin @At.",
+                    List.of("Expected " + AT_ANNOTATION + " for @Slice." + key + " but found " + nested.desc + "."));
+        }
+        AtFinding at = createAtFinding(0, nested);
+        if (at.status() != AtFindingStatus.CAPTURED) {
+            return new SliceBoundaryFinding(kind, true, nested.desc, at,
+                    SliceBoundaryStatus.INVALID_AT,
+                    "The explicit " + key + " @At was captured but contains invalid source-side metadata.",
+                    at.warnings());
+        }
+        return new SliceBoundaryFinding(kind, true, nested.desc, at,
+                SliceBoundaryStatus.EXPLICIT_AT_CAPTURED,
+                "The explicit " + key + " @At metadata was captured; target instruction matching is not evaluated.",
+                List.of());
     }
 
     private static List<ConstantFinding> readConstantFindings(AnnotationNode injector, InjectorAnnotationKind kind) {
@@ -1543,6 +1664,14 @@ public final class Forge1201MixinAnalyzer {
 
     private static void addSelectorCandidate(Set<String> candidates, String value) {
         if (value != null && !value.isBlank()) candidates.add(value);
+    }
+
+    private static boolean hasAnnotationValue(AnnotationNode annotation, String name) {
+        if (annotation.values == null) return false;
+        for (int i = 0; i + 1 < annotation.values.size(); i += 2) {
+            if (name.equals(annotation.values.get(i))) return true;
+        }
+        return false;
     }
 
     private static Object annotationValue(AnnotationNode annotation, String name) {

@@ -34,8 +34,8 @@ import java.util.zip.ZipFile;
  * inspect them, validate mixin injection semantics, or prove runtime compatibility.</p>
  */
 public final class Forge1201PreflightAnalyzer {
-    public static final String SCHEMA_VERSION = "1.7";
-    public static final String ANALYZER_VERSION = "1.7.0";
+    public static final String SCHEMA_VERSION = "1.8";
+    public static final String ANALYZER_VERSION = "1.8.0";
     public static final String TARGET_MINECRAFT_VERSION = "1.21.1";
     public static final String TARGET_NEOFORGE_VERSION = "21.1.258";
     private static final int MAX_MIXIN_JSON_BYTES = 1024 * 1024;
@@ -383,7 +383,7 @@ public final class Forge1201PreflightAnalyzer {
                 "Source Minecraft SRG member names are normalized to 1.20.1 Mojang names where the generated mapping table has an entry; missing entries remain explicitly UNMAPPED. This source-name normalization is not a 1.21.1 target API or semantic compatibility verdict.",
                 "Nested archive traversal is bounded by depth, archive count, per-archive size, and total inflated-byte limits. Class capture is bounded to 8 MiB per class, 16 MiB per nested archive, 128 MiB aggregate nested class bytes submitted, and 64 MiB aggregate outer class bytes. Archives/classes skipped by a limit or rejected as unsafe/corrupt remain explicit findings.",
                 "Mixin configs discovered by the manifest and outer-archive resource heuristics are parsed in the current preflight schema. Target-class presence is checked only when the root project's resolved target compile classpath is supplied; no 1.20.1-to-1.21.1 Minecraft class identity mapping is assumed.",
-                "Mixin analysis currently covers outer-archive configs, mixin class entries, statically readable @Mixin class targets, source-side member annotations, and source-side handler/selector inventories for the six core Mixin 0.8.5 injector annotations. Schema 1.7 additionally preserves detailed source-side @At values/targets and typed @ModifyConstant discriminators. It does not resolve those selectors against target bytecode, validate injector handler stack contracts, interpret @Slice from/to boundaries, compare target member descriptors, or apply semantic refmap remapping. Source-nested JAR config/class provenance remains a future increment. Mixin plugin classes are inventoried as resources but never executed.",
+                "Mixin analysis currently covers outer-archive configs, mixin class entries, statically readable @Mixin class targets, source-side member annotations, and source-side handler/selector inventories for the six core Mixin 0.8.5 injector annotations. Schema 1.8 additionally preserves each @Slice ID and its explicit or defaulted from/to @At boundary metadata, including nested selector syntax and boundary provenance. It does not resolve those selectors against target bytecode, establish instruction ordering, validate slice semantics or injector handler stack contracts, compare target member descriptors, or apply semantic refmap remapping. Source-nested JAR config/class provenance remains a future increment. Mixin plugin classes are inventoried as resources but never executed.",
                 "Reflection/resource string candidates remain heuristic and are not treated as confirmed bytecode references.",
                 "Installed provider discovery records top-level and nested archive paths, mod IDs, and declared versions. A provider ID/version match does not establish API or behavioral compatibility; installed version ranges and API compatibility are not verified.",
                 "Maven-style version ranges with numeric dotted versions are evaluated conservatively. Qualified or otherwise unsupported version strings remain explicitly unverified.",
@@ -400,6 +400,18 @@ public final class Forge1201PreflightAnalyzer {
                 fieldReferences, methodCallSites, fieldCallSites, dynamicReferences, nestedClassCount,
                 nestedClassScannedCount, normalizedMemberReferences, classScanWarnings,
                 observedNativeIds, limitations, archiveGraph);
+    }
+
+    private static void appendSliceBoundaryText(
+            StringBuilder out, Forge1201MixinAnalyzer.SliceBoundaryFinding boundary) {
+        if (boundary == null) return;
+        out.append("      @Slice.").append(boundary.kind().name().toLowerCase(java.util.Locale.ROOT))
+                .append(" declared=").append(boundary.declared())
+                .append(" annotation=").append(boundary.annotationDescriptor())
+                .append(" @At=").append(boundary.at())
+                .append(" [").append(boundary.status()).append("] — ")
+                .append(boundary.evidence()).append('\n');
+        boundary.warnings().forEach(warning -> out.append("        warning: ").append(warning).append('\n'));
     }
 
     public static String toJson(PreflightResult result) {
@@ -519,6 +531,14 @@ public final class Forge1201PreflightAnalyzer {
                         .append(" remap=").append(at.remap()).append(" id=").append(at.id())
                         .append(" [").append(at.status()).append("] — ").append(at.evidence()).append('\n');
                 at.warnings().forEach(warning -> out.append("      warning: ").append(warning).append('\n'));
+            }
+            for (Forge1201MixinAnalyzer.SliceFinding slice : finding.slices()) {
+                out.append("    @Slice[").append(slice.index()).append("] id=").append(slice.id())
+                        .append(" annotation=").append(slice.annotationDescriptor())
+                        .append(" [").append(slice.status()).append("] — ").append(slice.evidence()).append('\n');
+                appendSliceBoundaryText(out, slice.from());
+                appendSliceBoundaryText(out, slice.to());
+                slice.warnings().forEach(warning -> out.append("      warning: ").append(warning).append('\n'));
             }
             for (Forge1201MixinAnalyzer.ConstantFinding constant : finding.constants()) {
                 out.append("    @Constant[").append(constant.index()).append("] declared=")

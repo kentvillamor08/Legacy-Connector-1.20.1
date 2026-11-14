@@ -348,6 +348,43 @@ final class Forge1201MixinAnalyzerTest {
                 .filter(finding -> finding.sourceMemberName().equals("atMetadata"))
                 .findFirst().orElseThrow();
         assertEquals(4, atHandler.injectionPoints().size());
+        assertEquals(3, atHandler.sliceAnnotationCount());
+        assertEquals(3, atHandler.slices().size());
+
+        var explicitSlice = atHandler.slices().getFirst();
+        assertEquals("segment", explicitSlice.id());
+        assertEquals(Forge1201MixinAnalyzer.SliceFindingStatus.CAPTURED, explicitSlice.status());
+        assertEquals(Forge1201MixinAnalyzer.SliceBoundaryStatus.EXPLICIT_AT_CAPTURED,
+                explicitSlice.from().status());
+        assertTrue(explicitSlice.from().declared());
+        assertEquals("INVOKE", explicitSlice.from().at().value());
+        assertEquals(SOURCE_ENTITY, explicitSlice.from().at().targetSelector().ownerInternalName());
+        assertEquals("hurt", explicitSlice.from().at().targetSelector().memberName());
+        assertEquals("(D)Z", explicitSlice.from().at().targetSelector().descriptor());
+        assertEquals(1, explicitSlice.from().at().ordinal());
+        assertEquals("AFTER", explicitSlice.from().at().shift());
+        assertEquals("RETURN", explicitSlice.to().at().value());
+        assertEquals(2, explicitSlice.to().at().ordinal());
+
+        var defaultSlice = atHandler.slices().get(1);
+        assertEquals("defaulted", defaultSlice.id());
+        assertEquals(Forge1201MixinAnalyzer.SliceFindingStatus.CAPTURED, defaultSlice.status());
+        assertFalse(defaultSlice.from().declared());
+        assertEquals(Forge1201MixinAnalyzer.SliceBoundaryStatus.DEFAULT_AT_CAPTURED,
+                defaultSlice.from().status());
+        assertEquals("HEAD", defaultSlice.from().at().value());
+        assertFalse(defaultSlice.to().declared());
+        assertEquals("TAIL", defaultSlice.to().at().value());
+
+        var unsupportedSlice = atHandler.slices().get(2);
+        assertEquals("unsupported", unsupportedSlice.id());
+        assertEquals(Forge1201MixinAnalyzer.SliceFindingStatus.BOUNDARY_REQUIRES_REVIEW,
+                unsupportedSlice.status());
+        assertEquals(Forge1201MixinAnalyzer.SliceBoundaryStatus.UNSUPPORTED_NESTED_ANNOTATION,
+                unsupportedSlice.from().status());
+        assertEquals("Lcom/example/CustomAt;", unsupportedSlice.from().annotationDescriptor());
+        assertEquals("TAIL", unsupportedSlice.to().at().value());
+        assertTrue(new com.google.gson.Gson().toJson(result).contains("\"slices\""));
 
         var fieldAt = atHandler.injectionPoints().getFirst();
         assertEquals("FIELD", fieldAt.value());
@@ -483,7 +520,31 @@ final class Forge1201MixinAnalyzerTest {
         AnnotationVisitor slices = inject.visitArray("slice");
         AnnotationVisitor slice = slices.visitAnnotation(null, SLICE_DESC);
         slice.visit("id", "segment");
+        AnnotationVisitor from = slice.visitAnnotation("from", AT_DESC);
+        from.visit("value", "INVOKE");
+        from.visit("target", "L" + targetInternalName + ";hurt(D)Z");
+        from.visit("ordinal", 1);
+        from.visitEnum("shift", "Lorg/spongepowered/asm/mixin/injection/At$Shift;", "AFTER");
+        from.visitEnd();
+        AnnotationVisitor to = slice.visitAnnotation("to", AT_DESC);
+        to.visit("value", "RETURN");
+        to.visit("ordinal", 2);
+        to.visitEnd();
         slice.visitEnd();
+
+        AnnotationVisitor defaultSlice = slices.visitAnnotation(null, SLICE_DESC);
+        defaultSlice.visit("id", "defaulted");
+        defaultSlice.visitEnd();
+
+        AnnotationVisitor unsupportedSlice = slices.visitAnnotation(null, SLICE_DESC);
+        unsupportedSlice.visit("id", "unsupported");
+        AnnotationVisitor unsupportedFrom = unsupportedSlice.visitAnnotation(
+                "from", "Lcom/example/CustomAt;");
+        unsupportedFrom.visitEnd();
+        AnnotationVisitor explicitTail = unsupportedSlice.visitAnnotation("to", AT_DESC);
+        explicitTail.visit("value", "TAIL");
+        explicitTail.visitEnd();
+        unsupportedSlice.visitEnd();
         slices.visitEnd();
         inject.visitEnd();
         atMethod.visitCode();
