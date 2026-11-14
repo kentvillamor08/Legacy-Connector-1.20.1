@@ -223,30 +223,47 @@ Synthetic coverage added:
 
 The focused loader tests are confirmed passing as recorded above. Treat the real-JAR JSON/text artifacts as reviewed evidence, but do not infer runtime compatibility or a consolidated build pass.
 
-### Exact next action — correct Slice 2 dependency graph host-provider findings, then run the consolidated clean build
+### Exact next action — generate the corrected Slice 2 report, then run the consolidated build
 
-**Already completed:** the focused loader tests passed at source HEAD `e16566f0ff9ef1b2d8ec42e024287a8c3b56ddcb`. The latest root testbench JSON/text are the actual Slice 2 report and have been parsed/reviewed. They are archived immutably at `archive/preflight/slice-2/`. Do not regenerate or overwrite them.
+**Completed:** the corrected Schema 1.2 / Analyzer 1.2.0 source and regression tests passed the forced loader test gate at source HEAD `4ece76833d1614738bc626fe64dbde31e42b8941` on 2026-11-14. The user's output showed `BUILD SUCCESSFUL in 40s`, 12 actionable tasks (all 12 executed), including production/test compilation, `genBetaMappings` (9,243 rows), and `:loader:test`. The latest source change after that test is documentation-only.
 
-**Slice 2 correction implementation — committed; focused loader tests passed:**
-1. `minecraft` and `neoforge` are now treated as host-provided dependencies, not searched for among installed mod archives. Their version ranges are evaluated against target Minecraft `1.21.1` and NeoForge `21.1.258`; an out-of-range host version emits `HOST_VERSION_MISMATCH`. Unknown or qualified ranges remain `UNPARSEABLE`.
-2. NeoForge `neoforge.mods.toml` and Forge `mods.toml` now use separate dependency parsing rules. NeoForge reads `type` and defaults to `REQUIRED` even if a legacy `mandatory=false` key is also present; Forge reads `mandatory=true/false`. The inspector preserves `REQUIRED`, `OPTIONAL`, `INCOMPATIBLE`, `DISCOURAGED`, and `UNKNOWN`. The graph reports incompatible/discouraged presence separately rather than incorrectly treating those relations as required dependencies.
-3. Existing Forge `mandatory=true/false` metadata continues to map to required/optional. The old four-argument archive-graph entry point remains available; the preflight analyzer supplies both target host versions.
-4. Qualified versions such as Rhino `2101.2.8-build.91`, Better Advanced Tooltips `2101.1.0-build.1`, and prerelease NeoForge bounds remain explicitly unverified. Do not silently coerce them to numeric versions.
+**Next: run the corrected real-JAR preflight.** Use the known local Symbiote JAR and installed NeoForge mods paths from the continuation handoff. The next free filename pair is `symbiote-1.1.3.jar-slice-2-run-3.json` and `.txt`; the earlier `run-2` pair was uploaded as duplicate old report blobs and must not be overwritten.
 
-**Validation result — user-confirmed 2026-11-14:** after a clean fast-forward to `4ece76833d1614738bc626fe64dbde31e42b8941`, the user ran `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks`. Result: `BUILD SUCCESSFUL in 40s`; 12 actionable tasks, all 12 executed. Both production and test sources compiled, `genBetaMappings` completed with 9,243 rows, and the forced loader test task passed. Deprecation warnings were non-fatal. This validates the corrected focused loader test gate only; it does not validate the real-JAR output, consolidated build, or Minecraft runtime/gameplay behavior.
-
-With the corrected focused loader tests passing, generate a new report pair using explicit `-PpreflightJson` / `-PpreflightText` paths ending in `symbiote-1.1.3.jar-slice-2-run-3.json` and `symbiote-1.1.3.jar-slice-2-run-3.txt` under the testbench root. The `-run-2` filenames have now been used and must not be overwritten, even though their content was identical to the earlier Slice 2 report. Never overwrite the archived Slice 1 or Slice 2 reports or canonical Slice 2 filenames. When reviewing the rerun, preserve the original Symbiote SHA-256 `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c` and saved input paths from the continuation handoff. Use `-run-4` for any further rerun.
-
-If the corrected report is consistent, run the consolidated clean build:
 ```powershell
-$repo = 'F:\\Program\\intellij-idea-portable\\Legacy-Connector-1.20.1'
+$repo = 'F:\Program\intellij-idea-portable\Legacy-Connector-1.20.1'
 $branch = 'feat/forge1201-preflight-analyzer'
 $actual = (git -C $repo branch --show-current).Trim()
 if ($actual -ne $branch) { throw "Wrong branch: expected $branch, found $actual" }
-$head = (git -C $repo rev-parse HEAD).Trim()
-if ($head -ne '4ece76833d1614738bc626fe64dbde31e42b8941') { throw "Unexpected source HEAD: $head" }
+
+$jar = 'C:\Users\Administrator\legacy-connector-testbench\symbiote-1.1.3.jar'
+$modsDir = 'E:\Games\PolyMC\instances\Neoforge tester\.minecraft\mods'
+$testbench = 'C:\Users\Administrator\legacy-connector-testbench'
+$json = Join-Path $testbench 'symbiote-1.1.3.jar-slice-2-run-3.json'
+$text = Join-Path $testbench 'symbiote-1.1.3.jar-slice-2-run-3.txt'
+
+if (!(Test-Path -LiteralPath $jar -PathType Leaf)) { throw "Symbiote JAR not found: $jar" }
+if (!(Test-Path -LiteralPath $modsDir -PathType Container)) { throw "Installed NeoForge mods directory not found: $modsDir" }
+$hash = (Get-FileHash -LiteralPath $jar -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($hash -ne 'e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c') { throw "Unexpected Symbiote JAR SHA-256: $hash" }
+if ((Test-Path -LiteralPath $json) -or (Test-Path -LiteralPath $text)) { throw "Run-3 output already exists; choose a new run number." }
+
 Push-Location $repo
-.\\gradlew.bat :clean :loader:clean :testmods:clean :build :loader:build :testmods:assemble --no-daemon --console=plain
+.\gradlew.bat preflight1201 "-PpreflightJar=$jar" "-PpreflightModsDirs=$modsDir" "-PpreflightJson=$json" "-PpreflightText=$text" --no-daemon --console=plain
+$reportExit = $LASTEXITCODE
+Pop-Location
+if ($reportExit -ne 0) { throw "Corrected Slice 2 preflight failed." }
+```
+
+Upload both `-slice-2-run-3` files to the testbench root. Verify the report is schema `1.2` / analyzer `1.2.0`, that NeoForge host dependencies are evaluated against `21.1.258` rather than reported missing, that Symbiote's Minecraft `[1.20.1,1.21)` range is outside target `1.21.1`, and that NeoForge dependency types are parsed as declared. Qualified versions such as Rhino `2101.2.8-build.91` and Better Advanced Tooltips `2101.1.0-build.1` must remain explicitly unverified.
+
+**After the corrected report is reviewed:** run the consolidated clean build in the Universal worktree:
+```powershell
+$repo = 'F:\Program\intellij-idea-portable\Legacy-Connector-1.20.1'
+$branch = 'feat/forge1201-preflight-analyzer'
+$actual = (git -C $repo branch --show-current).Trim()
+if ($actual -ne $branch) { throw "Wrong branch: expected $branch, found $actual" }
+Push-Location $repo
+.\gradlew.bat :clean :loader:clean :testmods:clean :build :loader:build :testmods:assemble --no-daemon --console=plain
 $buildExit = $LASTEXITCODE
 Pop-Location
 if ($buildExit -ne 0) { throw "Universal consolidated build failed." }
