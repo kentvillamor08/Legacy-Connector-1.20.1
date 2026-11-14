@@ -21,6 +21,8 @@ final class PalladiumResourceCompat1201 {
             "addon/alienevo/kubejs_scripts/transform.js";
     static final String ALIEN_EVO_POWER_UI =
             "assets/alienevo/kubejs_scripts/power_ui.js";
+    static final String ALIEN_EVO_BLOCKS =
+            "addon/alienevo/kubejs_scripts/blocks.js";
     static final String ALIEN_EVO_DIAMOND_CREATION =
             "addon/alienevo/kubejs_scripts/diamond_creation.js";
     static final String ALIEN_EVO_STAT_ABILITY =
@@ -218,6 +220,7 @@ final class PalladiumResourceCompat1201 {
         rewrite(resources, ALIEN_EVO_POWER_UI, POWER_UI_TAB_COMPARISONS);
         rewritePowerUiEntityPreview(resources);
         rewritePowerUiEditBoxTick(resources);
+        rewriteAlienEvoTemporaryCrystalBlockTicks(resources);
         rewriteDiamondShardTexture(resources);
         rewriteAfOmniParticleTextureReferences(resources);
         rewriteGeckoLibAnimationFileNames(resources);
@@ -266,6 +269,11 @@ final class PalladiumResourceCompat1201 {
     private static int rewritePowerUiEditBoxTick(Map<String, byte[]> resources) {
         return rewrite(resources, ALIEN_EVO_POWER_UI, new String[][] {
                 {
+                        "nickTextBox.tick();",
+                        "/* EditBox input is ticked by the 1.21.1 screen; no manual tick() call. */",
+                        "1"
+                },
+                {
                         "hexTextBox.tick();",
                         "/* EditBox input is ticked by the 1.21.1 screen; no manual tick() call. */",
                         "1"
@@ -279,6 +287,48 @@ final class PalladiumResourceCompat1201 {
                         "1"
                 }
         });
+    }
+
+    /**
+     * KubeJS 1.20.1 used BlockEntityInfo.serverTick(frequency, offset, callback).
+     * KubeJS 7 splits the ticker setup from the targeted BlockEvents callback.
+     * Preserve the original 2500/250 cadence for both temporary crystal blocks.
+     */
+    private static int rewriteAlienEvoTemporaryCrystalBlockTicks(Map<String, byte[]> resources) {
+        byte[] original = resources.get(ALIEN_EVO_BLOCKS);
+        if (original == null) return 0;
+
+        String script = new String(original, StandardCharsets.UTF_8);
+        String lineEnding = script.contains("\\r\\n") ? "\\r\\n" : "\\n";
+        String legacy = "blockEntity.serverTick(2500, 250, entity => {" + lineEnding
+                + "                entity.level.destroyBlock(entity.blockPos, false)" + lineEnding
+                + "            })";
+        String migrated = "blockEntity.serverTicking();" + lineEnding
+                + "            blockEntity.tickFrequency(2500);" + lineEnding
+                + "            blockEntity.tickOffset(250);";
+        String marker = "// Legacy Connector: AlienEvo temporary crystal expiry on KubeJS 7";
+        String handlers = marker + lineEnding
+                + "BlockEvents.blockEntityTick('alienevo:crystal_block', event => {" + lineEnding
+                + "    event.level.destroyBlock(event.block.pos, false);" + lineEnding
+                + "});" + lineEnding
+                + "BlockEvents.blockEntityTick('alienevo:smooth_crystal_block', event => {" + lineEnding
+                + "    event.level.destroyBlock(event.block.pos, false);" + lineEnding
+                + "});" + lineEnding;
+
+        int legacyCount = occurrences(script, legacy);
+        int migratedCount = occurrences(script, migrated);
+        boolean hasHandlers = script.contains(marker);
+        if (legacyCount == 0 && migratedCount == 2 && hasHandlers) return 0;
+        if (legacyCount != 2 || migratedCount != 0 || hasHandlers) {
+            throw new IllegalStateException(
+                    "AlienEvo blocks.js has an unexpected temporary crystal tick migration shape: expected "
+                            + "two legacy serverTick calls, found " + legacyCount + " legacy and "
+                            + migratedCount + " migrated; event handlers present=" + hasHandlers);
+        }
+
+        String migratedScript = script.replace(legacy, migrated) + lineEnding + handlers;
+        resources.put(ALIEN_EVO_BLOCKS, migratedScript.getBytes(StandardCharsets.UTF_8));
+        return 1;
     }
 
     /** Fix AlienEvo's item model reference to the existing vanilla diamond-spike texture. */
@@ -924,9 +974,9 @@ final class PalladiumResourceCompat1201 {
     }
 
     /**
-     * KubeJS 7's EntityEvents.death exposes event.source as a DamageSource.
-     * Its getEntity() returns the causing entity, and EntityKJS.isPlayer()
-     * identifies player attackers. DamageSource itself has no getPlayer()
+     * KubeJS 7 remaps DamageSource.getEntity() to the Rhino-visible getActual()
+     * method. Read the causing entity through that alias, then keep the player
+     * attribution guard so environmental deaths do not award attacker XP.
      * method; using it silently breaks AlienEvo's player-kill XP progression.
      */
     private static int rewriteAlienEvoXpDeathPlayerAccess(Map<String, byte[]> resources) {
@@ -938,7 +988,7 @@ final class PalladiumResourceCompat1201 {
         String lineEnding = script.contains("\r\n") ? "\r\n" : "\n";
         String legacy = "if (source && source.player) {" + lineEnding
                 + "        let player = source.player;";
-        String migrated = "let player = source ? source.getEntity() : null;" + lineEnding
+        String migrated = "let player = source ? source.getActual() : null;" + lineEnding
                 + "    if (player && player.isPlayer()) {";
         return rewrite(resources, path, new String[][] {{legacy, migrated, "1"}});
     }
