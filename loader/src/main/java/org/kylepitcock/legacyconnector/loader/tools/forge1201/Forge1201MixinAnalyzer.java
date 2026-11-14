@@ -179,7 +179,42 @@ public final class Forge1201MixinAnalyzer {
         CONTEXT
     }
 
-    public record ConfigDeclaration(String path, DiscoverySource source) {
+    public enum RefmapLookupSource {
+        INJECTOR_METHOD, INJECTOR_DESC_TARGET, AT_TARGET, AT_DESC_TARGET, AT_NEW_CLASS_ARGUMENT
+    }
+    public enum RefmapCandidateStatus {
+        ENTRY_FOUND, ENTRY_NOT_FOUND_PASSTHROUGH, EXPLICIT_IDENTITY_ENTRY, TABLE_NOT_INVENTORIED
+    }
+    public enum RefmapContextBehavior {
+        CONTEXT_TABLE_SELECTED, CONTEXT_MISSING_DEFAULT_FALLBACK, CONTEXT_NOT_SELECTED, NOT_EVALUATED
+    }
+    public enum RefmapLookupStatus {
+        ENTRY_FOUND, ENTRY_NOT_FOUND_PASSTHROUGH, EXPLICIT_IDENTITY_ENTRY,
+        CONTEXT_NOT_SELECTED, CONTEXT_DEPENDENT_VALUES, OWNER_UNAVAILABLE, PLUGIN_DEPENDENT,
+        SELECTOR_NOT_EMITTED_AS_REF, ANALYSIS_INCOMPLETE, REMAP_DISABLED
+    }
+    public record RefmapLookupMatch(String referenceKey, String mappedReferenceValue) {}
+    public record RefmapLookupCandidate(
+            RefmapTableKind tableKind, String contextKey, RefmapCandidateStatus status,
+            String mappedReferenceValue, List<RefmapLookupMatch> matches) {
+        public RefmapLookupCandidate { matches = List.copyOf(matches); }
+    }
+    /** Exact source-owner/reference correlation only; no namespace or target/runtime verdict is implied. */
+    public record RefmapLookupFinding(
+            String archivePath, String configPath, String section, String mixinClassName,
+            String mixinInternalName, RefmapLookupSource source, String sourceLocation,
+            String sourceMemberName, String sourceMemberDescriptor, String rawReference,
+            String normalizedReference, boolean remap, String resourcePath,
+            String requestedContextKey, RefmapContextBehavior contextBehavior,
+            String selectedContextKey, RefmapLookupStatus status, String mappedReferenceValue,
+            List<RefmapLookupCandidate> candidates, String evidence, List<String> warnings) {
+        public RefmapLookupFinding {
+            candidates = List.copyOf(candidates);
+            warnings = List.copyOf(warnings);
+        }
+    }
+
+    public record ConfigDeclaration(String path, DiscoverySource source) {    public record ConfigDeclaration(String path, DiscoverySource source) {
         public ConfigDeclaration {
             if (path == null || path.isBlank()) throw new IllegalArgumentException("Config path is required");
             if (source == null) throw new IllegalArgumentException("Config discovery source is required");
@@ -260,12 +295,18 @@ public final class Forge1201MixinAnalyzer {
             String configPath,
             String section,
             String mixinClassName,
+            String mixinInternalName,
             String classEntryPath,
             MixinClassStatus status,
             boolean hasMixinAnnotation,
             List<String> warnings) {
-        public MixinClassFinding {
-            warnings = List.copyOf(warnings);
+        public MixinClassFinding { warnings = List.copyOf(warnings); }
+        public MixinClassFinding(
+                String archivePath, String configPath, String section, String mixinClassName,
+                String classEntryPath, MixinClassStatus status, boolean hasMixinAnnotation,
+                List<String> warnings) {
+            this(archivePath, configPath, section, mixinClassName, null,
+                    classEntryPath, status, hasMixinAnnotation, warnings);
         }
     }
 
@@ -443,7 +484,8 @@ public final class Forge1201MixinAnalyzer {
     /** Source-side injector metadata; no target mapping or injection success is implied. */
     public record InjectorFinding(
             String archivePath, String configPath, String section, String mixinClassName,
-            List<String> sourceTargetInternalNames, InjectorAnnotationKind annotationKind,
+            String mixinInternalName, List<String> sourceTargetInternalNames,
+            InjectorAnnotationKind annotationKind,
             MemberElementKind elementKind, String sourceMemberName, String sourceMemberDescriptor,
             List<InjectorTargetSelector> targetSelectors, List<AtFinding> injectionPoints,
             List<ConstantFinding> constants, List<SliceFinding> slices, boolean remap,
@@ -471,6 +513,8 @@ public final class Forge1201MixinAnalyzer {
             List<MemberAnnotationFinding> memberAnnotations,
             List<InjectorFinding> injectors,
             List<RefmapResourceFinding> refmapResources,
+            String requestedRefmapContextKey,
+            List<RefmapLookupFinding> refmapLookups,
             List<String> warnings) {
         public Result {
             configs = List.copyOf(configs);
@@ -479,6 +523,7 @@ public final class Forge1201MixinAnalyzer {
             memberAnnotations = List.copyOf(memberAnnotations);
             injectors = List.copyOf(injectors);
             refmapResources = List.copyOf(refmapResources);
+            refmapLookups = List.copyOf(refmapLookups);
             warnings = List.copyOf(warnings);
         }
     }
@@ -528,6 +573,18 @@ public final class Forge1201MixinAnalyzer {
             Forge1201TargetApiVerifier.TargetIndex targetIndex,
             Map<String, String> sourceToTargetClassMappings,
             String classMappingVersion) throws IOException {
+        return analyze(sourceJar, declarations, targetIndex, sourceToTargetClassMappings,
+                classMappingVersion, null);
+    }
+
+    /** Null means no runtime refmap context was explicitly supplied. */
+    public static Result analyze(
+            Path sourceJar,
+            Collection<ConfigDeclaration> declarations,
+            Forge1201TargetApiVerifier.TargetIndex targetIndex,
+            Map<String, String> sourceToTargetClassMappings,
+            String classMappingVersion,
+            String requestedRefmapContextKey) throws IOException {
         if (sourceJar == null || !java.nio.file.Files.isRegularFile(sourceJar)) {
             throw new IllegalArgumentException("Mixin analysis input must be an existing archive: " + sourceJar);
         }
@@ -754,7 +811,7 @@ public final class Forge1201MixinAnalyzer {
                                 archivePath, configPath, section, mixin.name.replace('/', '.'),
                                 parsedTargets, mixin, pluginDependent, mixinRemap));
                         injectorFindings.addAll(readInjectorAnnotations(
-                                archivePath, configPath, section, mixin.name.replace('/', '.'),
+                                archivePath, configPath, section, mixin.name.replace('/', '.'), mixin.name,
                                 parsedTargets, mixin, pluginDependent, mixinRemap));
                         boolean hasMixinAnnotation = hasMixinAnnotation(mixin);
                         List<String> classWarnings = new ArrayList<>();
@@ -764,7 +821,7 @@ public final class Forge1201MixinAnalyzer {
                             classWarnings.add("The @Mixin annotation has no statically readable class or string targets.");
                         }
                         classFindings.add(new MixinClassFinding(
-                                archivePath, configPath, section, mixin.name.replace('/', '.'),
+                                archivePath, configPath, section, mixin.name.replace('/', '.'), mixin.name,
                                 classEntryPath, MixinClassStatus.PRESENT, hasMixinAnnotation, classWarnings));
 
                         for (ParsedTarget target : parsedTargets) {
@@ -796,6 +853,16 @@ public final class Forge1201MixinAnalyzer {
                         finding.refmapCandidatePath(), legacyStatus, finding.warnings());
             }).toList());
 
+            List<RefmapLookupFinding> refmapLookupFindings = correlateRefmapLookups(
+                    archivePath, configFindings, injectorFindings, refmapFindings, requestedRefmapContextKey)
+                    .stream()
+                    .sorted(Comparator.comparing(RefmapLookupFinding::configPath)
+                            .thenComparing(value -> value.mixinInternalName() == null ? "" : value.mixinInternalName())
+                            .thenComparing(RefmapLookupFinding::source)
+                            .thenComparing(RefmapLookupFinding::sourceLocation)
+                            .thenComparing(value -> value.rawReference() == null ? "" : value.rawReference()))
+                    .toList();
+
             configFindings.sort(Comparator.comparing(ConfigFinding::configPath));
             classFindings.sort(Comparator.comparing(MixinClassFinding::configPath)
                     .thenComparing(MixinClassFinding::section)
@@ -821,7 +888,8 @@ public final class Forge1201MixinAnalyzer {
                     targetIndex == null ? TargetIndexStatus.UNAVAILABLE_NO_TARGET_CLASSPATH
                             : TargetIndexStatus.AVAILABLE,
                     configFindings, classFindings, targetFindings, memberFindings, injectorFindings,
-                    refmapFindings, warnings.stream().distinct().sorted().toList());
+                    refmapFindings, requestedRefmapContextKey, refmapLookupFindings,
+                    warnings.stream().distinct().sorted().toList());
         }
     }
 
@@ -1115,6 +1183,264 @@ public final class Forge1201MixinAnalyzer {
                 warnings.stream().distinct().sorted().toList());
     }
 
+
+    private static List<RefmapLookupFinding> correlateRefmapLookups(
+            String archivePath, List<ConfigFinding> configs, List<InjectorFinding> injectors,
+            List<RefmapResourceFinding> resources, String requestedContextKey) {
+        Map<String, ConfigFinding> configsByPath = new HashMap<>();
+        for (ConfigFinding config : configs) configsByPath.put(config.configPath(), config);
+        Map<String, RefmapResourceFinding> resourcesByPath = new HashMap<>();
+        for (RefmapResourceFinding resource : resources) resourcesByPath.put(resource.resourcePath(), resource);
+        List<RefmapLookupFinding> findings = new ArrayList<>();
+        for (InjectorFinding injector : injectors) {
+            ConfigFinding config = configsByPath.get(injector.configPath());
+            for (int i = 0; i < injector.targetSelectors().size(); i++) {
+                InjectorTargetSelector selector = injector.targetSelectors().get(i);
+                if (selector.source() == InjectorSelectorSource.METHOD_STRING) {
+                    boolean supported = injector.elementKind() == MemberElementKind.METHOD
+                            && (selector.status() == InjectorSelectorStatus.METHOD_NAME_ONLY
+                                || selector.status() == InjectorSelectorStatus.METHOD_DESCRIPTOR
+                                || selector.status() == InjectorSelectorStatus.WILDCARD);
+                    findings.add(createRefmapLookup(archivePath, injector, config, resourcesByPath,
+                            requestedContextKey, RefmapLookupSource.INJECTOR_METHOD, "method[" + i + "]",
+                            selector.rawSelector(), injector.remap(), supported,
+                            "Mixin 0.8.5 processes string injector method[] selectors; descriptor inference is not done here."));
+                } else {
+                    findings.add(createRefmapLookup(archivePath, injector, config, resourcesByPath,
+                            requestedContextKey, RefmapLookupSource.INJECTOR_DESC_TARGET, "target[" + i + "]",
+                            null, injector.remap(), false,
+                            "Mixin 0.8.5 @Desc target processing has no string refmap key; no key is synthesized."));
+                }
+            }
+            for (AtFinding at : injector.injectionPoints()) {
+                addAtRefmapLookups(findings, archivePath, injector, config, resourcesByPath,
+                        requestedContextKey, at, "at[" + at.index() + "]");
+            }
+            for (SliceFinding slice : injector.slices()) {
+                if (slice.from() != null && slice.from().at() != null) {
+                    addAtRefmapLookups(findings, archivePath, injector, config, resourcesByPath,
+                            requestedContextKey, slice.from().at(), "slice[" + slice.index() + "].from");
+                }
+                if (slice.to() != null && slice.to().at() != null) {
+                    addAtRefmapLookups(findings, archivePath, injector, config, resourcesByPath,
+                            requestedContextKey, slice.to().at(), "slice[" + slice.index() + "].to");
+                }
+            }
+        }
+        return findings;
+    }
+
+    private static void addAtRefmapLookups(
+            List<RefmapLookupFinding> findings, String archivePath, InjectorFinding injector,
+            ConfigFinding config, Map<String, RefmapResourceFinding> resourcesByPath,
+            String requestedContextKey, AtFinding at, String location) {
+        String atKind = at.value() == null ? "" : at.value().split(":", 2)[0];
+        boolean methodPlacement = injector.elementKind() == MemberElementKind.METHOD;
+        if (at.rawTarget() != null && !at.rawTarget().isEmpty()) {
+            AtTargetSelector selector = at.targetSelector();
+            boolean ownerAndDescriptor = selector != null && selector.ownerInternalName() != null
+                    && selector.descriptor() != null
+                    && (selector.status() == AtTargetSelectorStatus.METHOD_DESCRIPTOR
+                        || selector.status() == AtTargetSelectorStatus.FIELD_DESCRIPTOR);
+            boolean constructor = "NEW".equals(atKind) && ownerAndDescriptor
+                    && selector.descriptorKind() == AtTargetDescriptorKind.METHOD
+                    && "<init>".equals(selector.memberName());
+            boolean ordinaryMember = !"NEW".equals(atKind) && ownerAndDescriptor;
+            boolean canEmit = methodPlacement && (constructor || ordinaryMember);
+            String evidence = "Mixin 0.8.5 requires a fully-qualified remappable @At.target member selector.";
+            if ("NEW".equals(atKind)) evidence = constructor
+                    ? "Mixin 0.8.5 has a distinct NEW constructor-target refmap path."
+                    : "The AP only maps NEW targets parsed as constructor selectors; this form was not recognized.";
+            findings.add(createRefmapLookup(archivePath, injector, config, resourcesByPath,
+                    requestedContextKey, RefmapLookupSource.AT_TARGET, location + ".target",
+                    at.rawTarget(), at.remap(), canEmit, evidence));
+        }
+        if (at.descSelector() != null) {
+            findings.add(createRefmapLookup(archivePath, injector, config, resourcesByPath,
+                    requestedContextKey, RefmapLookupSource.AT_DESC_TARGET, location + ".desc",
+                    null, at.remap(), false,
+                    "Nested @At.desc is not a string refmap key in the pinned Mixin 0.8.5 AP path."));
+        }
+        if ("NEW".equals(atKind)) {
+            String classReference = null;
+            int classIndex = -1;
+            for (int i = 0; i < at.args().size(); i++) {
+                String argument = at.args().get(i);
+                if (argument == null) continue;
+                int equals = argument.indexOf('=');
+                String key = equals < 0 ? argument : argument.substring(0, equals);
+                if ("class".equals(key)) {
+                    classReference = equals < 0 ? "" : argument.substring(equals + 1);
+                    classIndex = i;
+                }
+            }
+            if (classIndex >= 0) {
+                boolean canEmit = methodPlacement && isNewClassArgumentSelector(classReference);
+                findings.add(createRefmapLookup(archivePath, injector, config, resourcesByPath,
+                        requestedContextKey, RefmapLookupSource.AT_NEW_CLASS_ARGUMENT,
+                        location + ".args[" + classIndex + "].class", classReference, at.remap(), canEmit,
+                        "Mixin 0.8.5 processes NEW args[class] separately through constructor-selector parsing; the last class= value is retained."));
+            }
+        }
+    }
+
+    private static boolean isNewClassArgumentSelector(String rawReference) {
+        if (rawReference == null || rawReference.isBlank()) return false;
+        AtTargetSelector selector = parseAtTargetSelector(rawReference);
+        boolean ownerOnlyClass = selector.ownerInternalName() != null
+                && selector.status() == AtTargetSelectorStatus.OWNER_ONLY
+                && selector.memberName() != null && selector.memberName().isBlank();
+        boolean explicitConstructor = selector.ownerInternalName() != null
+                && selector.status() == AtTargetSelectorStatus.METHOD_DESCRIPTOR
+                && selector.descriptorKind() == AtTargetDescriptorKind.METHOD
+                && "<init>".equals(selector.memberName());
+        return ownerOnlyClass || explicitConstructor;
+    }
+
+    private static RefmapLookupFinding createRefmapLookup(
+            String archivePath, InjectorFinding injector, ConfigFinding config,
+            Map<String, RefmapResourceFinding> resourcesByPath, String requestedContextKey,
+            RefmapLookupSource source, String sourceLocation, String rawReference,
+            boolean remap, boolean apCanEmitReference, String sourceEvidence) {
+        String normalizedReference = rawReference == null ? null : normalizeRefmapReferenceKey(rawReference);
+        String resourcePath = config == null ? null : config.refmapCandidatePath();
+        List<RefmapLookupCandidate> candidates = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+        RefmapContextBehavior behavior = RefmapContextBehavior.NOT_EVALUATED;
+        String selectedContextKey = null, mappedReferenceValue = null;
+        RefmapLookupStatus status;
+        String evidence;
+        boolean pluginDependent = config != null
+                && (config.refmapSelection() == RefmapSelection.PLUGIN_DEPENDENT
+                    || config.refmapWrapperClass() != null);
+        if (!apCanEmitReference) {
+            status = RefmapLookupStatus.SELECTOR_NOT_EMITTED_AS_REF;
+            evidence = sourceEvidence;
+        } else if (!remap) {
+            status = RefmapLookupStatus.REMAP_DISABLED;
+            evidence = "Effective remap=false; Mixin's annotation processor does not generate this refmap entry.";
+        } else if (injector.mixinInternalName() == null || injector.mixinInternalName().isBlank()) {
+            status = RefmapLookupStatus.OWNER_UNAVAILABLE;
+            evidence = "The mixin classfile internal name is unavailable; ownerless refmap lookup is prohibited.";
+        } else if (config == null) {
+            status = RefmapLookupStatus.ANALYSIS_INCOMPLETE;
+            evidence = "The owning Mixin config finding is unavailable; its refmap resource cannot be selected.";
+        } else if (resourcePath == null) {
+            status = pluginDependent ? RefmapLookupStatus.PLUGIN_DEPENDENT : RefmapLookupStatus.ANALYSIS_INCOMPLETE;
+            evidence = pluginDependent
+                    ? "A plugin or custom wrapper may choose the effective resource or lookup behavior."
+                    : "The config has no valid refmap resource candidate.";
+        } else {
+            RefmapResourceFinding resource = resourcesByPath.get(resourcePath);
+            boolean complete = resource != null
+                    && (resource.status() == RefmapResourceStatus.PARSED || resource.status() == RefmapResourceStatus.EMPTY);
+            if (!complete) {
+                if (resource == null) warnings.add("The selected refmap candidate has no resource inventory record.");
+                else warnings.add("Refmap resource status is " + resource.status()
+                        + "; incomplete inventory cannot establish an absent mapping.");
+                status = RefmapLookupStatus.ANALYSIS_INCOMPLETE;
+                evidence = "The selected refmap candidate is missing, malformed, unsupported, or incompletely inventoried.";
+            } else if (requestedContextKey != null) {
+                if (resource.contextKeys().contains(requestedContextKey)) {
+                    behavior = RefmapContextBehavior.CONTEXT_TABLE_SELECTED;
+                    selectedContextKey = requestedContextKey;
+                    RefmapTableFinding table = resource.tables().stream()
+                            .filter(value -> value.kind() == RefmapTableKind.CONTEXT
+                                    && requestedContextKey.equals(value.contextKey()))
+                            .findFirst().orElse(null);
+                    RefmapLookupCandidate candidate = lookupRefmapTable(table, RefmapTableKind.CONTEXT,
+                            requestedContextKey, injector.mixinInternalName(), normalizedReference, true);
+                    candidates.add(candidate);
+                    status = topLevelLookupStatus(candidate.status());
+                    mappedReferenceValue = candidate.mappedReferenceValue();
+                    evidence = candidate.status() == RefmapCandidateStatus.TABLE_NOT_INVENTORIED
+                            ? "The requested context exists but was not inventoried; it is selected and does not fall back to base."
+                            : "The explicitly requested context table is selected; a missing owner/reference within it does not fall back to base.";
+                } else {
+                    behavior = RefmapContextBehavior.CONTEXT_MISSING_DEFAULT_FALLBACK;
+                    RefmapTableFinding baseTable = resource.tables().stream()
+                            .filter(value -> value.kind() == RefmapTableKind.BASE_MAPPINGS)
+                            .findFirst().orElse(null);
+                    RefmapLookupCandidate candidate = lookupRefmapTable(baseTable, RefmapTableKind.BASE_MAPPINGS,
+                            null, injector.mixinInternalName(), normalizedReference, false);
+                    candidates.add(candidate);
+                    status = topLevelLookupStatus(candidate.status());
+                    mappedReferenceValue = candidate.mappedReferenceValue();
+                    evidence = "The requested context table is absent, so Mixin 0.8.5 falls back to base mappings.";
+                }
+            } else {
+                behavior = RefmapContextBehavior.CONTEXT_NOT_SELECTED;
+                RefmapTableFinding baseTable = resource.tables().stream()
+                        .filter(value -> value.kind() == RefmapTableKind.BASE_MAPPINGS)
+                        .findFirst().orElse(null);
+                candidates.add(lookupRefmapTable(baseTable, RefmapTableKind.BASE_MAPPINGS,
+                        null, injector.mixinInternalName(), normalizedReference, false));
+                resource.tables().stream()
+                        .filter(value -> value.kind() == RefmapTableKind.CONTEXT)
+                        .sorted(Comparator.comparing(RefmapTableFinding::contextKey))
+                        .forEach(table -> candidates.add(lookupRefmapTable(table, RefmapTableKind.CONTEXT,
+                                table.contextKey(), injector.mixinInternalName(), normalizedReference, true)));
+                Set<String> results = new TreeSet<>();
+                for (RefmapLookupCandidate candidate : candidates) results.add(
+                        candidate.mappedReferenceValue() == null ? normalizedReference : candidate.mappedReferenceValue());
+                status = results.size() > 1 ? RefmapLookupStatus.CONTEXT_DEPENDENT_VALUES
+                        : RefmapLookupStatus.CONTEXT_NOT_SELECTED;
+                evidence = status == RefmapLookupStatus.CONTEXT_DEPENDENT_VALUES
+                        ? "Available tables produce different exact owner/reference results; no runtime context was supplied."
+                        : "No runtime context was supplied; all base/context candidate results are shown without selecting one.";
+            }
+        }
+        if (pluginDependent && apCanEmitReference && remap) {
+            status = RefmapLookupStatus.PLUGIN_DEPENDENT;
+            evidence += " A declared plugin or custom refmapWrapper may alter resource selection or lookup; code was not executed.";
+        }
+        if (requestedContextKey != null && behavior == RefmapContextBehavior.NOT_EVALUATED) {
+            warnings.add("The requested context was not evaluated because this source element/resource was not eligible for exact lookup.");
+        }
+        return new RefmapLookupFinding(archivePath, injector.configPath(), injector.section(),
+                injector.mixinClassName(), injector.mixinInternalName(), source, sourceLocation,
+                injector.sourceMemberName(), injector.sourceMemberDescriptor(), rawReference,
+                normalizedReference, remap, resourcePath, requestedContextKey, behavior,
+                selectedContextKey, status, mappedReferenceValue, candidates, evidence, warnings);
+    }
+
+    private static RefmapLookupCandidate lookupRefmapTable(
+            RefmapTableFinding table, RefmapTableKind kind, String contextKey,
+            String ownerInternalName, String normalizedReference, boolean expectedTable) {
+        if (table == null) return new RefmapLookupCandidate(kind, contextKey,
+                expectedTable ? RefmapCandidateStatus.TABLE_NOT_INVENTORIED
+                        : RefmapCandidateStatus.ENTRY_NOT_FOUND_PASSTHROUGH, null, List.of());
+        List<RefmapEntryFinding> matches = table.entries().stream()
+                .filter(entry -> ownerInternalName.equals(entry.ownerInternalName())
+                        && normalizedReference.equals(entry.referenceKey()))
+                .toList();
+        List<RefmapLookupMatch> matchRows = matches.stream()
+                .map(entry -> new RefmapLookupMatch(entry.referenceKey(), entry.mappedReferenceValue())).toList();
+        if (matches.isEmpty()) return new RefmapLookupCandidate(kind, contextKey,
+                RefmapCandidateStatus.ENTRY_NOT_FOUND_PASSTHROUGH, null, matchRows);
+        RefmapEntryFinding match = matches.getFirst();
+        RefmapCandidateStatus status = normalizedReference.equals(match.mappedReferenceValue())
+                ? RefmapCandidateStatus.EXPLICIT_IDENTITY_ENTRY : RefmapCandidateStatus.ENTRY_FOUND;
+        return new RefmapLookupCandidate(kind, contextKey, status, match.mappedReferenceValue(), matchRows);
+    }
+
+    private static RefmapLookupStatus topLevelLookupStatus(RefmapCandidateStatus status) {
+        return switch (status) {
+            case ENTRY_FOUND -> RefmapLookupStatus.ENTRY_FOUND;
+            case ENTRY_NOT_FOUND_PASSTHROUGH -> RefmapLookupStatus.ENTRY_NOT_FOUND_PASSTHROUGH;
+            case EXPLICIT_IDENTITY_ENTRY -> RefmapLookupStatus.EXPLICIT_IDENTITY_ENTRY;
+            case TABLE_NOT_INVENTORIED -> RefmapLookupStatus.ANALYSIS_INCOMPLETE;
+        };
+    }
+
+    /** Mixin 0.8.5 AP removes whitespace from source references before storing refmap keys. */
+    private static String normalizeRefmapReferenceKey(String raw) {
+        if (raw == null) return null;
+        StringBuilder result = new StringBuilder(raw.length());
+        raw.codePoints().filter(Character::isWhitespace).forEach(result::appendCodePoint);
+        return result.toString();
+    }
+
     private static RefmapResourceFinding refmapResourceFailure(
             String archivePath,
             String path,
@@ -1241,7 +1567,8 @@ public final class Forge1201MixinAnalyzer {
 
     private static List<InjectorFinding> readInjectorAnnotations(
             String archivePath, String configPath, String section, String mixinClassName,
-            List<ParsedTarget> parsedTargets, ClassNode mixin, boolean pluginDependent, boolean mixinRemap) {
+            String mixinInternalName, List<ParsedTarget> parsedTargets,
+            ClassNode mixin, boolean pluginDependent, boolean mixinRemap) {
         List<String> targets = parsedTargets.stream().map(ParsedTarget::selector).distinct().sorted().toList();
         List<InjectorFinding> findings = new ArrayList<>();
         if (mixin.fields != null) {
@@ -1251,7 +1578,8 @@ public final class Forge1201MixinAnalyzer {
                     for (AnnotationNode annotation : annotations) {
                         InjectorAnnotationKind kind = injectorAnnotationKind(annotation.desc);
                         if (kind != null) findings.add(createInjectorFinding(archivePath, configPath, section,
-                                mixinClassName, targets, kind, MemberElementKind.FIELD, field.name, field.desc,
+                                mixinClassName, mixinInternalName, targets, kind,
+                                MemberElementKind.FIELD, field.name, field.desc,
                                 annotation, pluginDependent, mixinRemap));
                     }
                 }
@@ -1264,7 +1592,8 @@ public final class Forge1201MixinAnalyzer {
                     for (AnnotationNode annotation : annotations) {
                         InjectorAnnotationKind kind = injectorAnnotationKind(annotation.desc);
                         if (kind != null) findings.add(createInjectorFinding(archivePath, configPath, section,
-                                mixinClassName, targets, kind, MemberElementKind.METHOD, method.name, method.desc,
+                                mixinClassName, mixinInternalName, targets, kind,
+                                MemberElementKind.METHOD, method.name, method.desc,
                                 annotation, pluginDependent, mixinRemap));
                     }
                 }
@@ -1287,7 +1616,8 @@ public final class Forge1201MixinAnalyzer {
 
     private static InjectorFinding createInjectorFinding(
             String archivePath, String configPath, String section, String mixinClassName,
-            List<String> targets, InjectorAnnotationKind kind, MemberElementKind elementKind,
+            String mixinInternalName, List<String> targets,
+            InjectorAnnotationKind kind, MemberElementKind elementKind,
             String sourceName, String sourceDescriptor, AnnotationNode annotation,
             boolean pluginDependent, boolean mixinRemap) {
         List<String> warnings = new ArrayList<>();
@@ -1314,9 +1644,9 @@ public final class Forge1201MixinAnalyzer {
         }
 
         boolean remap = booleanAnnotationValue(annotation, "remap", mixinRemap);
-        List<AtFinding> injectionPoints = readAtFindings(annotation);
+        List<AtFinding> injectionPoints = readAtFindings(annotation, remap);
         List<ConstantFinding> constants = readConstantFindings(annotation, kind);
-        List<SliceFinding> slices = readSliceFindings(annotation);
+        List<SliceFinding> slices = readSliceFindings(annotation, remap);
         int atCount = injectionPoints.size();
         int sliceCount = slices.size();
         Integer index = nullableIntegerAnnotationValue(annotation, "index");
@@ -1352,23 +1682,23 @@ public final class Forge1201MixinAnalyzer {
             case INJECTOR_REMAP_UNRESOLVED -> "Source handler and target selectors were inventoried; no reviewed versioned member mapping was supplied, so target presence is not asserted.";
             case INJECTOR_REMAP_DISABLED_UNVERIFIED -> "remap=false; source handler and target selectors were inventoried, but target presence and parity remain unverified.";
         };
-        return new InjectorFinding(archivePath, configPath, section, mixinClassName, targets,
+        return new InjectorFinding(archivePath, configPath, section, mixinClassName, mixinInternalName, targets,
                 kind, elementKind, sourceName, sourceDescriptor, selectors, injectionPoints, constants, slices, remap,
                 atCount, sliceCount, index, cancellable, argsOnly,
                 require, expect, allow, constraints, status, evidence, warnings);
     }
 
 
-    private static List<AtFinding> readAtFindings(AnnotationNode injector) {
+    private static List<AtFinding> readAtFindings(AnnotationNode injector, boolean defaultRemap) {
         List<AtFinding> findings = new ArrayList<>();
         List<AnnotationNode> annotations = annotationArrayValue(injector, "at");
         for (int i = 0; i < annotations.size(); i++) {
-            findings.add(createAtFinding(i, annotations.get(i)));
+            findings.add(createAtFinding(i, annotations.get(i), defaultRemap));
         }
         return List.copyOf(findings);
     }
 
-    private static AtFinding createAtFinding(int index, AnnotationNode annotation) {
+    private static AtFinding createAtFinding(int index, AnnotationNode annotation, boolean defaultRemap) {
         List<String> warnings = new ArrayList<>();
         String value = stringAnnotationValue(annotation, "value");
         AtValueKind valueKind = isBuiltInAtValue(value) ? AtValueKind.BUILT_IN : AtValueKind.CUSTOM_OR_UNKNOWN;
@@ -1433,7 +1763,7 @@ public final class Forge1201MixinAnalyzer {
                 integerAnnotationValue(annotation, "by", 0),
                 stringAnnotationValue(annotation, "slice") == null ? "" : stringAnnotationValue(annotation, "slice"),
                 stringArrayValues(annotation, "args"),
-                booleanAnnotationValue(annotation, "remap", true),
+                booleanAnnotationValue(annotation, "remap", defaultRemap),
                 stringAnnotationValue(annotation, "id") == null ? "" : stringAnnotationValue(annotation, "id"),
                 status, evidence, warnings);
     }
@@ -1546,7 +1876,7 @@ public final class Forge1201MixinAnalyzer {
         }
     }
 
-    private static List<SliceFinding> readSliceFindings(AnnotationNode injector) {
+    private static List<SliceFinding> readSliceFindings(AnnotationNode injector, boolean defaultRemap) {
         Object raw = annotationValue(injector, "slice");
         if (raw == null) return List.of();
         List<?> entries = raw instanceof List<?> values ? values : List.of(raw);
@@ -1566,17 +1896,17 @@ public final class Forge1201MixinAnalyzer {
                         "A nested annotation was retained, but it is not the Mixin 0.8.5 @Slice type.",
                         List.of("Expected " + SLICE_ANNOTATION + " but found " + annotation.desc + ".")));
             } else {
-                findings.add(createSliceFinding(i, annotation));
+                findings.add(createSliceFinding(i, annotation, defaultRemap));
             }
         }
         return List.copyOf(findings);
     }
 
-    private static SliceFinding createSliceFinding(int index, AnnotationNode annotation) {
+    private static SliceFinding createSliceFinding(int index, AnnotationNode annotation, boolean defaultRemap) {
         String id = stringAnnotationValue(annotation, "id");
         if (id == null) id = "";
-        SliceBoundaryFinding from = createSliceBoundary(annotation, SliceBoundaryKind.FROM);
-        SliceBoundaryFinding to = createSliceBoundary(annotation, SliceBoundaryKind.TO);
+        SliceBoundaryFinding from = createSliceBoundary(annotation, SliceBoundaryKind.FROM, defaultRemap);
+        SliceBoundaryFinding to = createSliceBoundary(annotation, SliceBoundaryKind.TO, defaultRemap);
         List<String> warnings = new ArrayList<>();
         warnings.addAll(from.warnings());
         warnings.addAll(to.warnings());
@@ -1593,7 +1923,7 @@ public final class Forge1201MixinAnalyzer {
     }
 
     private static SliceBoundaryFinding createSliceBoundary(
-            AnnotationNode slice, SliceBoundaryKind kind) {
+            AnnotationNode slice, SliceBoundaryKind kind, boolean defaultRemap) {
         String key = kind == SliceBoundaryKind.FROM ? "from" : "to";
         boolean declared = hasAnnotationValue(slice, key);
         Object raw = annotationValue(slice, key);
@@ -1601,7 +1931,7 @@ public final class Forge1201MixinAnalyzer {
             AnnotationNode defaultAt = new AnnotationNode(AT_ANNOTATION);
             defaultAt.visit("value", kind == SliceBoundaryKind.FROM ? "HEAD" : "TAIL");
             defaultAt.visitEnd();
-            AtFinding at = createAtFinding(0, defaultAt);
+            AtFinding at = createAtFinding(0, defaultAt, defaultRemap);
             String boundaryName = kind == SliceBoundaryKind.FROM ? "@Slice.from" : "@Slice.to";
             String defaultValue = kind == SliceBoundaryKind.FROM ? "HEAD" : "TAIL";
             return new SliceBoundaryFinding(kind, false, AT_ANNOTATION, at,
@@ -1621,7 +1951,7 @@ public final class Forge1201MixinAnalyzer {
                     "The declared " + key + " boundary uses an annotation type other than Mixin @At.",
                     List.of("Expected " + AT_ANNOTATION + " for @Slice." + key + " but found " + nested.desc + "."));
         }
-        AtFinding at = createAtFinding(0, nested);
+        AtFinding at = createAtFinding(0, nested, defaultRemap);
         if (at.status() != AtFindingStatus.CAPTURED) {
             return new SliceBoundaryFinding(kind, true, nested.desc, at,
                     SliceBoundaryStatus.INVALID_AT,

@@ -306,7 +306,7 @@ Tests must use generated fixtures and must not instantiate or execute Mixin runt
 
 ### Schema 1.9A — resource and table inventory
 
-**Implementation status: code and synthetic tests added; forced loader gate pending.** The current implementation batch:
+**Implementation and forced loader test gate: PASSED on 2026-11-14** at `a59fdac24ab848e31152901b9a4f4f3a5db5413d` (`:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks`; `BUILD SUCCESSFUL in 50s; 14/14 tasks executed`).
 
 - Adds immutable RefmapResourceFinding, RefmapTableFinding, and RefmapEntryFinding records to the existing Forge1201MixinAnalyzer.Result.
 - Resolves explicit refmap paths, the mixin.refmap.json default candidate, and a weaker plugin-dependent default candidate. Multiple configs sharing a path share one parsed inventory while retaining sorted config/origin provenance.
@@ -318,16 +318,23 @@ Tests must use generated fixtures and must not instantiate or execute Mixin runt
 - Implements the current guardrails as public constants: 1 MiB/resource, 8 MiB aggregate, 256 paths, 64 contexts/resource, 20,000 owner buckets/resource, and 100,000 entries/resource. These remain conservative, unprofiled initial limits; the bounded reader consumes at most one extra byte to detect overflow and accounts for those bytes against the aggregate budget.
 - Adds synthetic coverage for base/context tables, shared-path provenance, default/plugin-dependent candidates, wrapper preservation, unknown top-level fields, duplicate JSON keys, unsupported table/value shapes, deterministic inventory, per-resource and aggregate byte caps, JSON nesting depth, and the context-table cap.
 
-**Not yet validated:** no Gradle compile/test has run against this batch. The Schema 1.8 user green gate remains the last confirmed test checkpoint. Source and target namespaces remain unresolved; 1.9A does not correlate source selectors or prove Mixin compatibility.
+**Validation boundary:** this gate confirms compilation and synthetic tests for 1.9A resource/table inventory only. It does not prove runtime Mixin application, namespace conversion, target-member existence, or mod compatibility. Source and target namespaces remain unresolved.
 
 ### Schema 1.9B — explicit-context exact lookup correlation
 
-- Preserve each mixin's internal class name alongside the display name.
-- Correlate only the source annotation strings that Mixin 0.8.5 AP emits as refmap keys.
-- Use owner-scoped exact lookups and the AP whitespace normalization rule.
-- Accept a context only from an explicit analyzer input; otherwise emit context inventory and candidate results.
-- Add the complete context fallback and no-entry fallback regression matrix.
-- Do not rewrite or target-resolve selectors.
+**Implementation status: code and synthetic regression tests added; forced loader gate pending.**
+
+- Preserve mixin classfile internal owners beside display names and use exact owners for lookup.
+- Correlate only Mixin 0.8.5 AP string-reference paths: injector `method[]`, fully-qualified `@At.target`, `@At("NEW")` constructor target, and separate `args[class]` constructor-selector path. `@Desc` paths remain non-string-ref evidence; no synthetic key is invented.
+- Preserve raw annotation text and its AP whitespace-stripped source-key candidate. Match that candidate exactly against the serialized refmap key and exact mixin owner.
+- Distinguish an absent-entry pass-through from an explicit identity entry.
+- Accept runtime context only via explicit analyzer input (`--refmap-context`; Gradle `-PpreflightRefmapContext=<key>`). Without context, inventory base/context candidates without selecting one.
+- Match Mixin 0.8.5 context behavior: an absent context table falls back to base; a present table with a missing owner/reference does not.
+- Inherit effective injector `remap` into `@At.remap` and slice boundary `@At` unless explicitly overridden.
+- Plugins and wrappers remain inert/dynamic. No namespace conversion, target-member verification, selector rewriting, or runtime compatibility claim is added.
+- Synthetic tests cover owner isolation, source whitespace normalization, present-context/missing-key, absent-context fallback, no-context divergent candidates, identity versus absence, inherited/overridden `@At.remap`, and both NEW mapping paths.
+
+**Not yet validated:** the implementation still requires the user's forced `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks` gate.
 
 ### Later mapping integration
 

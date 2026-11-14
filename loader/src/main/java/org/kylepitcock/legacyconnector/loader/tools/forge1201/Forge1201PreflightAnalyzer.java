@@ -158,7 +158,7 @@ public final class Forge1201PreflightAnalyzer {
 
     /** Inspects one source archive. Installed native-mod directories and target classpath are optional. */
     public static PreflightResult analyze(Path jarPath, Collection<Path> installedModDirectories) throws IOException {
-        return analyze(jarPath, installedModDirectories, List.of());
+        return analyze(jarPath, installedModDirectories, List.of(), null);
     }
 
     /**
@@ -169,6 +169,15 @@ public final class Forge1201PreflightAnalyzer {
             Path jarPath,
             Collection<Path> installedModDirectories,
             Collection<Path> targetClasspath) throws IOException {
+        return analyze(jarPath, installedModDirectories, targetClasspath, null);
+    }
+
+    /** Null context leaves context selection unresolved and inventories all refmap tables. */
+    public static PreflightResult analyze(
+            Path jarPath,
+            Collection<Path> installedModDirectories,
+            Collection<Path> targetClasspath,
+            String requestedRefmapContextKey) throws IOException {
         if (jarPath == null || !Files.isRegularFile(jarPath)) {
             throw new IllegalArgumentException("Preflight input must be an existing JAR file: " + jarPath);
         }
@@ -373,7 +382,7 @@ public final class Forge1201PreflightAnalyzer {
                             targetLoader.getResourceAsStream(internalName + ".class"));
             // No 1.20.1 -> 1.21.1 Minecraft class map is supplied yet; Mojang names are never assumed identical.
             mixinAnalysis = Forge1201MixinAnalyzer.analyze(
-                    jar, mixinDeclarations, targetIndex, Map.of(), "not-supplied");
+                    jar, mixinDeclarations, targetIndex, Map.of(), "not-supplied", requestedRefmapContextKey);
         }
 
         List<String> observedNativeIds = nativeIds.stream().sorted().toList();
@@ -383,7 +392,7 @@ public final class Forge1201PreflightAnalyzer {
                 "Source Minecraft SRG member names are normalized to 1.20.1 Mojang names where the generated mapping table has an entry; missing entries remain explicitly UNMAPPED. This source-name normalization is not a 1.21.1 target API or semantic compatibility verdict.",
                 "Nested archive traversal is bounded by depth, archive count, per-archive size, and total inflated-byte limits. Class capture is bounded to 8 MiB per class, 16 MiB per nested archive, 128 MiB aggregate nested class bytes submitted, and 64 MiB aggregate outer class bytes. Archives/classes skipped by a limit or rejected as unsafe/corrupt remain explicit findings.",
                 "Mixin configs discovered by the manifest and outer-archive resource heuristics are parsed in the current preflight schema. Target-class presence is checked only when the root project's resolved target compile classpath is supplied; no 1.20.1-to-1.21.1 Minecraft class identity mapping is assumed.",
-                "Mixin analysis currently covers outer-archive configs, mixin class entries, statically readable @Mixin class targets, source-side member annotations, source-side handler/selector inventories for the six core Mixin 0.8.5 injector annotations, @Slice boundary metadata, and bounded refmap base/context table inventory. Refmap contexts remain opaque identifiers; the analyzer does not select a runtime context, convert source/target namespaces, correlate exact selector lookups, resolve selectors against target bytecode, establish instruction ordering, validate slice semantics or injector handler stack contracts, compare target member descriptors, or apply semantic refmap remapping. Source-nested JAR config/class provenance remains a future increment. Mixin plugin classes and custom refmap wrappers are inventoried as inert metadata and never executed.",
+                "Mixin analysis covers outer-archive configs, mixin class entries and internal owner names, static @Mixin targets, member annotations, six core Mixin 0.8.5 injector annotations, @Slice boundaries, bounded refmap tables, and owner-scoped exact correlation candidates for AP-emitted string references. A caller may explicitly supply a refmap context; otherwise base/context candidates are inventoried without selection. Plugins and custom wrappers remain inert and may make effective resource selection dynamic. No source/target namespace conversion, target selector/member/instruction resolution, slice ordering, handler stack validation, or runtime injection success is claimed. Source-nested JAR config/class provenance remains a future increment.",
                 "Reflection/resource string candidates remain heuristic and are not treated as confirmed bytecode references.",
                 "Installed provider discovery records top-level and nested archive paths, mod IDs, and declared versions. A provider ID/version match does not establish API or behavioral compatibility; installed version ranges and API compatibility are not verified.",
                 "Maven-style version ranges with numeric dotted versions are evaluated conservatively. Qualified or otherwise unsupported version strings remain explicitly unverified.",
@@ -504,8 +513,31 @@ public final class Forge1201PreflightAnalyzer {
             }
             resource.warnings().forEach(warning -> out.append("    warning: ").append(warning).append('\n'));
         }
+        out.append("\nMixin refmap lookup correlation (").append(mixins.refmapLookups().size())
+                .append("), requested context=")
+                .append(mixins.requestedRefmapContextKey() == null ? "<not supplied>" : mixins.requestedRefmapContextKey())
+                .append(":\n");
+        if (mixins.refmapLookups().isEmpty()) out.append("  none discovered\n");
+        for (Forge1201MixinAnalyzer.RefmapLookupFinding lookup : mixins.refmapLookups()) {
+            out.append("  ").append(lookup.source()).append(' ').append(lookup.mixinInternalName()).append('#')
+                    .append(lookup.sourceMemberName()).append(lookup.sourceMemberDescriptor())
+                    .append(" at ").append(lookup.sourceLocation()).append(" [").append(lookup.status())
+                    .append(", remap=").append(lookup.remap()).append(", resource=").append(lookup.resourcePath())
+                    .append(", context=").append(lookup.selectedContextKey()).append("] raw=")
+                    .append(lookup.rawReference()).append(" normalized=").append(lookup.normalizedReference())
+                    .append(" mapped=").append(lookup.mappedReferenceValue()).append(" — ")
+                    .append(lookup.evidence()).append('\n');
+            for (Forge1201MixinAnalyzer.RefmapLookupCandidate candidate : lookup.candidates()) {
+                out.append("    candidate ").append(candidate.tableKind())
+                        .append(candidate.contextKey() == null ? "" : " context=" + candidate.contextKey())
+                        .append(" [").append(candidate.status()).append("] mapped=")
+                        .append(candidate.mappedReferenceValue()).append(" matches=").append(candidate.matches()).append('\n');
+            }
+            lookup.warnings().forEach(warning -> out.append("    warning: ").append(warning).append('\n'));
+        }
         for (Forge1201MixinAnalyzer.MixinClassFinding finding : mixins.mixinClasses()) {
             out.append("  mixin ").append(finding.mixinClassName()).append(" [").append(finding.status())
+                    .append(", internal=").append(finding.mixinInternalName())
                     .append(", section=").append(finding.section()).append("]\n");
             finding.warnings().forEach(warning -> out.append("    warning: ").append(warning).append('\n'));
         }
@@ -883,20 +915,25 @@ public final class Forge1201PreflightAnalyzer {
         Files.writeString(absolute, content, StandardCharsets.UTF_8);
     }
 
-    /** CLI: <jar> [--mods-dir <directory>]... [--target-classpath-file <path>] [--json <path>] [--text <path>] */
+    /** CLI: <jar> [--mods-dir <directory>]... [--target-classpath-file <path>] [--refmap-context <key>] [--json <path>] [--text <path>] */
     public static void main(String[] args) throws IOException {
         if (args.length < 1) {
             throw new IllegalArgumentException("Usage: <jar> [--mods-dir <directory>]... "
-                    + "[--target-classpath-file <path>] [--json <path>] [--text <path>]");
+                    + "[--target-classpath-file <path>] [--refmap-context <key>] [--json <path>] [--text <path>]");
         }
         Path jar = Path.of(args[0]);
         List<Path> modDirectories = new ArrayList<>();
         Path targetClasspathFile = null;
         Path json = null;
         Path text = null;
+        String requestedRefmapContextKey = null;
         for (int i = 1; i < args.length; i++) {
             String option = args[i];
             if (++i >= args.length) throw new IllegalArgumentException("Missing value after " + option);
+            if ("--refmap-context".equals(option)) {
+                requestedRefmapContextKey = args[i];
+                continue;
+            }
             Path value = Path.of(args[i]);
             switch (option) {
                 case "--mods-dir" -> modDirectories.add(value);
@@ -906,7 +943,7 @@ public final class Forge1201PreflightAnalyzer {
                 default -> throw new IllegalArgumentException("Unknown preflight option: " + option);
             }
         }
-        PreflightResult result = analyze(jar, modDirectories, readTargetClasspathFile(targetClasspathFile));
+        PreflightResult result = analyze(jar, modDirectories, readTargetClasspathFile(targetClasspathFile), requestedRefmapContextKey);
         if (json != null) write(json, toJson(result));
         if (text != null) write(text, toText(result));
         if (json == null && text == null) {

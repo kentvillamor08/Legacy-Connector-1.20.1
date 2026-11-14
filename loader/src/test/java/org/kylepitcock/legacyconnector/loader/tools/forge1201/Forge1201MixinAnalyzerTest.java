@@ -48,6 +48,202 @@ final class Forge1201MixinAnalyzerTest {
     @TempDir
     Path tempDir;
 
+
+    @Test
+    void correlatesExactOwnerScopedRefsAndRespectsContextTableFallbackRules() throws Exception {
+        String configPath = "mixins.refmap-lookup.json";
+        String mixinOwner = "com/example/mixins/RefmapMixin";
+        String atReference = "L" + SOURCE_ENTITY + ";hurt(D)Z";
+        String config = """
+                {"package":"com.example.mixins","refmap":"lookup.refmap.json","mixins":["RefmapMixin"]}
+                """;
+        String refmap = """
+                {
+                  "mappings": {"com/example/mixins/RefmapMixin": {
+                    "tick()V": "baseTick()V",
+                    "Lnet/minecraft/world/entity/Entity;hurt(D)Z": "baseHurt(D)Z"
+                  }},
+                  "data": {
+                    "ctx-present-miss": {"com/example/other/OtherMixin": {
+                      "tick()V": "wrongOwnerTick()V",
+                      "Lnet/minecraft/world/entity/Entity;hurt(D)Z": "wrongOwnerHurt(D)Z"
+                    }},
+                    "ctx-different": {"com/example/mixins/RefmapMixin": {
+                      "tick()V": "contextTick()V",
+                      "Lnet/minecraft/world/entity/Entity;hurt(D)Z": "contextHurt(D)Z"
+                    }}
+                  }
+                }
+                """;
+        Path jar = writeJar("refmap-owner-context-lookup.jar", Map.of(
+                configPath, config.getBytes(StandardCharsets.UTF_8),
+                "lookup.refmap.json", refmap.getBytes(StandardCharsets.UTF_8),
+                mixinOwner + ".class",
+                refmapLookupMixinClass(mixinOwner, SOURCE_ENTITY, new String[] {"tick ()V"},
+                        true, null, "INVOKE", atReference, new String[0])));
+
+        var present = Forge1201MixinAnalyzer.analyze(jar,
+                List.of(new Forge1201MixinAnalyzer.ConfigDeclaration(configPath,
+                        Forge1201MixinAnalyzer.DiscoverySource.MANIFEST)),
+                emptyTargetIndex(), Map.of(), "no-member-map", "ctx-present-miss");
+        var method = present.refmapLookups().stream()
+                .filter(value -> value.source() == Forge1201MixinAnalyzer.RefmapLookupSource.INJECTOR_METHOD)
+                .findFirst().orElseThrow();
+        assertEquals(mixinOwner, method.mixinInternalName());
+        assertEquals("tick ()V", method.rawReference());
+        assertEquals("tick()V", method.normalizedReference());
+        assertEquals(Forge1201MixinAnalyzer.RefmapContextBehavior.CONTEXT_TABLE_SELECTED, method.contextBehavior());
+        assertEquals(Forge1201MixinAnalyzer.RefmapLookupStatus.ENTRY_NOT_FOUND_PASSTHROUGH, method.status());
+        assertNull(method.mappedReferenceValue());
+        assertTrue(method.candidates().getFirst().matches().isEmpty());
+        var at = present.refmapLookups().stream()
+                .filter(value -> value.source() == Forge1201MixinAnalyzer.RefmapLookupSource.AT_TARGET)
+                .findFirst().orElseThrow();
+        assertEquals(atReference, at.rawReference());
+        assertEquals(Forge1201MixinAnalyzer.RefmapLookupStatus.ENTRY_NOT_FOUND_PASSTHROUGH, at.status());
+        assertTrue(present.injectors().getFirst().injectionPoints().getFirst().remap());
+
+        var missingContext = Forge1201MixinAnalyzer.analyze(jar,
+                List.of(new Forge1201MixinAnalyzer.ConfigDeclaration(configPath,
+                        Forge1201MixinAnalyzer.DiscoverySource.MANIFEST)),
+                emptyTargetIndex(), Map.of(), "no-member-map", "ctx-not-present");
+        var fallback = missingContext.refmapLookups().stream()
+                .filter(value -> value.source() == Forge1201MixinAnalyzer.RefmapLookupSource.INJECTOR_METHOD)
+                .findFirst().orElseThrow();
+        assertEquals(Forge1201MixinAnalyzer.RefmapContextBehavior.CONTEXT_MISSING_DEFAULT_FALLBACK,
+                fallback.contextBehavior());
+        assertEquals(Forge1201MixinAnalyzer.RefmapLookupStatus.ENTRY_FOUND, fallback.status());
+        assertEquals("baseTick()V", fallback.mappedReferenceValue());
+        assertEquals(Forge1201MixinAnalyzer.RefmapTableKind.BASE_MAPPINGS, fallback.candidates().getFirst().tableKind());
+
+        var noContext = Forge1201MixinAnalyzer.analyze(jar,
+                List.of(new Forge1201MixinAnalyzer.ConfigDeclaration(configPath,
+                        Forge1201MixinAnalyzer.DiscoverySource.MANIFEST)),
+                emptyTargetIndex(), Map.of(), "no-member-map");
+        var unresolved = noContext.refmapLookups().stream()
+                .filter(value -> value.source() == Forge1201MixinAnalyzer.RefmapLookupSource.INJECTOR_METHOD)
+                .findFirst().orElseThrow();
+        assertEquals(Forge1201MixinAnalyzer.RefmapContextBehavior.CONTEXT_NOT_SELECTED, unresolved.contextBehavior());
+        assertEquals(Forge1201MixinAnalyzer.RefmapLookupStatus.CONTEXT_DEPENDENT_VALUES, unresolved.status());
+        assertNull(unresolved.selectedContextKey());
+        assertTrue(unresolved.candidates().stream().anyMatch(candidate ->
+                "ctx-different".equals(candidate.contextKey())
+                        && "contextTick()V".equals(candidate.mappedReferenceValue())));
+    }
+
+    @Test
+    void distinguishesExplicitIdentityEntriesFromMissingKeysAndNeverSearchesOtherOwners() throws Exception {
+        String configPath = "mixins.refmap-identity.json";
+        String mixinOwner = "com/example/mixins/IdentityMixin";
+        String refmap = """
+                {"mappings": {
+                  "com/example/mixins/IdentityMixin": {"tick()V": "tick()V"},
+                  "com/example/other/OtherMixin": {"missing()V": "wrongOwner()V"}
+                }}
+                """;
+        Path jar = writeJar("refmap-identity-and-miss.jar", Map.of(
+                configPath, "{\"package\":\"com.example.mixins\",\"refmap\":\"identity.refmap.json\",\"mixins\":[\"IdentityMixin\"]}".getBytes(StandardCharsets.UTF_8),
+                "identity.refmap.json", refmap.getBytes(StandardCharsets.UTF_8),
+                mixinOwner + ".class", refmapLookupMixinClass(mixinOwner, SOURCE_ENTITY,
+                        new String[] {"tick()V", "missing()V"}, true, null, "HEAD", null, new String[0])));
+        var result = Forge1201MixinAnalyzer.analyze(jar,
+                List.of(new Forge1201MixinAnalyzer.ConfigDeclaration(configPath,
+                        Forge1201MixinAnalyzer.DiscoverySource.MANIFEST)),
+                emptyTargetIndex(), Map.of(), "no-member-map", "unlisted-context");
+        var tick = result.refmapLookups().stream()
+                .filter(value -> value.source() == Forge1201MixinAnalyzer.RefmapLookupSource.INJECTOR_METHOD
+                        && "tick()V".equals(value.rawReference())).findFirst().orElseThrow();
+        assertEquals(Forge1201MixinAnalyzer.RefmapLookupStatus.EXPLICIT_IDENTITY_ENTRY, tick.status());
+        assertEquals("tick()V", tick.mappedReferenceValue());
+        var missing = result.refmapLookups().stream()
+                .filter(value -> value.source() == Forge1201MixinAnalyzer.RefmapLookupSource.INJECTOR_METHOD
+                        && "missing()V".equals(value.rawReference())).findFirst().orElseThrow();
+        assertEquals(Forge1201MixinAnalyzer.RefmapLookupStatus.ENTRY_NOT_FOUND_PASSTHROUGH, missing.status());
+        assertNull(missing.mappedReferenceValue());
+        assertTrue(missing.candidates().getFirst().matches().isEmpty());
+    }
+
+    @Test
+    void injectionPointRemapInheritsInjectorRemapAndHonorsExplicitAtOverride() throws Exception {
+        String configPath = "mixins.refmap-remap.json";
+        String mixinOwner = "com/example/mixins/RemapMixin";
+        String refmap = """
+                {"mappings": {"com/example/mixins/RemapMixin": {
+                  "tick()V": "obfTick()V",
+                  "Lnet/minecraft/world/entity/Entity;hurt(D)Z": "La;h(D)Z"
+                }}}
+                """;
+        String config = "{\"package\":\"com.example.mixins\",\"refmap\":\"remap.refmap.json\",\"mixins\":[\"RemapMixin\"]}";
+        var declarations = List.of(new Forge1201MixinAnalyzer.ConfigDeclaration(configPath,
+                Forge1201MixinAnalyzer.DiscoverySource.MANIFEST));
+        Path inheritedJar = writeJar("refmap-remap-inherited.jar", Map.of(
+                configPath, config.getBytes(StandardCharsets.UTF_8),
+                "remap.refmap.json", refmap.getBytes(StandardCharsets.UTF_8),
+                mixinOwner + ".class", refmapLookupMixinClass(mixinOwner, SOURCE_ENTITY,
+                        new String[] {"tick()V"}, false, null, "INVOKE",
+                        "L" + SOURCE_ENTITY + ";hurt(D)Z", new String[0])));
+        var inherited = Forge1201MixinAnalyzer.analyze(inheritedJar, declarations,
+                emptyTargetIndex(), Map.of(), "no-member-map", "missing-context");
+        var inheritedAt = inherited.refmapLookups().stream()
+                .filter(value -> value.source() == Forge1201MixinAnalyzer.RefmapLookupSource.AT_TARGET)
+                .findFirst().orElseThrow();
+        assertFalse(inheritedAt.remap());
+        assertEquals(Forge1201MixinAnalyzer.RefmapLookupStatus.REMAP_DISABLED, inheritedAt.status());
+        assertTrue(inherited.refmapLookups().stream()
+                .filter(value -> value.source() == Forge1201MixinAnalyzer.RefmapLookupSource.INJECTOR_METHOD)
+                .allMatch(value -> value.status() == Forge1201MixinAnalyzer.RefmapLookupStatus.REMAP_DISABLED));
+
+        Path overrideJar = writeJar("refmap-remap-override.jar", Map.of(
+                configPath, config.getBytes(StandardCharsets.UTF_8),
+                "remap.refmap.json", refmap.getBytes(StandardCharsets.UTF_8),
+                mixinOwner + ".class", refmapLookupMixinClass(mixinOwner, SOURCE_ENTITY,
+                        new String[] {"tick()V"}, false, true, "INVOKE",
+                        "L" + SOURCE_ENTITY + ";hurt(D)Z", new String[0])));
+        var override = Forge1201MixinAnalyzer.analyze(overrideJar, declarations,
+                emptyTargetIndex(), Map.of(), "no-member-map", "missing-context");
+        var at = override.refmapLookups().stream()
+                .filter(value -> value.source() == Forge1201MixinAnalyzer.RefmapLookupSource.AT_TARGET)
+                .findFirst().orElseThrow();
+        assertTrue(at.remap());
+        assertEquals(Forge1201MixinAnalyzer.RefmapLookupStatus.ENTRY_FOUND, at.status());
+        assertEquals("La;h(D)Z", at.mappedReferenceValue());
+    }
+
+    @Test
+    void inventoriesBothNewConstructorTargetAndArgsClassRefmapPaths() throws Exception {
+        String configPath = "mixins.refmap-new.json";
+        String mixinOwner = "com/example/mixins/NewMixin";
+        String constructorTarget = "L" + SOURCE_ENTITY + ";<init>()V";
+        String classReference = "L" + SOURCE_ENTITY + ";";
+        String wrongClassReference = "Lcom/example/NotTheMappedClass;";
+        String refmap = "{\"mappings\":{\"" + mixinOwner + "\":{"
+                + "\"" + constructorTarget + "\":\"La;.<init>()V\","
+                + "\"" + classReference + "\":\"La;\"}}}";
+        String config = "{\"package\":\"com.example.mixins\",\"refmap\":\"new.refmap.json\",\"mixins\":[\"NewMixin\"]}";
+        Path jar = writeJar("refmap-new-paths.jar", Map.of(
+                configPath, config.getBytes(StandardCharsets.UTF_8),
+                "new.refmap.json", refmap.getBytes(StandardCharsets.UTF_8),
+                mixinOwner + ".class", refmapLookupMixinClass(mixinOwner, SOURCE_ENTITY,
+                        new String[] {"create()V"}, true, null, "NEW", constructorTarget,
+                        new String[] {"class=" + wrongClassReference, "class=" + classReference})));
+        var result = Forge1201MixinAnalyzer.analyze(jar,
+                List.of(new Forge1201MixinAnalyzer.ConfigDeclaration(configPath,
+                        Forge1201MixinAnalyzer.DiscoverySource.MANIFEST)),
+                emptyTargetIndex(), Map.of(), "no-member-map", "missing-context");
+        var constructor = result.refmapLookups().stream()
+                .filter(value -> value.source() == Forge1201MixinAnalyzer.RefmapLookupSource.AT_TARGET)
+                .findFirst().orElseThrow();
+        assertEquals(constructorTarget, constructor.rawReference());
+        assertEquals(Forge1201MixinAnalyzer.RefmapLookupStatus.ENTRY_FOUND, constructor.status());
+        var classLookup = result.refmapLookups().stream()
+                .filter(value -> value.source() == Forge1201MixinAnalyzer.RefmapLookupSource.AT_NEW_CLASS_ARGUMENT)
+                .findFirst().orElseThrow();
+        assertEquals(classReference, classLookup.rawReference());
+        assertEquals("at[0].args[1].class", classLookup.sourceLocation());
+        assertEquals(Forge1201MixinAnalyzer.RefmapLookupStatus.ENTRY_FOUND, classLookup.status());
+        assertEquals("La;", classLookup.mappedReferenceValue());
+    }
+
     @Test
     void inventoriesBaseAndContextRefmapTablesAndPreservesWrapperMetadata() throws Exception {
         String firstConfig = """
@@ -909,6 +1105,45 @@ final class Forge1201MixinAnalyzerTest {
         conflict.visitEnd();
         emitInjectorMethodBody(conflictMethod, "(I)I");
 
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+
+    private static byte[] refmapLookupMixinClass(
+            String internalName, String targetInternalName, String[] methodSelectors,
+            boolean injectorRemap, Boolean atRemap, String atValue, String atTarget, String[] atArgs) {
+        ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC | Opcodes.ACC_ABSTRACT,
+                internalName, null, "java/lang/Object", null);
+        AnnotationVisitor mixin = writer.visitAnnotation(MIXIN_DESC, true);
+        AnnotationVisitor mixinTargets = mixin.visitArray("value");
+        mixinTargets.visit(null, Type.getObjectType(targetInternalName));
+        mixinTargets.visitEnd();
+        mixin.visitEnd();
+        MethodVisitor handler = writer.visitMethod(Opcodes.ACC_PRIVATE, "onTick", "()V", null, null);
+        AnnotationVisitor inject = handler.visitAnnotation(INJECT_DESC, false);
+        AnnotationVisitor methods = inject.visitArray("method");
+        for (String selector : methodSelectors) methods.visit(null, selector);
+        methods.visitEnd();
+        if (!injectorRemap) inject.visit("remap", false);
+        AnnotationVisitor atArray = inject.visitArray("at");
+        AnnotationVisitor at = atArray.visitAnnotation(null, AT_DESC);
+        at.visit("value", atValue);
+        if (atTarget != null) at.visit("target", atTarget);
+        if (atRemap != null) at.visit("remap", atRemap);
+        if (atArgs != null && atArgs.length > 0) {
+            AnnotationVisitor args = at.visitArray("args");
+            for (String arg : atArgs) args.visit(null, arg);
+            args.visitEnd();
+        }
+        at.visitEnd();
+        atArray.visitEnd();
+        inject.visitEnd();
+        handler.visitCode();
+        handler.visitInsn(Opcodes.RETURN);
+        handler.visitMaxs(0, 0);
+        handler.visitEnd();
         writer.visitEnd();
         return writer.toByteArray();
     }

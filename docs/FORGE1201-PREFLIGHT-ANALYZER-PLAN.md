@@ -1,4 +1,4 @@
-**Current checkpoint — 2026-11-14:** Slice 4 Mixin preflight passed the user-forced loader test gate through Schema 1.8 at commit `4b4f9ce437671f08eafd3f9cf4a18e34a3d24284` (`BUILD SUCCESSFUL in 33s; 14/14 actionable tasks executed`). The Mixin 0.8.5 refmap contract is pinned in `docs/FORGE1201-PREFLIGHT-SCHEMA-1.9-REFMAP-DESIGN.md`. Schema 1.9A resource/table inventory code and synthetic tests have now been added in the current branch change set, including explicit/default/plugin-dependent resource provenance, strict base/context table parsing, duplicate-key rejection, bounded bytes, and inert `refmapWrapper` metadata. **The new batch has not yet been compiled or run by Gradle; Schema 1.8 remains the latest green gate.** Schema 1.9A does not correlate selectors or resolve namespaces. Static test success at earlier schemas does not establish runtime Mixin application or mod compatibility.
+**Current checkpoint — 2026-11-14:** Schema 1.9A resource/table inventory passed the user's forced `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks` gate at `a59fdac24ab848e31152901b9a4f4f3a5db5413d` (`BUILD SUCCESSFUL in 50s; 14/14 actionable tasks executed`). Schema 1.9B owner-scoped exact lookup correlation and synthetic regression tests have now been authored but are **not yet compiled or test-run by the user**. No namespace conversion, target-member verification, runtime Mixin application, or modpack compatibility is implied by the 1.9A green gate.
 
 ---
 
@@ -1025,11 +1025,7 @@ The current analyzer stores refmapPath and a coarse JSON-resource status, but do
 
 ### Next implementation task
 
-Implement Schema 1.9A first: bounded resource resolution and parse/inventory of base mappings and each data context table, preserving resource origin, digest, owner buckets, raw keys/values, duplicate and limit status, and plugin/wrapper caveats. Add synthetic tests and JSON/text output. Do not rewrite selectors or convert namespace values yet.
-
-After 1.9A is green, implement Schema 1.9B owner-scoped exact lookup correlation. Runtime context must be explicitly supplied to select one context; otherwise inventory all available contexts. Add regression coverage for absent-context fallback versus present-context/missing-entry behavior. Keep namespace translation as a later stage requiring explicit mapping profiles.
-
-The Schema 1.8 green gate remains the latest user-run test checkpoint. Schema 1.9 is not implemented or tested yet.
+Schema 1.9A has passed the user's forced loader test gate at `a59fdac24ab848e31152901b9a4f4f3a5db5413d`. Schema 1.9B adds owner-scoped exact refmap lookup, explicit runtime-context input, exact Mixin 0.8.5 context fallback behavior, and synthetic regression coverage. Schema 1.9B awaits the user's forced loader gate; namespace translation remains a separate later stage requiring explicit mapping profiles.
 
 
 ---
@@ -1062,3 +1058,25 @@ After this batch is committed and the guarded local fast-forward is verified, ru
 ```
 
 Do not mark Schema 1.9A green or begin 1.9B until this full forced loader test gate passes. If it fails, diagnose the actual compiler/test failure, make the smallest source correction, and rerun the same forced gate from the updated exact commit. Runtime client/server and modpack testing remain separate later gates.
+
+
+---
+
+## 2026-11-14 — Schema 1.9A green; Schema 1.9B implementation prepared for validation
+
+### Confirmed user-run checkpoint
+- Local branch `feat/forge1201-preflight-analyzer` fast-forwarded from `4b4f9ce437671f08eafd3f9cf4a18e34a3d24284` to `a59fdac24ab848e31152901b9a4f4f3a5db5413d` after branch/head/worktree/remote-tip guards passed.
+- The user ran `:loader:clean :loader:test --no-daemon --console=plain --rerun-tasks`: `BUILD SUCCESSFUL in 50s`, all 14 actionable tasks executed.
+- This validates Schema 1.9A compilation and synthetic loader tests only; it is not a runtime Mixin or mod-compatibility result.
+
+### Schema 1.9B implementation scope
+- Source mixin internal owners are preserved beside display names and used for exact lookup.
+- New immutable lookup/candidate findings correlate only Mixin 0.8.5 AP string-reference paths; `@Desc` keys are not fabricated.
+- Raw source text and the AP whitespace-normalized candidate are preserved; serialized refmap keys and owner are compared exactly.
+- An absent context table selects base; a present context table with a missing key passes through without base fallback. No context means candidates are listed without automatic selection.
+- Unified preflight accepts `--refmap-context` and Gradle `-PpreflightRefmapContext`.
+- `@At.remap` inherits injector remap unless explicitly overridden, including slice boundaries.
+- Plugins/wrappers remain inert and may leave resource selection dynamic. Namespace conversion and target/member/instruction verification are not included.
+
+### Validation state
+**Schema 1.9B has not yet passed a user-run Gradle gate.** Do not begin namespace integration until the updated source branch passes the forced loader test command. Real mod/client/server and modpack testing remain separate later gates.

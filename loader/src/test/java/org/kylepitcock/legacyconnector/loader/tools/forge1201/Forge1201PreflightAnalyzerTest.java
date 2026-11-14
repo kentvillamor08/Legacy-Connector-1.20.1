@@ -171,13 +171,15 @@ final class Forge1201PreflightAnalyzerTest {
                     {
                       "mappings": {
                         "sample/mixin/ModListMixin": {
-                          "Lnet/minecraftforge/fml/ModList;get()V": "Lx;get()V"
+                          "Lnet/minecraftforge/fml/ModList;get()V": "Lx;get()V",
+                          "Lnet/minecraftforge/fml/ModList;tick()V": "Lx;tick()V"
                         }
                       },
                       "data": {
                         "synthetic-context": {
                           "sample/mixin/ModListMixin": {
-                            "Lnet/minecraftforge/fml/ModList;get()V": "Lx;func_1()V"
+                            "Lnet/minecraftforge/fml/ModList;get()V": "Lx;func_1()V",
+                            "Lnet/minecraftforge/fml/ModList;tick()V": "Lx;func_2()V"
                           }
                         }
                       }
@@ -192,7 +194,8 @@ final class Forge1201PreflightAnalyzerTest {
         Files.write(targetClasses.resolve("ModList.class"), plainTargetClass("net/neoforged/fml/ModList"));
         Path targetClasspathRoot = tempDir.resolve("target-compile-classpath");
 
-        var result = Forge1201PreflightAnalyzer.analyze(sourceJar, List.of(), List.of(targetClasspathRoot));
+        var result = Forge1201PreflightAnalyzer.analyze(
+                sourceJar, List.of(), List.of(targetClasspathRoot), "synthetic-context");
 
         assertEquals(Forge1201MixinAnalyzer.TargetIndexStatus.AVAILABLE,
                 result.mixinAnalysis().targetIndexStatus());
@@ -201,12 +204,20 @@ final class Forge1201PreflightAnalyzerTest {
         assertEquals("net/neoforged/fml/ModList", target.targetInternalName());
         assertEquals(Forge1201MixinAnalyzer.TargetStatus.TARGET_CLASS_PRESENT, target.status());
         assertEquals(1, result.mixinAnalysis().injectors().size());
+        assertEquals("synthetic-context", result.mixinAnalysis().requestedRefmapContextKey());
         assertEquals(1, result.mixinAnalysis().injectors().getFirst().slices().size());
+        var sliceRefmapLookup = result.mixinAnalysis().refmapLookups().stream()
+                .filter(value -> value.source() == Forge1201MixinAnalyzer.RefmapLookupSource.AT_TARGET
+                        && value.sourceLocation().equals("slice[0].from.target"))
+                .findFirst().orElseThrow();
+        assertEquals(Forge1201MixinAnalyzer.RefmapLookupStatus.ENTRY_FOUND, sliceRefmapLookup.status());
+        assertEquals("Lx;func_2()V", sliceRefmapLookup.mappedReferenceValue());
         assertTrue(Forge1201PreflightAnalyzer.toJson(result).contains("\"slices\""));
         assertTrue(Forge1201PreflightAnalyzer.toJson(result).contains("\"mixinAnalysis\""));
         assertTrue(Forge1201PreflightAnalyzer.toText(result).contains("Mixin analysis (1 configs, 1 mixin classes, 1 target selectors)"));
         assertTrue(Forge1201PreflightAnalyzer.toText(result).contains("@Slice[0] id=preflight-slice"));
         assertTrue(Forge1201PreflightAnalyzer.toText(result).contains("@Slice.from declared=true"));
+        assertTrue(Forge1201PreflightAnalyzer.toText(result).contains("Mixin refmap lookup correlation"));
         assertEquals(1, result.mixinAnalysis().refmapResources().size());
         var refmap = result.mixinAnalysis().refmapResources().getFirst();
         assertEquals("sample.refmap.json", refmap.resourcePath());
