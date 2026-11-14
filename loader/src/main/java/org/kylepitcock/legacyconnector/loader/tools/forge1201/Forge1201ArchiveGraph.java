@@ -311,7 +311,7 @@ public final class Forge1201ArchiveGraph {
             ZipEntry neoEntry = findEntry(zip, "META-INF/neoforge.mods.toml");
             if (neoEntry != null) {
                 String toml = readZipEntry(zip, neoEntry, MAX_METADATA_BYTES);
-                List<Forge1201JarInfo.Mod> mods = Forge1201JarInspector.readModMetadata(toml);
+                List<Forge1201JarInfo.Mod> mods = Forge1201JarInspector.readNeoForgeModMetadata(toml);
                 return new InstalledRoot("NEOFORGE", mods);
             }
             ZipEntry forgeEntry = findEntry(zip, "META-INF/mods.toml");
@@ -665,7 +665,7 @@ public final class Forge1201ArchiveGraph {
         List<String> warnings = new ArrayList<>();
         warnings.addAll(snapshot.warnings());
         if (snapshot.neoForgeModsToml() != null) {
-            List<Forge1201JarInfo.Mod> mods = Forge1201JarInspector.readModMetadata(snapshot.neoForgeModsToml());
+            List<Forge1201JarInfo.Mod> mods = Forge1201JarInspector.readNeoForgeModMetadata(snapshot.neoForgeModsToml());
             if (!mods.isEmpty()) return new ParsedArchive(ArchiveKind.NEOFORGE_MOD, "NEOFORGE", mods, warnings);
             warnings.add("NeoForge metadata exists but no scalar mod declarations were recognized.");
             return new ParsedArchive(ArchiveKind.LIBRARY_OR_UNRECOGNIZED, "NEOFORGE_UNRECOGNIZED", List.of(), warnings);
