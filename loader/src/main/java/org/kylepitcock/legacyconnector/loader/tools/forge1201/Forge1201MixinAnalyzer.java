@@ -677,6 +677,11 @@ public final class Forge1201MixinAnalyzer {
             warnings.add("Mixin aliases are only supported for private members; this source member is not private.");
             invalidAnnotationValue = true;
         }
+        if ((kind == MemberAnnotationKind.ACCESSOR || kind == MemberAnnotationKind.INVOKER)
+                && (sourceAccess & Opcodes.ACC_ABSTRACT) == 0) {
+            warnings.add(kind + " methods must be abstract.");
+            invalidAnnotationValue = true;
+        }
 
         boolean validDescriptor = isValidMemberDescriptor(elementKind, sourceDescriptor);
         if (!validDescriptor) {
