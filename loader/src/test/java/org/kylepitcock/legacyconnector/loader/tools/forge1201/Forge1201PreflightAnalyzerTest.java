@@ -181,6 +181,10 @@ final class Forge1201PreflightAnalyzerTest {
                         && reference.owner().equals("net/minecraft/world/item/ItemStack")
                         && reference.context().startsWith("class-annotation:")
                         && reference.instructionOrdinal() == -1));
+        assertTrue(result.dynamicReferences().stream()
+                .filter(reference -> reference.context().startsWith("class-annotation:"))
+                .allMatch(reference -> reference.archivePath().equals("source/fixture.jar!/nested.jar")
+                        && reference.classEntryPath().equals("fixture/StructuralReferences.class")));
         assertTrue(result.dynamicReferences().stream().anyMatch(reference ->
                 reference.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.CLASS_LITERAL
                         && reference.owner().equals("net/minecraft/client/Minecraft")
