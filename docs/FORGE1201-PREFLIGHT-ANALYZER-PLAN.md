@@ -747,8 +747,10 @@ The integration batch begins from the last user-synced documentation checkpoint 
 - `7ce6917469aacf8896eebe7d44e2b3bb5bc69619` — Gradle target compile-classpath handoff.
 - `79148fb5533bafe655c8cb7e802e284a83da9b7a` — preflight integration tests.
 - `97d35ae727ecb63142bce9cdde714f4e4af98e6b` — scope the classpath-list file in the task argument provider.
+- `d6c50831efd1d6b2bb6f1ec2b67d53925ab35d11` — clarify that only mapped Mixin target-class presence is checked in this increment; general API member verification remains future work.
+- `777b2059565fa1d1f74a1d5c806557c7973c6413` — correct the Mixin analyzer class-level scope comment now that unified preflight consumes its result.
 
-Latest verified feature-branch HEAD at this update: `97d35ae727ecb63142bce9cdde714f4e4af98e6b`. The compare against `0d3d04a...` is six commits ahead and zero behind; the six commits update five implementation/test files.
+Latest verified feature-branch HEAD at this update: `777b2059565fa1d1f74a1d5c806557c7973c6413`. The implementation compare against `0d3d04a...` initially showed six commits ahead and zero behind; two documentation/scope-correction commits followed. The branch is still a fast-forward from the user's last confirmed local base.
 
 The user's last confirmed green loader test remains at `90daa1ee78d2de73ff44e27ffd01ba6e126858f4` (`BUILD SUCCESSFUL in 57s`, 14 actionable tasks executed). **The Schema 1.4 integration and new regression tests have not yet been compiled or run in the user's Gradle environment. Do not claim this increment passes until the next forced test output is reviewed.**
 
