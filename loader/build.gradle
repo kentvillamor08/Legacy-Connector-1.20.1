@@ -188,8 +188,8 @@ tasks.withType(JavaCompile).configureEach {
 
 test {
     useJUnitPlatform()
-    dependsOn genBetaMappings
-    classpath += files(betaMappingsDir)
+    dependsOn genBetaMappings, genSrgMojang
+    classpath += files(betaMappingsDir, srgMojangDir)
 }
 
 jar {
