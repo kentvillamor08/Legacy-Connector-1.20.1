@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Analyzer — Slice 3 Design
 
-Status: implementation checkpoint. The dynamic/bootstrap reference batch is committed; nested source-archive bytecode scanning and SRG-to-1.20.1 Mojang-name normalization are prepared in the first integration batch. Structural-reference coverage audit and its broader fixture matrix remain in progress.
+Status: implementation checkpoint. The dynamic/bootstrap reference batch is committed; nested source-archive bytecode scanning and SRG-to-1.20.1 Mojang-name normalization are committed in a494d20a3be797abd3de563fa3672df69e2276da; a follow-up stale-limitation assertion correction is committed in 3c6febb075c32391b6879b0f3ef00c5856e80d51. Structural-reference coverage audit and its broader fixture matrix remain in progress.
 
 ## Goal
 
@@ -174,3 +174,8 @@ Use ASM `ClassWriter` to build bytecode fixtures; do not compile fixture source 
 6. Mixin semantic target/handler analysis remains Slice 4; runtime/gameplay compatibility remains unverified.
 
 Do not overwrite the prior Symbiote Slice 2 run-3 artifacts. Keep Palladium + Alien Evolution isolated from this Universal branch.
+
+
+### Pre-test review correction — 2026-11-14
+
+The first integration commit was followed by commit 3c6febb075c32391b6879b0f3ef00c5856e80d51, which updates the existing limitation assertion to match the now-implemented source-nested Forge/library scan. Both commits remain pending the user's forced loader test gate.

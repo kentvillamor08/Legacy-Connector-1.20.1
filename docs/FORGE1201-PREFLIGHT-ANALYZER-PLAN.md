@@ -1,6 +1,6 @@
 # Forge 1.20.1 Preflight Compatibility Analyzer
 
-**Status:** Slices 1 and 2 are implemented and validated. The first Slice 3 dynamic-reference batch passed the user's forced focused loader test gate at `4457199a4109d774b25a428e7c68e23b4ec3b4ce` (`BUILD SUCCESSFUL in 24s`, 12/12 tasks executed). A follow-on integration batch is prepared to scan safe source-nested class entries through the same ASM inventory and normalize Minecraft SRG member tokens through the generated SrgMojangTable; this batch awaits its own user-run forced test gate. Structural reference coverage remains under audit.
+**Status:** Slices 1 and 2 are implemented and validated. The first Slice 3 dynamic-reference batch passed the user's forced focused loader test gate at `4457199a4109d774b25a428e7c68e23b4ec3b4ce` (`BUILD SUCCESSFUL in 24s`, 12/12 tasks executed). A follow-on integration batch was committed as a494d20a3be797abd3de563fa3672df69e2276da; the test's stale limitation assertion was corrected in 3c6febb075c32391b6879b0f3ef00c5856e80d51. Both commits await the user's forced test gate. Structural reference coverage remains under audit.
 
 **Report filename rule:** every analyzer output filename includes its slice number, e.g. `symbiote-1.1.3.jar-slice-2.json` and `symbiote-1.1.3.jar-slice-2.txt`. Repeated runs append a run number, e.g. `symbiote-1.1.3.jar-slice-2-run-2.json` and `.txt`. Use the root Gradle task's explicit `-PpreflightJson=<path>` and `-PpreflightText=<path>` options. Never overwrite the unsuffixed legacy root filenames or an earlier slice/run. The testbench archive index is `archive/preflight/README.md`.
   
@@ -406,12 +406,17 @@ This confirms the dynamic-reference outer-JAR batch and corrected assertion. The
 
 ### Validation boundary
 
-- Integration source changes are prepared in four source/test blobs but are not yet committed or user-tested. Do not claim that the code compiles or that the new tests pass.
+- The integration batch is committed as a494d20a3be797abd3de563fa3672df69e2276da, followed by the stale-limitation assertion correction in 3c6febb075c32391b6879b0f3ef00c5856e80d51. These changes are not yet user-tested. Do not claim that the code compiles or that the new tests pass.
 - Existing confirmed green checkpoint remains 4457199a4109d774b25a428e7c68e23b4ec3b4ce.
-- Next: commit the reviewed Graph/ASM/Preflight/test/docs batch to the same Universal branch, then give the user a guarded fast-forward + forced :loader:clean :loader:test command. Do not generate a new Symbiote report until the integration forced test gate is green.
+- Next: the user's local checkout is still expected at 4457199a4109d774b25a428e7c68e23b4ec3b4ce. Pull the Universal branch through its latest tip 3c6febb075c32391b6879b0f3ef00c5856e80d51 with path/branch/HEAD/clean-worktree guards, then run the forced :loader:clean :loader:test gate. Do not generate a new Symbiote report until the integration forced test gate is green.
 - The next Symbiote output must use a new run suffix; do not overwrite Slice 2 run-3.
 - Keep the friend Palladium + Alien Evolution worktree/branch untouched.
 
 ### New-chat reminder
 
 Read docs/CHATGPT-CONTINUATION-HANDOFF.md in the testbench repository first. Continue from the integration batch's user test gate; preserve the universal modpack-ready vision and branch isolation.
+
+
+### Pre-test review correction — 2026-11-14
+
+The integration test initially retained an assertion for the previous Slice 3 limitation that nested class bytecode was pending. The report limitation now correctly says the outer source JAR and bounded source-nested Forge/library archives are inventoried. Commit 3c6febb075c32391b6879b0f3ef00c5856e80d51 updates that assertion. The current Universal branch tip is 3c6febb075c32391b6879b0f3ef00c5856e80d51; user validation is still pending.
