@@ -154,7 +154,7 @@ final class Forge1201MixinAnalyzerTest {
         assertEquals(List.of("healthLegacy"), shadowField.aliases());
         assertEquals(List.of("shadow$health", "healthLegacy"), shadowField.targetMemberNameCandidates());
         assertTrue(shadowField.warnings().stream().anyMatch(warning -> warning.contains("prefixes only apply to shadow methods")));
-        assertEquals(Forge1201MixinAnalyzer.MemberResolutionStatus.MEMBER_REMAP_UNRESOLVED,
+        assertEquals(Forge1201MixinAnalyzer.MemberResolutionStatus.INVALID_ANNOTATION_VALUE,
                 shadowField.status());
 
         var shadowMethod = result.memberAnnotations().stream()
@@ -452,7 +452,8 @@ final class Forge1201MixinAnalyzerTest {
             String prefix,
             String[] aliases,
             Boolean remap) {
-        MethodVisitor method = writer.visitMethod(Opcodes.ACC_PUBLIC, name, descriptor, null, null);
+        int access = aliases != null && aliases.length > 0 ? Opcodes.ACC_PRIVATE : Opcodes.ACC_PUBLIC;
+        MethodVisitor method = writer.visitMethod(access, name, descriptor, null, null);
         AnnotationVisitor annotation = method.visitAnnotation(annotationDescriptor, false);
         if (value != null) annotation.visit("value", value);
         if (prefix != null) annotation.visit("prefix", prefix);
