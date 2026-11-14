@@ -48,8 +48,8 @@ final class Forge1201PreflightAnalyzerTest {
                         && candidate.discoveredBy().contains("manifest")));
         assertTrue(first.mixinConfigCandidates().stream().anyMatch(candidate ->
                 candidate.path().equals("config/feature.json")));
-        assertEquals("1.8", first.schemaVersion());
-        assertEquals("1.8.0", first.analyzerVersion());
+        assertEquals("1.9", first.schemaVersion());
+        assertEquals("1.9.0", first.analyzerVersion());
         assertEquals(Forge1201MixinAnalyzer.TargetIndexStatus.UNAVAILABLE_NO_TARGET_CLASSPATH,
                 first.mixinAnalysis().targetIndexStatus());
         assertTrue(first.mixinAnalysis().memberAnnotations().isEmpty());
@@ -137,6 +137,8 @@ final class Forge1201PreflightAnalyzerTest {
         assertEquals(Forge1201PreflightAnalyzer.toJson(first), Forge1201PreflightAnalyzer.toJson(second));
         assertTrue(Forge1201PreflightAnalyzer.toJson(first).contains("\"dynamicReferences\""));
         assertTrue(Forge1201PreflightAnalyzer.toJson(first).contains("\"memberAnnotations\""));
+        assertTrue(Forge1201PreflightAnalyzer.toJson(first).contains("\"refmapResources\""));
+        assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("Mixin refmap resources ("));
         assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("Dynamic / bootstrap references:"));
         assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("Mixin member annotations (0):"));
         assertTrue(Forge1201PreflightAnalyzer.toText(first).contains("Mixin injectors (0):"));
@@ -162,7 +164,24 @@ final class Forge1201PreflightAnalyzerTest {
             put(zip, "META-INF/MANIFEST.MF", manifestBytes.toByteArray());
             put(zip, "mixins.integration.json",
                     """
-                    {"package":"sample.mixin","mixins":["ModListMixin"]}
+                    {"package":"sample.mixin","refmap":"sample.refmap.json","mixins":["ModListMixin"]}
+                    """.getBytes(StandardCharsets.UTF_8));
+            put(zip, "sample.refmap.json",
+                    """
+                    {
+                      "mappings": {
+                        "sample/mixin/ModListMixin": {
+                          "Lnet/minecraftforge/fml/ModList;get()V": "Lx;get()V"
+                        }
+                      },
+                      "data": {
+                        "synthetic-context": {
+                          "sample/mixin/ModListMixin": {
+                            "Lnet/minecraftforge/fml/ModList;get()V": "Lx;func_1()V"
+                          }
+                        }
+                      }
+                    }
                     """.getBytes(StandardCharsets.UTF_8));
             put(zip, "sample/mixin/ModListMixin.class",
                     mixinTargetClass("sample/mixin/ModListMixin", "net.minecraftforge.fml.ModList"));
@@ -188,6 +207,17 @@ final class Forge1201PreflightAnalyzerTest {
         assertTrue(Forge1201PreflightAnalyzer.toText(result).contains("Mixin analysis (1 configs, 1 mixin classes, 1 target selectors)"));
         assertTrue(Forge1201PreflightAnalyzer.toText(result).contains("@Slice[0] id=preflight-slice"));
         assertTrue(Forge1201PreflightAnalyzer.toText(result).contains("@Slice.from declared=true"));
+        assertEquals(1, result.mixinAnalysis().refmapResources().size());
+        var refmap = result.mixinAnalysis().refmapResources().getFirst();
+        assertEquals("sample.refmap.json", refmap.resourcePath());
+        assertEquals(Forge1201MixinAnalyzer.RefmapResourceStatus.PARSED, refmap.status());
+        assertEquals(List.of("synthetic-context"), refmap.contextKeys());
+        assertTrue(refmap.declaredSizeBytes() > 0);
+        assertEquals(refmap.inflatedSizeBytes(), refmap.declaredSizeBytes());
+        assertTrue(refmap.compressedSizeBytes() >= 0);
+        assertTrue(refmap.inflatedSizeBytes() > 0);
+        assertTrue(Forge1201PreflightAnalyzer.toText(result).contains("sample.refmap.json"));
+        assertTrue(Forge1201PreflightAnalyzer.toText(result).contains("synthetic-context"));
     }
 
     @Test

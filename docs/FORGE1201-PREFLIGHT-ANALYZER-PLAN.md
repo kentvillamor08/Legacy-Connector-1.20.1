@@ -1,4 +1,4 @@
-**Current checkpoint — 2026-11-14:** Slice 4 Mixin preflight has passed the user-forced loader test gate through Schema 1.8 at commit `4b4f9ce437671f08eafd3f9cf4a18e34a3d24284` (`BUILD SUCCESSFUL in 33s; 14/14 actionable tasks executed`). The Mixin 0.8.5 refmap contract has now been audited and the Schema 1.9 design is documented in `docs/FORGE1201-PREFLIGHT-SCHEMA-1.9-REFMAP-DESIGN.md`. This is a docs/research checkpoint; Schema 1.9 code and tests have not started. The design preserves opaque obfuscation contexts, owner-scoped exact key lookup, correct context fallback semantics, plugin/wrapper boundaries, and explicit namespace provenance. Schema 1.8 test success does not establish runtime Mixin application or mod compatibility.
+**Current checkpoint — 2026-11-14:** Slice 4 Mixin preflight passed the user-forced loader test gate through Schema 1.8 at commit `4b4f9ce437671f08eafd3f9cf4a18e34a3d24284` (`BUILD SUCCESSFUL in 33s; 14/14 actionable tasks executed`). The Mixin 0.8.5 refmap contract is pinned in `docs/FORGE1201-PREFLIGHT-SCHEMA-1.9-REFMAP-DESIGN.md`. Schema 1.9A resource/table inventory code and synthetic tests have now been added in the current branch change set, including explicit/default/plugin-dependent resource provenance, strict base/context table parsing, duplicate-key rejection, bounded bytes, and inert `refmapWrapper` metadata. **The new batch has not yet been compiled or run by Gradle; Schema 1.8 remains the latest green gate.** Schema 1.9A does not correlate selectors or resolve namespaces. Static test success at earlier schemas does not establish runtime Mixin application or mod compatibility.
 
 ---
 
@@ -1030,3 +1030,35 @@ Implement Schema 1.9A first: bounded resource resolution and parse/inventory of 
 After 1.9A is green, implement Schema 1.9B owner-scoped exact lookup correlation. Runtime context must be explicitly supplied to select one context; otherwise inventory all available contexts. Add regression coverage for absent-context fallback versus present-context/missing-entry behavior. Keep namespace translation as a later stage requiring explicit mapping profiles.
 
 The Schema 1.8 green gate remains the latest user-run test checkpoint. Schema 1.9 is not implemented or tested yet.
+
+
+---
+
+## 2026-11-14 — Schema 1.9A refmap resource/table inventory implemented (validation pending)
+
+### Source changes in the Schema 1.9A branch change set
+
+- Forge1201MixinAnalyzer.Result now carries immutable refmap resource, table, and entry findings.
+- Config selection distinguishes an explicit refmap path, Mixin's mixin.refmap.json default candidate, and a plugin-dependent default candidate when a plugin exists but no path is declared. The default path remains only a candidate when plugin code may provide a different one.
+- refmapWrapper is retained as inert metadata and never loaded, instantiated, initialized, or executed.
+- The analyzer parses base mappings and opaque data[context] tables with exact owner/reference/value strings. It preserves raw keys and values and does not classify all mapped strings as methods.
+- Strict UTF-8 / JSON validation rejects duplicate object member names before Gson parsing. Wrong root/map/value types remain explicit unsupported-shape results. Unknown top-level fields are reported by name.
+- Refmap reads reuse the existing outer-archive entry index and bounded readBounded reader. Resource/path/aggregate/context/owner/entry and 128-level JSON nesting caps are surfaced as explicit statuses. SHA-256, config/origin provenance, ZIP-declared size, compressed size, and inflated bytes are recorded where available.
+- JSON serialization uses the existing result record. Text output prints resource/table/entry inventory. The unified report version advances to 1.9 / 1.9.0.
+- Synthetic tests cover base + multiple context tables, shared path across configs, explicit wrapper metadata, default and plugin-dependent candidates, duplicate JSON keys, unsupported shapes/non-string values, per-resource and aggregate byte caps, JSON nesting depth, deterministic results, and context limit behavior. Unified preflight tests assert schema version, JSON/text exposure, and a real synthetic refmap inventory.
+
+### Scope and validation boundary
+
+This is **Schema 1.9A only**. It does not add selector lookup correlation, AP whitespace-normalization matching, explicit runtime context selection, context fallback simulation, namespace conversion, target member checks, or runtime Mixin execution. Those remain Schema 1.9B/later mapping work.
+
+The code and tests are not yet locally compiled or executed. The last user-confirmed green test checkpoint remains Schema 1.8 at 4b4f9ce437671f08eafd3f9cf4a18e34a3d24284.
+
+### Exact next validation action
+
+After this batch is committed and the guarded local fast-forward is verified, run:
+
+```powershell
+.\gradlew.bat :loader:clean :loader:test --no-daemon --console=plain --rerun-tasks
+```
+
+Do not mark Schema 1.9A green or begin 1.9B until this full forced loader test gate passes. If it fails, diagnose the actual compiler/test failure, make the smallest source correction, and rerun the same forced gate from the updated exact commit. Runtime client/server and modpack testing remain separate later gates.

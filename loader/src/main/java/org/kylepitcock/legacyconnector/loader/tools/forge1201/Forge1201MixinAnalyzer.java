@@ -3,20 +3,31 @@ package org.kylepitcock.legacyconnector.loader.tools.forge1201;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonParseException;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.StringReader;
+import java.nio.ByteBuffer;
+import java.nio.charset.CodingErrorAction;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import org.objectweb.asm.ClassReader;
@@ -33,10 +44,11 @@ import org.objectweb.asm.tree.MethodNode;
  * <p>This implementation analyzes the outer source archive only. It resolves declared config
  * resources and mixin class entries, reads visible/invisible @Mixin and member annotations, and
  * inventories source-side handler and selector data for core injectors, including detailed @At
- * metadata and typed @ModifyConstant discriminators, and @Slice from/to boundary metadata. It checks mapped class targets through the shared
- * target index but never loads or executes mod classes or Mixin plugins. Nested archive resources,
- * semantic refmap remapping, target instruction resolution, and
- * injector handler stack validation remain later increments. Unified preflight consumes this result API.</p>
+ * metadata, typed @ModifyConstant discriminators, @Slice boundaries, and bounded Mixin 0.8.5
+ * refmap table contents. It checks mapped class targets through the shared target index but never
+ * loads or executes mod classes, Mixin plugins, or custom refmap wrappers. Namespace conversion,
+ * target instruction resolution, and injector handler stack validation remain later increments.
+ * Unified preflight consumes this result API.</p>
  */
 public final class Forge1201MixinAnalyzer {
     public static final int MAX_ARCHIVE_ENTRIES = 100_000;
@@ -46,6 +58,14 @@ public final class Forge1201MixinAnalyzer {
     public static final int MAX_MIXIN_CLASS_COUNT = 20_000;
     public static final int MAX_CLASS_BYTES = 8 * 1024 * 1024;
     public static final long MAX_TOTAL_CLASS_BYTES = 128L * 1024 * 1024;
+    public static final int MAX_REFMAP_RESOURCE_PATHS = 256;
+    public static final int MAX_REFMAP_BYTES = 1024 * 1024;
+    public static final long MAX_TOTAL_REFMAP_BYTES = 8L * 1024 * 1024;
+    public static final int MAX_REFMAP_CONTEXTS_PER_RESOURCE = 64;
+    public static final int MAX_REFMAP_OWNER_BUCKETS_PER_RESOURCE = 20_000;
+    public static final int MAX_REFMAP_ENTRIES_PER_RESOURCE = 100_000;
+    public static final int MAX_REFMAP_JSON_DEPTH = 128;
+    public static final String DEFAULT_REFMAP_RESOURCE = "mixin.refmap.json";
 
     private static final String MIXIN_ANNOTATION = "Lorg/spongepowered/asm/mixin/Mixin;";
     private static final String SHADOW_ANNOTATION = "Lorg/spongepowered/asm/mixin/Shadow;";
@@ -115,6 +135,7 @@ public final class Forge1201MixinAnalyzer {
         DUPLICATE_ENTRY,
         LIMIT_EXCEEDED,
         INVALID_JSON,
+        UNSUPPORTED_SHAPE,
         ARCHIVE_INDEX_INCOMPLETE
     }
 
@@ -125,6 +146,37 @@ public final class Forge1201MixinAnalyzer {
         INVALID_CLASS_NAME,
         DUPLICATE_ENTRY,
         ARCHIVE_INDEX_INCOMPLETE
+    }
+
+    public enum RefmapSelection {
+        NOT_ANALYZED,
+        EXPLICIT_RESOURCE,
+        DEFAULT_RESOURCE,
+        PLUGIN_DEPENDENT,
+        INVALID_DECLARATION
+    }
+
+    public enum RefmapResourceOrigin {
+        EXPLICIT_CONFIG_FIELD,
+        MIXIN_DEFAULT_CANDIDATE,
+        PLUGIN_DEPENDENT_CANDIDATE
+    }
+
+    public enum RefmapResourceStatus {
+        PARSED,
+        EMPTY,
+        MISSING,
+        INVALID_PATH,
+        DUPLICATE_ENTRY,
+        LIMIT_EXCEEDED,
+        INVALID_JSON,
+        UNSUPPORTED_SHAPE,
+        ARCHIVE_INDEX_INCOMPLETE
+    }
+
+    public enum RefmapTableKind {
+        BASE_MAPPINGS,
+        CONTEXT
     }
 
     public record ConfigDeclaration(String path, DiscoverySource source) {
@@ -146,10 +198,59 @@ public final class Forge1201MixinAnalyzer {
             String pluginClass,
             PluginStatus pluginStatus,
             String refmapPath,
+            String refmapWrapperClass,
+            RefmapSelection refmapSelection,
+            String refmapCandidatePath,
             ResourceStatus refmapStatus,
             List<String> warnings) {
         public ConfigFinding {
             discoverySources = List.copyOf(discoverySources);
+            warnings = List.copyOf(warnings);
+        }
+    }
+
+    public record RefmapEntryFinding(
+            String ownerInternalName,
+            String referenceKey,
+            String mappedReferenceValue) {}
+
+    public record RefmapTableFinding(
+            RefmapTableKind kind,
+            String contextKey,
+            int ownerBucketCount,
+            int entryCount,
+            List<RefmapEntryFinding> entries,
+            List<String> warnings) {
+        public RefmapTableFinding {
+            entries = List.copyOf(entries);
+            warnings = List.copyOf(warnings);
+        }
+    }
+
+    public record RefmapResourceFinding(
+            String archivePath,
+            String resourcePath,
+            List<String> configPaths,
+            List<RefmapResourceOrigin> origins,
+            RefmapResourceStatus status,
+            long declaredSizeBytes,
+            long compressedSizeBytes,
+            long inflatedSizeBytes,
+            String sha256,
+            boolean mappingsPresent,
+            boolean dataPresent,
+            List<String> contextKeys,
+            int ownerBucketCount,
+            int entryCount,
+            List<String> unknownTopLevelFields,
+            List<RefmapTableFinding> tables,
+            List<String> warnings) {
+        public RefmapResourceFinding {
+            configPaths = List.copyOf(configPaths);
+            origins = List.copyOf(origins);
+            contextKeys = List.copyOf(contextKeys);
+            unknownTopLevelFields = List.copyOf(unknownTopLevelFields);
+            tables = List.copyOf(tables);
             warnings = List.copyOf(warnings);
         }
     }
@@ -369,6 +470,7 @@ public final class Forge1201MixinAnalyzer {
             List<TargetFinding> targets,
             List<MemberAnnotationFinding> memberAnnotations,
             List<InjectorFinding> injectors,
+            List<RefmapResourceFinding> refmapResources,
             List<String> warnings) {
         public Result {
             configs = List.copyOf(configs);
@@ -376,6 +478,7 @@ public final class Forge1201MixinAnalyzer {
             targets = List.copyOf(targets);
             memberAnnotations = List.copyOf(memberAnnotations);
             injectors = List.copyOf(injectors);
+            refmapResources = List.copyOf(refmapResources);
             warnings = List.copyOf(warnings);
         }
     }
@@ -389,10 +492,30 @@ public final class Forge1201MixinAnalyzer {
             String compatibilityLevel,
             String pluginClass,
             String refmapPath,
+            String refmapWrapperClass,
+            boolean refmapFieldPresent,
+            boolean refmapFieldValid,
             Map<String, List<String>> mixins,
             List<String> warnings) {}
 
     private record ParsedTarget(String selector, TargetSelectorForm form) {}
+
+    private static final class RefmapCandidateAccumulator {
+        private final Set<String> configPaths = new TreeSet<>();
+        private final Set<RefmapResourceOrigin> origins = new TreeSet<>();
+    }
+
+    private static final class RefmapBudget {
+        private long inflatedBytes;
+    }
+
+    private static final class RefmapParseState {
+        private int ownerBucketCount;
+        private int entryCount;
+        private boolean limitExceeded;
+        private boolean unsupportedShape;
+        private final List<String> warnings = new ArrayList<>();
+    }
 
     /**
      * Analyze declared and heuristic config candidates. Minecraft class targets are only checked
@@ -448,6 +571,7 @@ public final class Forge1201MixinAnalyzer {
             long totalClassBytes = 0;
             int processedConfigs = 0;
             int processedMixins = 0;
+            Map<String, RefmapCandidateAccumulator> refmapCandidates = new TreeMap<>();
 
             for (Map.Entry<String, LinkedHashSet<DiscoverySource>> candidate : grouped.entrySet()) {
                 String configPath = candidate.getKey();
@@ -508,13 +632,42 @@ public final class Forge1201MixinAnalyzer {
                 configWarnings.addAll(parsed.warnings());
 
                 PluginStatus pluginStatus = inspectPlugin(parsed.pluginClass(), entries, archiveEntryIndexIncomplete);
-                ResourceStatus refmapStatus = inspectRefmap(
-                        parsed.refmapPath(), entries, zip, archiveEntryIndexIncomplete);
+                RefmapSelection refmapSelection;
+                RefmapResourceOrigin refmapOrigin = null;
+                String refmapCandidatePath = null;
+                if (parsed.refmapFieldPresent() && !parsed.refmapFieldValid()) {
+                    refmapSelection = RefmapSelection.INVALID_DECLARATION;
+                } else if (parsed.refmapFieldPresent()) {
+                    refmapSelection = RefmapSelection.EXPLICIT_RESOURCE;
+                    refmapCandidatePath = parsed.refmapPath();
+                    refmapOrigin = RefmapResourceOrigin.EXPLICIT_CONFIG_FIELD;
+                } else if (parsed.pluginClass() != null && !parsed.pluginClass().isBlank()) {
+                    refmapSelection = RefmapSelection.PLUGIN_DEPENDENT;
+                    refmapCandidatePath = DEFAULT_REFMAP_RESOURCE;
+                    refmapOrigin = RefmapResourceOrigin.PLUGIN_DEPENDENT_CANDIDATE;
+                    configWarnings.add("A declared Mixin plugin may provide a different refmap resource path at runtime; "
+                            + "mixin.refmap.json is only a non-authoritative static candidate. Plugin code was not executed.");
+                } else {
+                    refmapSelection = RefmapSelection.DEFAULT_RESOURCE;
+                    refmapCandidatePath = DEFAULT_REFMAP_RESOURCE;
+                    refmapOrigin = RefmapResourceOrigin.MIXIN_DEFAULT_CANDIDATE;
+                }
+                if (refmapCandidatePath != null) {
+                    RefmapCandidateAccumulator accumulator = refmapCandidates.computeIfAbsent(
+                            refmapCandidatePath, ignored -> new RefmapCandidateAccumulator());
+                    accumulator.configPaths.add(configPath);
+                    accumulator.origins.add(refmapOrigin);
+                }
+                if (parsed.refmapWrapperClass() != null) {
+                    configWarnings.add("Custom refmapWrapper '" + parsed.refmapWrapperClass()
+                            + "' is preserved as metadata but is never loaded or executed by preflight.");
+                }
                 configFindings.add(new ConfigFinding(
                         archivePath, configPath, sources, ConfigStatus.PARSED,
                         parsed.packageName(), parsed.required(), parsed.minimumVersion(),
                         parsed.compatibilityLevel(), parsed.pluginClass(), pluginStatus,
-                        parsed.refmapPath(), refmapStatus, configWarnings));
+                        parsed.refmapPath(), parsed.refmapWrapperClass(), refmapSelection,
+                        refmapCandidatePath, ResourceStatus.NOT_DECLARED, configWarnings));
 
                 boolean pluginDependent = parsed.pluginClass() != null;
                 for (String section : List.of("mixins", "client", "server")) {
@@ -624,6 +777,25 @@ public final class Forge1201MixinAnalyzer {
                 }
             }
 
+            List<RefmapResourceFinding> refmapFindings = inspectRefmapResources(
+                    archivePath, refmapCandidates, entries, zip, archiveEntryIndexIncomplete);
+            Map<String, RefmapResourceFinding> refmapsByPath = new HashMap<>();
+            for (RefmapResourceFinding finding : refmapFindings) {
+                refmapsByPath.put(finding.resourcePath(), finding);
+            }
+            configFindings = configFindings.stream().map(finding -> {
+                if (finding.refmapPath() == null) return finding;
+                RefmapResourceFinding resource = refmapsByPath.get(finding.refmapPath());
+                ResourceStatus legacyStatus = resource == null
+                        ? ResourceStatus.NOT_DECLARED : toLegacyResourceStatus(resource.status());
+                return new ConfigFinding(
+                        finding.archivePath(), finding.configPath(), finding.discoverySources(), finding.status(),
+                        finding.packageName(), finding.required(), finding.minimumVersion(),
+                        finding.compatibilityLevel(), finding.pluginClass(), finding.pluginStatus(),
+                        finding.refmapPath(), finding.refmapWrapperClass(), finding.refmapSelection(),
+                        finding.refmapCandidatePath(), legacyStatus, finding.warnings());
+            }).toList();
+
             configFindings.sort(Comparator.comparing(ConfigFinding::configPath));
             classFindings.sort(Comparator.comparing(MixinClassFinding::configPath)
                     .thenComparing(MixinClassFinding::section)
@@ -649,7 +821,7 @@ public final class Forge1201MixinAnalyzer {
                     targetIndex == null ? TargetIndexStatus.UNAVAILABLE_NO_TARGET_CLASSPATH
                             : TargetIndexStatus.AVAILABLE,
                     configFindings, classFindings, targetFindings, memberFindings, injectorFindings,
-                    warnings.stream().distinct().sorted().toList());
+                    refmapFindings, warnings.stream().distinct().sorted().toList());
         }
     }
 
@@ -658,7 +830,8 @@ public final class Forge1201MixinAnalyzer {
             ConfigStatus status, String warning) {
         return new ConfigFinding(archivePath, configPath, sources, status,
                 null, null, null, null, null, PluginStatus.NOT_DECLARED,
-                null, ResourceStatus.NOT_DECLARED, List.of(warning));
+                null, null, RefmapSelection.NOT_ANALYZED, null,
+                ResourceStatus.NOT_DECLARED, List.of(warning));
     }
 
     private static ParsedConfig parseConfig(byte[] bytes) {
@@ -691,6 +864,16 @@ public final class Forge1201MixinAnalyzer {
             names.sort(String::compareTo);
             mixins.put(section, List.copyOf(names));
         }
+        boolean refmapFieldPresent = object.has("refmap");
+        boolean refmapFieldValid = !refmapFieldPresent || isJsonString(object.get("refmap"));
+        if (refmapFieldPresent && !refmapFieldValid) {
+            warnings.add("Config field 'refmap' is present but is not a JSON string; resource selection is unresolved.");
+        }
+        boolean wrapperFieldPresent = object.has("refmapWrapper");
+        boolean wrapperFieldValid = !wrapperFieldPresent || isJsonString(object.get("refmapWrapper"));
+        if (wrapperFieldPresent && !wrapperFieldValid) {
+            warnings.add("Config field 'refmapWrapper' is present but is not a JSON string; wrapper metadata is unavailable.");
+        }
         return new ParsedConfig(
                 packageName,
                 booleanValue(object, "required"),
@@ -698,6 +881,9 @@ public final class Forge1201MixinAnalyzer {
                 stringValue(object, "compatibilityLevel"),
                 stringValue(object, "plugin"),
                 stringValue(object, "refmap"),
+                stringValue(object, "refmapWrapper"),
+                refmapFieldPresent,
+                refmapFieldValid,
                 Map.copyOf(mixins),
                 List.copyOf(warnings));
     }
@@ -715,22 +901,293 @@ public final class Forge1201MixinAnalyzer {
         return PluginStatus.PRESENT_NOT_EXECUTED;
     }
 
-    private static ResourceStatus inspectRefmap(
-            String refmapPath, Map<String, IndexedEntry> entries, ZipFile zip, boolean archiveIndexIncomplete) {
-        if (refmapPath == null || refmapPath.isBlank()) return ResourceStatus.NOT_DECLARED;
-        if (!isSafeArchivePath(refmapPath)) return ResourceStatus.INVALID_PATH;
-        IndexedEntry entry = entries.get(refmapPath);
-        if (entry == null) return archiveIndexIncomplete
-                ? ResourceStatus.ARCHIVE_INDEX_INCOMPLETE : ResourceStatus.MISSING;
-        if (entry.occurrences() != 1) return ResourceStatus.DUPLICATE_ENTRY;
+    private static List<RefmapResourceFinding> inspectRefmapResources(
+            String archivePath,
+            Map<String, RefmapCandidateAccumulator> candidates,
+            Map<String, IndexedEntry> entries,
+            ZipFile zip,
+            boolean archiveIndexIncomplete) {
+        List<RefmapResourceFinding> findings = new ArrayList<>();
+        RefmapBudget budget = new RefmapBudget();
+        int resourceIndex = 0;
+        for (Map.Entry<String, RefmapCandidateAccumulator> candidate : new TreeMap<>(candidates).entrySet()) {
+            String path = candidate.getKey();
+            RefmapCandidateAccumulator accumulator = candidate.getValue();
+            List<String> configPaths = accumulator.configPaths.stream().sorted().toList();
+            List<RefmapResourceOrigin> origins = accumulator.origins.stream().sorted().toList();
+            if (resourceIndex++ >= MAX_REFMAP_RESOURCE_PATHS) {
+                findings.add(refmapResourceFailure(
+                        archivePath, path, configPaths, origins, RefmapResourceStatus.LIMIT_EXCEEDED,
+                        "Distinct refmap resource path limit (" + MAX_REFMAP_RESOURCE_PATHS + ") was reached."));
+                continue;
+            }
+            findings.add(inspectRefmapResource(
+                    archivePath, path, configPaths, origins, entries, zip, archiveIndexIncomplete, budget));
+        }
+        return findings.stream().sorted(Comparator.comparing(RefmapResourceFinding::resourcePath)).toList();
+    }
+
+    private static RefmapResourceFinding inspectRefmapResource(
+            String archivePath,
+            String path,
+            List<String> configPaths,
+            List<RefmapResourceOrigin> origins,
+            Map<String, IndexedEntry> entries,
+            ZipFile zip,
+            boolean archiveIndexIncomplete,
+            RefmapBudget budget) {
+        if (!isSafeArchivePath(path)) {
+            return refmapResourceFailure(archivePath, path, configPaths, origins,
+                    RefmapResourceStatus.INVALID_PATH, "Refmap resource path is absolute, traversing, empty, or malformed.");
+        }
+        IndexedEntry indexed = entries.get(path);
+        if (indexed == null) {
+            return refmapResourceFailure(archivePath, path, configPaths, origins,
+                    archiveIndexIncomplete ? RefmapResourceStatus.ARCHIVE_INDEX_INCOMPLETE : RefmapResourceStatus.MISSING,
+                    archiveIndexIncomplete
+                            ? "Archive entry index was truncated; refmap presence cannot be established."
+                            : "Candidate refmap resource is absent from the source archive.");
+        }
+        if (indexed.occurrences() != 1) {
+            return refmapResourceFailure(archivePath, path, configPaths, origins,
+                    RefmapResourceStatus.DUPLICATE_ENTRY, "Multiple ZIP entries use the same refmap path.");
+        }
+
+        long remainingBudget = MAX_TOTAL_REFMAP_BYTES - budget.inflatedBytes;
+        int readLimit = (int) Math.min((long) MAX_REFMAP_BYTES, Math.max(0L, remainingBudget));
+        if (readLimit == 0) {
+            return refmapResourceFailure(archivePath, path, configPaths, origins,
+                    RefmapResourceStatus.LIMIT_EXCEEDED, "Aggregate refmap inflated-byte budget was exhausted.");
+        }
+        final byte[] bytes;
         try {
-            byte[] bytes = readBounded(zip, entry.entry(), MAX_CONFIG_BYTES);
-            JsonElement json = JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8));
-            return json.isJsonObject() ? ResourceStatus.PRESENT_VALID_JSON : ResourceStatus.INVALID_JSON;
+            bytes = readBounded(zip, indexed.entry(), readLimit);
         } catch (EntryLimitException exception) {
-            return ResourceStatus.LIMIT_EXCEEDED;
-        } catch (RuntimeException | IOException exception) {
-            return ResourceStatus.INVALID_JSON;
+            budget.inflatedBytes += exception.bytesRead();
+            return new RefmapResourceFinding(
+                    archivePath, path, configPaths, origins, RefmapResourceStatus.LIMIT_EXCEEDED,
+                    indexed.entry().getSize(), indexed.entry().getCompressedSize(),
+                    exception.bytesRead(), null, false, false, List.of(), 0, 0, List.of(), List.of(),
+                    List.of(exception.getMessage() + " Refmap parsing was not completed."));
+        } catch (IOException exception) {
+            return refmapResourceFailure(archivePath, path, configPaths, origins,
+                    RefmapResourceStatus.INVALID_JSON, "Refmap resource could not be read: " + conciseMessage(exception));
+        }
+        budget.inflatedBytes += bytes.length;
+        String digest = sha256(bytes);
+
+        final JsonElement parsed;
+        try {
+            String jsonText = StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(CodingErrorAction.REPORT)
+                    .decode(ByteBuffer.wrap(bytes)).toString();
+            validateJsonWithoutDuplicateMembers(jsonText);
+            parsed = JsonParser.parseString(jsonText);
+        } catch (IOException | RuntimeException exception) {
+            return new RefmapResourceFinding(
+                    archivePath, path, configPaths, origins, RefmapResourceStatus.INVALID_JSON,
+                    indexed.entry().getSize(), indexed.entry().getCompressedSize(),
+                    bytes.length, digest, false, false, List.of(), 0, 0, List.of(), List.of(),
+                    List.of("Refmap is not strict UTF-8 JSON or contains duplicate object member names: "
+                            + conciseMessage(exception)));
+        }
+        if (!parsed.isJsonObject()) {
+            return new RefmapResourceFinding(
+                    archivePath, path, configPaths, origins, RefmapResourceStatus.UNSUPPORTED_SHAPE,
+                    indexed.entry().getSize(), indexed.entry().getCompressedSize(),
+                    bytes.length, digest, false, false, List.of(), 0, 0, List.of(), List.of(),
+                    List.of("Refmap root must be a JSON object."));
+        }
+
+        JsonObject root = parsed.getAsJsonObject();
+        boolean mappingsPresent = root.has("mappings");
+        boolean dataPresent = root.has("data");
+        List<String> unknownFields = root.keySet().stream()
+                .filter(key -> !key.equals("mappings") && !key.equals("data"))
+                .sorted().toList();
+        RefmapParseState state = new RefmapParseState();
+        List<RefmapTableFinding> tables = new ArrayList<>();
+        if (!unknownFields.isEmpty()) {
+            state.warnings.add("Unknown top-level refmap fields were retained as names only: " + unknownFields);
+        }
+
+        JsonElement mappingsElement = root.get("mappings");
+        if (mappingsPresent) {
+            if (mappingsElement != null && mappingsElement.isJsonObject()) {
+                tables.add(parseRefmapTable(
+                        mappingsElement.getAsJsonObject(), RefmapTableKind.BASE_MAPPINGS, null, state));
+            } else {
+                state.unsupportedShape = true;
+                state.warnings.add("Top-level 'mappings' must be an owner-to-reference JSON object.");
+            }
+        }
+
+        List<String> contextKeys = List.of();
+        JsonElement dataElement = root.get("data");
+        if (dataPresent) {
+            if (dataElement == null || !dataElement.isJsonObject()) {
+                state.unsupportedShape = true;
+                state.warnings.add("Top-level 'data' must be a context-to-owner JSON object.");
+            } else {
+                JsonObject contextObject = dataElement.getAsJsonObject();
+                contextKeys = contextObject.keySet().stream().sorted().toList();
+                boolean contextLimitExceeded = contextKeys.size() > MAX_REFMAP_CONTEXTS_PER_RESOURCE;
+                if (contextLimitExceeded) {
+                    state.warnings.add("Context table limit (" + MAX_REFMAP_CONTEXTS_PER_RESOURCE
+                            + ") was reached; remaining context tables are inventoried by key only.");
+                }
+                int parsedContexts = 0;
+                for (String contextKey : contextKeys) {
+                    if (parsedContexts >= MAX_REFMAP_CONTEXTS_PER_RESOURCE) break;
+                    JsonElement tableElement = contextObject.get(contextKey);
+                    if (tableElement == null || !tableElement.isJsonObject()) {
+                        state.unsupportedShape = true;
+                        state.warnings.add("Context '" + contextKey + "' must contain an owner-to-reference JSON object.");
+                        parsedContexts++;
+                        continue;
+                    }
+                    tables.add(parseRefmapTable(
+                            tableElement.getAsJsonObject(), RefmapTableKind.CONTEXT, contextKey, state));
+                    parsedContexts++;
+                    if (state.limitExceeded) break;
+                }
+                if (contextLimitExceeded) state.limitExceeded = true;
+            }
+        }
+
+        RefmapResourceStatus status = state.limitExceeded ? RefmapResourceStatus.LIMIT_EXCEEDED
+                : state.unsupportedShape ? RefmapResourceStatus.UNSUPPORTED_SHAPE
+                : state.entryCount == 0 ? RefmapResourceStatus.EMPTY : RefmapResourceStatus.PARSED;
+        return new RefmapResourceFinding(
+                archivePath, path, configPaths, origins, status,
+                indexed.entry().getSize(), indexed.entry().getCompressedSize(), bytes.length, digest,
+                mappingsPresent, dataPresent, contextKeys, state.ownerBucketCount, state.entryCount,
+                unknownFields, tables,
+                state.warnings.stream().distinct().sorted().toList());
+    }
+
+    private static RefmapTableFinding parseRefmapTable(
+            JsonObject table,
+            RefmapTableKind kind,
+            String contextKey,
+            RefmapParseState state) {
+        List<RefmapEntryFinding> entries = new ArrayList<>();
+        List<String> warnings = new ArrayList<>();
+        int ownerCount = 0;
+        int entryCount = 0;
+        for (String owner : table.keySet().stream().sorted().toList()) {
+            if (state.ownerBucketCount >= MAX_REFMAP_OWNER_BUCKETS_PER_RESOURCE) {
+                state.limitExceeded = true;
+                warnings.add("Owner-bucket limit (" + MAX_REFMAP_OWNER_BUCKETS_PER_RESOURCE + ") was reached.");
+                break;
+            }
+            JsonElement ownerElement = table.get(owner);
+            if (owner.isBlank() || ownerElement == null || !ownerElement.isJsonObject()) {
+                state.unsupportedShape = true;
+                warnings.add("Owner bucket '" + owner + "' must be a non-empty owner name mapped to a JSON object.");
+                break;
+            }
+            JsonObject references = ownerElement.getAsJsonObject();
+            ownerCount++;
+            state.ownerBucketCount++;
+            for (String reference : references.keySet().stream().sorted().toList()) {
+                if (state.entryCount >= MAX_REFMAP_ENTRIES_PER_RESOURCE) {
+                    state.limitExceeded = true;
+                    warnings.add("Mapping-entry limit (" + MAX_REFMAP_ENTRIES_PER_RESOURCE + ") was reached.");
+                    break;
+                }
+                JsonElement mapped = references.get(reference);
+                if (mapped == null || !isJsonString(mapped)) {
+                    state.unsupportedShape = true;
+                    warnings.add("Mapping value for owner '" + owner + "' and reference '" + reference
+                            + "' must be a JSON string.");
+                    break;
+                }
+                entries.add(new RefmapEntryFinding(owner, reference, mapped.getAsString()));
+                entryCount++;
+                state.entryCount++;
+            }
+            if (state.limitExceeded || state.unsupportedShape) break;
+        }
+        return new RefmapTableFinding(
+                kind, contextKey, ownerCount, entryCount, entries,
+                warnings.stream().distinct().sorted().toList());
+    }
+
+    private static RefmapResourceFinding refmapResourceFailure(
+            String archivePath,
+            String path,
+            List<String> configPaths,
+            List<RefmapResourceOrigin> origins,
+            RefmapResourceStatus status,
+            String warning) {
+        return new RefmapResourceFinding(
+                archivePath, path, configPaths, origins, status, -1L, -1L, -1L, null,
+                false, false, List.of(), 0, 0, List.of(), List.of(), List.of(warning));
+    }
+
+    private static ResourceStatus toLegacyResourceStatus(RefmapResourceStatus status) {
+        return switch (status) {
+            case PARSED, EMPTY -> ResourceStatus.PRESENT_VALID_JSON;
+            case UNSUPPORTED_SHAPE -> ResourceStatus.UNSUPPORTED_SHAPE;
+            case MISSING -> ResourceStatus.MISSING;
+            case INVALID_PATH -> ResourceStatus.INVALID_PATH;
+            case DUPLICATE_ENTRY -> ResourceStatus.DUPLICATE_ENTRY;
+            case LIMIT_EXCEEDED -> ResourceStatus.LIMIT_EXCEEDED;
+            case INVALID_JSON -> ResourceStatus.INVALID_JSON;
+            case ARCHIVE_INDEX_INCOMPLETE -> ResourceStatus.ARCHIVE_INDEX_INCOMPLETE;
+        };
+    }
+
+    private static boolean isJsonString(JsonElement element) {
+        return element != null && element.isJsonPrimitive() && element.getAsJsonPrimitive().isString();
+    }
+
+    private static void validateJsonWithoutDuplicateMembers(String json) throws IOException {
+        try (JsonReader reader = new JsonReader(new StringReader(json))) {
+            reader.setLenient(false);
+            scanJsonValue(reader, 0);
+            if (reader.peek() != JsonToken.END_DOCUMENT) {
+                throw new JsonParseException("Trailing data after the refmap JSON value.");
+            }
+        }
+    }
+
+    private static void scanJsonValue(JsonReader reader, int depth) throws IOException {
+        if (depth > MAX_REFMAP_JSON_DEPTH) {
+            throw new JsonParseException("Refmap JSON nesting exceeds " + MAX_REFMAP_JSON_DEPTH + " levels.");
+        }
+        switch (reader.peek()) {
+            case BEGIN_OBJECT -> {
+                reader.beginObject();
+                Set<String> names = new HashSet<>();
+                while (reader.hasNext()) {
+                    String name = reader.nextName();
+                    if (!names.add(name)) {
+                        throw new JsonParseException("Duplicate JSON object member '" + name + "'.");
+                    }
+                    scanJsonValue(reader, depth + 1);
+                }
+                reader.endObject();
+            }
+            case BEGIN_ARRAY -> {
+                reader.beginArray();
+                while (reader.hasNext()) scanJsonValue(reader, depth + 1);
+                reader.endArray();
+            }
+            case STRING, NUMBER -> reader.nextString();
+            case BOOLEAN -> reader.nextBoolean();
+            case NULL -> reader.nextNull();
+            default -> throw new JsonParseException("Unexpected JSON token: " + reader.peek());
+        }
+    }
+
+    private static String sha256(byte[] bytes) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable.", exception);
         }
     }
 
@@ -1865,9 +2322,11 @@ public final class Forge1201MixinAnalyzer {
             byte[] buffer = new byte[8192];
             int total = 0;
             int read;
-            while ((read = input.read(buffer)) != -1) {
+            while ((read = input.read(buffer, 0, Math.min(buffer.length, limit - total + 1))) != -1) {
                 total += read;
-                if (total > limit) throw new EntryLimitException("Archive entry exceeded " + limit + " bytes.");
+                if (total > limit) {
+                    throw new EntryLimitException("Archive entry exceeded " + limit + " bytes.", total);
+                }
                 output.write(buffer, 0, read);
             }
             return output.toByteArray();
@@ -1881,8 +2340,15 @@ public final class Forge1201MixinAnalyzer {
     }
 
     private static final class EntryLimitException extends IOException {
-        private EntryLimitException(String message) {
+        private final int bytesRead;
+
+        private EntryLimitException(String message, int bytesRead) {
             super(message);
+            this.bytesRead = bytesRead;
+        }
+
+        private int bytesRead() {
+            return bytesRead;
         }
     }
 }

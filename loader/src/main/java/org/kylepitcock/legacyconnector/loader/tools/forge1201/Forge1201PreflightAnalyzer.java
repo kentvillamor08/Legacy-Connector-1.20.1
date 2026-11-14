@@ -34,8 +34,8 @@ import java.util.zip.ZipFile;
  * inspect them, validate mixin injection semantics, or prove runtime compatibility.</p>
  */
 public final class Forge1201PreflightAnalyzer {
-    public static final String SCHEMA_VERSION = "1.8";
-    public static final String ANALYZER_VERSION = "1.8.0";
+    public static final String SCHEMA_VERSION = "1.9";
+    public static final String ANALYZER_VERSION = "1.9.0";
     public static final String TARGET_MINECRAFT_VERSION = "1.21.1";
     public static final String TARGET_NEOFORGE_VERSION = "21.1.258";
     private static final int MAX_MIXIN_JSON_BYTES = 1024 * 1024;
@@ -383,7 +383,7 @@ public final class Forge1201PreflightAnalyzer {
                 "Source Minecraft SRG member names are normalized to 1.20.1 Mojang names where the generated mapping table has an entry; missing entries remain explicitly UNMAPPED. This source-name normalization is not a 1.21.1 target API or semantic compatibility verdict.",
                 "Nested archive traversal is bounded by depth, archive count, per-archive size, and total inflated-byte limits. Class capture is bounded to 8 MiB per class, 16 MiB per nested archive, 128 MiB aggregate nested class bytes submitted, and 64 MiB aggregate outer class bytes. Archives/classes skipped by a limit or rejected as unsafe/corrupt remain explicit findings.",
                 "Mixin configs discovered by the manifest and outer-archive resource heuristics are parsed in the current preflight schema. Target-class presence is checked only when the root project's resolved target compile classpath is supplied; no 1.20.1-to-1.21.1 Minecraft class identity mapping is assumed.",
-                "Mixin analysis currently covers outer-archive configs, mixin class entries, statically readable @Mixin class targets, source-side member annotations, and source-side handler/selector inventories for the six core Mixin 0.8.5 injector annotations. Schema 1.8 additionally preserves each @Slice ID and its explicit or defaulted from/to @At boundary metadata, including nested selector syntax and boundary provenance. It does not resolve those selectors against target bytecode, establish instruction ordering, validate slice semantics or injector handler stack contracts, compare target member descriptors, or apply semantic refmap remapping. Source-nested JAR config/class provenance remains a future increment. Mixin plugin classes are inventoried as resources but never executed.",
+                "Mixin analysis currently covers outer-archive configs, mixin class entries, statically readable @Mixin class targets, source-side member annotations, source-side handler/selector inventories for the six core Mixin 0.8.5 injector annotations, @Slice boundary metadata, and bounded refmap base/context table inventory. Refmap contexts remain opaque identifiers; the analyzer does not select a runtime context, convert source/target namespaces, correlate exact selector lookups, resolve selectors against target bytecode, establish instruction ordering, validate slice semantics or injector handler stack contracts, compare target member descriptors, or apply semantic refmap remapping. Source-nested JAR config/class provenance remains a future increment. Mixin plugin classes and custom refmap wrappers are inventoried as inert metadata and never executed.",
                 "Reflection/resource string candidates remain heuristic and are not treated as confirmed bytecode references.",
                 "Installed provider discovery records top-level and nested archive paths, mod IDs, and declared versions. A provider ID/version match does not establish API or behavioral compatibility; installed version ranges and API compatibility are not verified.",
                 "Maven-style version ranges with numeric dotted versions are evaluated conservatively. Qualified or otherwise unsupported version strings remain explicitly unverified.",
@@ -471,8 +471,38 @@ public final class Forge1201PreflightAnalyzer {
                 .append('\n');
         for (Forge1201MixinAnalyzer.ConfigFinding finding : mixins.configs()) {
             out.append("  config ").append(finding.configPath()).append(" [").append(finding.status())
-                    .append(", discovered by ").append(finding.discoverySources()).append("]\n");
+                    .append(", discovered by ").append(finding.discoverySources())
+                    .append(", refmap=").append(finding.refmapSelection())
+                    .append(", candidate=").append(finding.refmapCandidatePath())
+                    .append(", wrapper=").append(finding.refmapWrapperClass()).append("]\n");
             finding.warnings().forEach(warning -> out.append("    warning: ").append(warning).append('\n'));
+        }
+        out.append("\nMixin refmap resources (").append(mixins.refmapResources().size()).append("):\n");
+        if (mixins.refmapResources().isEmpty()) out.append("  none discovered\n");
+        for (Forge1201MixinAnalyzer.RefmapResourceFinding resource : mixins.refmapResources()) {
+            out.append("  refmap ").append(resource.resourcePath()).append(" [").append(resource.status())
+                    .append(", origins=").append(resource.origins())
+                    .append(", configs=").append(resource.configPaths())
+                    .append(", declared-bytes=").append(resource.declaredSizeBytes())
+                    .append(", compressed-bytes=").append(resource.compressedSizeBytes())
+                    .append(", inflated-bytes=").append(resource.inflatedSizeBytes())
+                    .append(", sha256=").append(resource.sha256())
+                    .append(", contexts=").append(resource.contextKeys())
+                    .append(", owners=").append(resource.ownerBucketCount())
+                    .append(", entries=").append(resource.entryCount()).append("]\n");
+            for (Forge1201MixinAnalyzer.RefmapTableFinding table : resource.tables()) {
+                out.append("    table ").append(table.kind())
+                        .append(table.contextKey() == null ? "" : " context=" + table.contextKey())
+                        .append(" [owners=").append(table.ownerBucketCount())
+                        .append(", entries=").append(table.entryCount()).append("]\n");
+                for (Forge1201MixinAnalyzer.RefmapEntryFinding entry : table.entries()) {
+                    out.append("      ").append(entry.ownerInternalName()).append(" :: ")
+                            .append(entry.referenceKey()).append(" -> ")
+                            .append(entry.mappedReferenceValue()).append('\n');
+                }
+                table.warnings().forEach(warning -> out.append("      warning: ").append(warning).append('\n'));
+            }
+            resource.warnings().forEach(warning -> out.append("    warning: ").append(warning).append('\n'));
         }
         for (Forge1201MixinAnalyzer.MixinClassFinding finding : mixins.mixinClasses()) {
             out.append("  mixin ").append(finding.mixinClassName()).append(" [").append(finding.status())

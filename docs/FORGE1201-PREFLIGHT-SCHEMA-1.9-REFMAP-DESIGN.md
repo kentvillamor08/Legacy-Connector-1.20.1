@@ -1,9 +1,9 @@
 # Schema 1.9 — Mixin Refmap Inventory and Interpretation Design
 
-**Status:** Research/design complete; implementation not started.  
+**Status:** Schema 1.9A resource/table inventory and synthetic regression coverage are implemented in the current branch change set; the user's forced loader test gate is still required. Schema 1.9B exact owner-scoped selector correlation has not started.  
 **Upstream contract pinned:** SpongePowered Mixin tag 0.8.5.  
 **Universal target:** Forge 1.20.1 source mods analyzed for NeoForge 1.21.1 / 21.1.x.  
-**Current green checkpoint:** Schema 1.8 at Universal commit 4b4f9ce437671f08eafd3f9cf4a18e34a3d24284 (loader tests: BUILD SUCCESSFUL in 33s; 14/14 actionable tasks executed).
+**Latest confirmed green checkpoint:** Schema 1.8 at Universal commit 4b4f9ce437671f08eafd3f9cf4a18e34a3d24284 (loader tests: BUILD SUCCESSFUL in 33s; 14/14 actionable tasks executed). Schema 1.9A code is not yet locally compiled or user-validated.
 
 This document defines the next bounded Mixin-analysis increment. It does not implement selector rewriting, invent source/target namespace identities, load Mixin plugins, or claim that a refmap entry resolves a target member.
 
@@ -268,16 +268,17 @@ Schema 1.9 static analysis must not:
 
 ## 7. Bounded parsing and archive safety
 
-Initial implementation limits should be conservative and visible in the result. Reuse the existing indexed outer archive and path-validation routines. Do not add another ZIP walker. Suggested initial ceilings, to be confirmed against representative mod archives before coding:
+Initial implementation limits should be conservative and visible in the result. Reuse the existing indexed outer archive and path-validation routines. Do not add another ZIP walker. Current implementation ceilings, to be profiled against representative mod archives:
 
 - 1 MiB inflated bytes per refmap resource.
 - 8 MiB aggregate inflated bytes across refmap resources in one analyzed archive.
 - 256 distinct resource paths.
 - 64 obfuscation context tables per resource.
-- 20,000 owner buckets per resource.
-- 100,000 mapping entries per resource.
+- 20,000 owner buckets per resource (counted across base and context tables).
+- 100,000 mapping entries per resource (counted across base and context tables).
+- 128 JSON nesting levels for the strict duplicate-key pre-scan and bounded Gson materialization.
 
-If a limit is reached, preserve resource identity, the limit that was reached, partial counts where available, and an explicit ANALYSIS_INCOMPLETE result. Never silently truncate and then call the refmap completely analyzed. These values are proposed guardrails, not yet locked implementation constants.
+If a limit is reached, preserve resource identity, the limit that was reached, partial counts where available, and an explicit incomplete status. Never silently truncate and then call the refmap completely analyzed. The bounded reader may consume at most one byte beyond a byte cap to detect overflow; that byte is charged to the aggregate refmap budget. These values are implementation guardrails, not performance-profiled limits.
 
 ## 8. Synthetic regression matrix
 
@@ -305,13 +306,19 @@ Tests must use generated fixtures and must not instantiate or execute Mixin runt
 
 ### Schema 1.9A — resource and table inventory
 
-- Add immutable refmap resource/table/entry result records.
-- Resolve explicit/default/plugin-dependent resource candidates from each Mixin config.
-- Preserve the refmapWrapper class name without loading it.
-- Parse the two Mixin 0.8.5 table structures with strict type validation and bounded archive reads.
-- Inventory context keys, owner buckets, raw entries, and resource digests.
-- Add JSON/text output and synthetic tests.
-- Keep source and target namespaces unresolved.
+**Implementation status: code and synthetic tests added; forced loader gate pending.** The current implementation batch:
+
+- Adds immutable RefmapResourceFinding, RefmapTableFinding, and RefmapEntryFinding records to the existing Forge1201MixinAnalyzer.Result.
+- Resolves explicit refmap paths, the mixin.refmap.json default candidate, and a weaker plugin-dependent default candidate. Multiple configs sharing a path share one parsed inventory while retaining sorted config/origin provenance.
+- Preserves refmapWrapper as an inert class-name string and warns that it is never loaded or executed.
+- Parses the base mappings table and every data context table up to the configured guardrail; preserves opaque context names, owner internal names, raw reference keys, mapped values, unknown top-level field names, exact byte digest, and ZIP-declared/compressed/inflated sizes.
+- Rejects duplicate JSON object member names before Gson materialization, avoiding silent last-value-wins loss. Wrong JSON types/shapes and invalid UTF-8 remain explicit findings.
+- Reuses the existing indexed outer-archive entries and readBounded method. It does not add a ZIP walker, Mixin runtime, plugin loader, wrapper loader, selector remapper, or namespace converter.
+- Adds JSON data through the existing result record and prints a human-readable refmap inventory in preflight text output. The unified report schema/analyzer versions advance to 1.9 / 1.9.0.
+- Implements the current guardrails as public constants: 1 MiB/resource, 8 MiB aggregate, 256 paths, 64 contexts/resource, 20,000 owner buckets/resource, and 100,000 entries/resource. These remain conservative, unprofiled initial limits; the bounded reader consumes at most one extra byte to detect overflow and accounts for those bytes against the aggregate budget.
+- Adds synthetic coverage for base/context tables, shared-path provenance, default/plugin-dependent candidates, wrapper preservation, unknown top-level fields, duplicate JSON keys, unsupported table/value shapes, deterministic inventory, per-resource and aggregate byte caps, JSON nesting depth, and the context-table cap.
+
+**Not yet validated:** no Gradle compile/test has run against this batch. The Schema 1.8 user green gate remains the last confirmed test checkpoint. Source and target namespaces remain unresolved; 1.9A does not correlate source selectors or prove Mixin compatibility.
 
 ### Schema 1.9B — explicit-context exact lookup correlation
 

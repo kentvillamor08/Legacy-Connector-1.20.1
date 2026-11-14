@@ -49,6 +49,299 @@ final class Forge1201MixinAnalyzerTest {
     Path tempDir;
 
     @Test
+    void inventoriesBaseAndContextRefmapTablesAndPreservesWrapperMetadata() throws Exception {
+        String firstConfig = """
+                {"package":"com.example.mixins","refmap":"shared.refmap.json",
+                 "refmapWrapper":"com.example.CustomMapper","mixins":[]}
+                """;
+        String secondConfig = """
+                {"package":"com.example.other","refmap":"shared.refmap.json","mixins":[]}
+                """;
+        String refmap = """
+                {
+                  "mappings": {
+                    "com/example/other/OtherMixin": {
+                      "Lexample/Target;field:I": "La;f:I"
+                    },
+                    "com/example/mixins/TestMixin": {
+                      "Lexample/Target;run()V": "La;a()V"
+                    }
+                  },
+                  "data": {
+                    "searge": {
+                      "com/example/mixins/TestMixin": {
+                        "Lexample/Target;run()V": "La;func_1()V"
+                      }
+                    },
+                    "notch": {
+                      "com/example/mixins/TestMixin": {
+                        "Lexample/Target;run()V": "La;b()V"
+                      }
+                    }
+                  },
+                  "customMetadata": "retained as an unknown-field warning"
+                }
+                """;
+        Map<String, byte[]> archive = new LinkedHashMap<>();
+        archive.put("mixins.a.json", firstConfig.getBytes(StandardCharsets.UTF_8));
+        archive.put("mixins.b.json", secondConfig.getBytes(StandardCharsets.UTF_8));
+        archive.put("shared.refmap.json", refmap.getBytes(StandardCharsets.UTF_8));
+        Path jar = writeJar("shared-refmap.jar", archive);
+
+        var result = Forge1201MixinAnalyzer.analyze(
+                jar,
+                List.of(
+                        new Forge1201MixinAnalyzer.ConfigDeclaration(
+                                "mixins.a.json", Forge1201MixinAnalyzer.DiscoverySource.MANIFEST),
+                        new Forge1201MixinAnalyzer.ConfigDeclaration(
+                                "mixins.b.json", Forge1201MixinAnalyzer.DiscoverySource.RESOURCE_HEURISTIC)),
+                null, Map.of(), "not-supplied");
+
+        assertEquals(2, result.configs().size());
+        assertEquals("com.example.CustomMapper", result.configs().getFirst().refmapWrapperClass());
+        assertEquals(Forge1201MixinAnalyzer.RefmapSelection.EXPLICIT_RESOURCE,
+                result.configs().getFirst().refmapSelection());
+        assertEquals(Forge1201MixinAnalyzer.ResourceStatus.PRESENT_VALID_JSON,
+                result.configs().getFirst().refmapStatus());
+
+        assertEquals(1, result.refmapResources().size(),
+                "Two configs sharing one path must share one parsed resource inventory.");
+        var resource = result.refmapResources().getFirst();
+        assertEquals("shared.refmap.json", resource.resourcePath());
+        assertEquals(List.of("mixins.a.json", "mixins.b.json"), resource.configPaths());
+        assertEquals(List.of(Forge1201MixinAnalyzer.RefmapResourceOrigin.EXPLICIT_CONFIG_FIELD),
+                resource.origins());
+        assertEquals(Forge1201MixinAnalyzer.RefmapResourceStatus.PARSED, resource.status());
+        assertEquals(refmap.getBytes(StandardCharsets.UTF_8).length, resource.inflatedSizeBytes());
+        assertEquals(resource.inflatedSizeBytes(), resource.declaredSizeBytes());
+        assertTrue(resource.compressedSizeBytes() >= 0);
+        assertEquals(64, resource.sha256().length());
+        assertTrue(resource.mappingsPresent());
+        assertTrue(resource.dataPresent());
+        assertEquals(List.of("notch", "searge"), resource.contextKeys());
+        assertEquals(List.of("customMetadata"), resource.unknownTopLevelFields());
+        assertEquals(3, resource.tables().size());
+        assertEquals(Forge1201MixinAnalyzer.RefmapTableKind.BASE_MAPPINGS,
+                resource.tables().getFirst().kind());
+        assertEquals(2, resource.tables().getFirst().ownerBucketCount());
+        assertEquals(2, resource.tables().getFirst().entryCount());
+        assertEquals(Forge1201MixinAnalyzer.RefmapTableKind.CONTEXT, resource.tables().get(1).kind());
+        assertEquals("notch", resource.tables().get(1).contextKey());
+        assertEquals("La;b()V", resource.tables().get(1).entries().getFirst().mappedReferenceValue());
+        assertEquals("searge", resource.tables().get(2).contextKey());
+        assertTrue(resource.warnings().stream().anyMatch(warning -> warning.contains("Unknown top-level")));
+
+        var secondRun = Forge1201MixinAnalyzer.analyze(
+                jar,
+                List.of(
+                        new Forge1201MixinAnalyzer.ConfigDeclaration(
+                                "mixins.a.json", Forge1201MixinAnalyzer.DiscoverySource.MANIFEST),
+                        new Forge1201MixinAnalyzer.ConfigDeclaration(
+                                "mixins.b.json", Forge1201MixinAnalyzer.DiscoverySource.RESOURCE_HEURISTIC)),
+                null, Map.of(), "not-supplied");
+        assertEquals(result.refmapResources(), secondRun.refmapResources());
+    }
+
+    @Test
+    void distinguishesDefaultRefmapCandidateFromPluginDependentCandidate() throws Exception {
+        Map<String, byte[]> archive = new LinkedHashMap<>();
+        archive.put("mixins.default.json",
+                "{\"package\":\"com.example.default\",\"mixins\":[]}".getBytes(StandardCharsets.UTF_8));
+        archive.put("mixins.plugin.json",
+                "{\"package\":\"com.example.plugin\",\"plugin\":\"com.example.DynamicPlugin\",\"mixins\":[]}"
+                        .getBytes(StandardCharsets.UTF_8));
+        archive.put(Forge1201MixinAnalyzer.DEFAULT_REFMAP_RESOURCE, "{}".getBytes(StandardCharsets.UTF_8));
+        Path jar = writeJar("default-refmap.jar", archive);
+
+        var result = Forge1201MixinAnalyzer.analyze(
+                jar,
+                List.of(
+                        new Forge1201MixinAnalyzer.ConfigDeclaration(
+                                "mixins.default.json", Forge1201MixinAnalyzer.DiscoverySource.MANIFEST),
+                        new Forge1201MixinAnalyzer.ConfigDeclaration(
+                                "mixins.plugin.json", Forge1201MixinAnalyzer.DiscoverySource.MANIFEST)),
+                null, Map.of(), "not-supplied");
+
+        var defaultConfig = config(result, "mixins.default.json");
+        var pluginConfig = config(result, "mixins.plugin.json");
+        assertEquals(Forge1201MixinAnalyzer.RefmapSelection.DEFAULT_RESOURCE, defaultConfig.refmapSelection());
+        assertEquals(Forge1201MixinAnalyzer.RefmapSelection.PLUGIN_DEPENDENT, pluginConfig.refmapSelection());
+        assertTrue(pluginConfig.warnings().stream().anyMatch(warning ->
+                warning.contains("non-authoritative static candidate")));
+        assertEquals(Forge1201MixinAnalyzer.DEFAULT_REFMAP_RESOURCE, defaultConfig.refmapCandidatePath());
+        assertEquals(Forge1201MixinAnalyzer.DEFAULT_REFMAP_RESOURCE, pluginConfig.refmapCandidatePath());
+        assertNull(defaultConfig.refmapPath());
+        assertNull(pluginConfig.refmapPath());
+        assertEquals(Forge1201MixinAnalyzer.ResourceStatus.NOT_DECLARED, defaultConfig.refmapStatus());
+        assertEquals(Forge1201MixinAnalyzer.ResourceStatus.NOT_DECLARED, pluginConfig.refmapStatus());
+
+        assertEquals(1, result.refmapResources().size());
+        var resource = result.refmapResources().getFirst();
+        assertEquals(Forge1201MixinAnalyzer.RefmapResourceStatus.EMPTY, resource.status());
+        assertEquals(List.of("mixins.default.json", "mixins.plugin.json"), resource.configPaths());
+        assertEquals(List.of(
+                        Forge1201MixinAnalyzer.RefmapResourceOrigin.MIXIN_DEFAULT_CANDIDATE,
+                        Forge1201MixinAnalyzer.RefmapResourceOrigin.PLUGIN_DEPENDENT_CANDIDATE),
+                resource.origins());
+    }
+
+    @Test
+    void reportsInvalidRefmapShapesDuplicateJsonMembersAndNonStringValues() throws Exception {
+        Map<String, byte[]> archive = new LinkedHashMap<>();
+        archive.put("mixins.shape.json",
+                "{\"package\":\"com.example.shape\",\"refmap\":\"shape.refmap.json\",\"mixins\":[]}"
+                        .getBytes(StandardCharsets.UTF_8));
+        archive.put("mixins.duplicate.json",
+                "{\"package\":\"com.example.duplicate\",\"refmap\":\"duplicate.refmap.json\",\"mixins\":[]}"
+                        .getBytes(StandardCharsets.UTF_8));
+        archive.put("mixins.value.json",
+                "{\"package\":\"com.example.value\",\"refmap\":\"value.refmap.json\",\"mixins\":[]}"
+                        .getBytes(StandardCharsets.UTF_8));
+        archive.put("shape.refmap.json", "{\"mappings\":[]}".getBytes(StandardCharsets.UTF_8));
+        archive.put("duplicate.refmap.json",
+                "{\"mappings\":{},\"mappings\":{}}".getBytes(StandardCharsets.UTF_8));
+        archive.put("value.refmap.json",
+                "{\"mappings\":{\"com/example/Mixin\":{\"selector\":42}}}".getBytes(StandardCharsets.UTF_8));
+        Path jar = writeJar("invalid-refmaps.jar", archive);
+
+        var result = Forge1201MixinAnalyzer.analyze(
+                jar,
+                List.of(
+                        new Forge1201MixinAnalyzer.ConfigDeclaration(
+                                "mixins.shape.json", Forge1201MixinAnalyzer.DiscoverySource.MANIFEST),
+                        new Forge1201MixinAnalyzer.ConfigDeclaration(
+                                "mixins.duplicate.json", Forge1201MixinAnalyzer.DiscoverySource.MANIFEST),
+                        new Forge1201MixinAnalyzer.ConfigDeclaration(
+                                "mixins.value.json", Forge1201MixinAnalyzer.DiscoverySource.MANIFEST)),
+                null, Map.of(), "not-supplied");
+
+        assertEquals(Forge1201MixinAnalyzer.RefmapResourceStatus.UNSUPPORTED_SHAPE,
+                result.refmapResources().stream()
+                        .filter(finding -> finding.resourcePath().equals("shape.refmap.json"))
+                        .findFirst().orElseThrow().status());
+        assertEquals(Forge1201MixinAnalyzer.ResourceStatus.UNSUPPORTED_SHAPE,
+                config(result, "mixins.shape.json").refmapStatus());
+        var duplicate = result.refmapResources().stream()
+                .filter(finding -> finding.resourcePath().equals("duplicate.refmap.json"))
+                .findFirst().orElseThrow();
+        assertEquals(Forge1201MixinAnalyzer.RefmapResourceStatus.INVALID_JSON, duplicate.status());
+        assertTrue(duplicate.warnings().stream().anyMatch(warning -> warning.contains("duplicate object member")));
+        assertEquals(Forge1201MixinAnalyzer.RefmapResourceStatus.UNSUPPORTED_SHAPE,
+                result.refmapResources().stream()
+                        .filter(finding -> finding.resourcePath().equals("value.refmap.json"))
+                        .findFirst().orElseThrow().status());
+    }
+
+    @Test
+    void enforcesAggregateRefmapInflatedByteBudgetAcrossUniqueResources() throws Exception {
+        String exactLimitJson = "{}" + " ".repeat(Forge1201MixinAnalyzer.MAX_REFMAP_BYTES - 2);
+        Map<String, byte[]> archive = new LinkedHashMap<>();
+        List<Forge1201MixinAnalyzer.ConfigDeclaration> declarations = new ArrayList<>();
+        for (int i = 0; i < 9; i++) {
+            String configPath = "mixins.aggregate-" + i + ".json";
+            String refmapPath = "refmap-" + i + ".json";
+            archive.put(configPath,
+                    ("{\"package\":\"com.example.aggregate" + i + "\",\"refmap\":\""
+                            + refmapPath + "\",\"mixins\":[]}")
+                            .getBytes(StandardCharsets.UTF_8));
+            archive.put(refmapPath, exactLimitJson.getBytes(StandardCharsets.UTF_8));
+            declarations.add(new Forge1201MixinAnalyzer.ConfigDeclaration(
+                    configPath, Forge1201MixinAnalyzer.DiscoverySource.MANIFEST));
+        }
+        Path jar = writeJar("aggregate-refmap-budget.jar", archive);
+
+        var result = Forge1201MixinAnalyzer.analyze(jar, declarations, null, Map.of(), "not-supplied");
+
+        assertEquals(9, result.refmapResources().size());
+        assertTrue(result.refmapResources().subList(0, 8).stream().allMatch(resource ->
+                resource.status() == Forge1201MixinAnalyzer.RefmapResourceStatus.EMPTY
+                        && resource.inflatedSizeBytes() == Forge1201MixinAnalyzer.MAX_REFMAP_BYTES));
+        var ninth = result.refmapResources().getLast();
+        assertEquals(Forge1201MixinAnalyzer.RefmapResourceStatus.LIMIT_EXCEEDED, ninth.status());
+        assertTrue(ninth.warnings().stream().anyMatch(warning ->
+                warning.contains("Aggregate refmap inflated-byte budget was exhausted")));
+    }
+
+    @Test
+    void enforcesPerResourceRefmapByteLimitAndRecordsConsumedBytes() throws Exception {
+        String oversizedJson = "{\"mappings\":{}}" +
+                " ".repeat(Forge1201MixinAnalyzer.MAX_REFMAP_BYTES + 1);
+        Map<String, byte[]> archive = new LinkedHashMap<>();
+        archive.put("mixins.oversized.json",
+                "{\"package\":\"com.example.oversized\",\"refmap\":\"oversized.refmap.json\",\"mixins\":[]}"
+                        .getBytes(StandardCharsets.UTF_8));
+        archive.put("oversized.refmap.json", oversizedJson.getBytes(StandardCharsets.UTF_8));
+        Path jar = writeJar("oversized-refmap.jar", archive);
+
+        var result = Forge1201MixinAnalyzer.analyze(
+                jar,
+                List.of(new Forge1201MixinAnalyzer.ConfigDeclaration(
+                        "mixins.oversized.json", Forge1201MixinAnalyzer.DiscoverySource.MANIFEST)),
+                null, Map.of(), "not-supplied");
+
+        var resource = result.refmapResources().getFirst();
+        assertEquals(Forge1201MixinAnalyzer.RefmapResourceStatus.LIMIT_EXCEEDED, resource.status());
+        assertEquals(Forge1201MixinAnalyzer.MAX_REFMAP_BYTES + 1L, resource.inflatedSizeBytes());
+        assertEquals(oversizedJson.getBytes(StandardCharsets.UTF_8).length, resource.declaredSizeBytes());
+        assertTrue(resource.tables().isEmpty());
+    }
+
+    @Test
+    void rejectsExcessiveRefmapJsonNestingBeforeTreeMaterialization() throws Exception {
+        StringBuilder deeplyNested = new StringBuilder("{\"mappings\":");
+        for (int i = 0; i <= Forge1201MixinAnalyzer.MAX_REFMAP_JSON_DEPTH; i++) deeplyNested.append('[');
+        deeplyNested.append("\"leaf\"");
+        for (int i = 0; i <= Forge1201MixinAnalyzer.MAX_REFMAP_JSON_DEPTH; i++) deeplyNested.append(']');
+        deeplyNested.append('}');
+
+        Map<String, byte[]> archive = new LinkedHashMap<>();
+        archive.put("mixins.deep.json",
+                "{\"package\":\"com.example.deep\",\"refmap\":\"deep.refmap.json\",\"mixins\":[]}"
+                        .getBytes(StandardCharsets.UTF_8));
+        archive.put("deep.refmap.json", deeplyNested.toString().getBytes(StandardCharsets.UTF_8));
+        Path jar = writeJar("deep-refmap.json.jar", archive);
+
+        var result = Forge1201MixinAnalyzer.analyze(
+                jar,
+                List.of(new Forge1201MixinAnalyzer.ConfigDeclaration(
+                        "mixins.deep.json", Forge1201MixinAnalyzer.DiscoverySource.MANIFEST)),
+                null, Map.of(), "not-supplied");
+
+        var resource = result.refmapResources().getFirst();
+        assertEquals(Forge1201MixinAnalyzer.RefmapResourceStatus.INVALID_JSON, resource.status());
+        assertTrue(resource.warnings().stream().anyMatch(warning -> warning.contains("nesting exceeds")));
+    }
+
+    @Test
+    void preservesAllContextKeysButStopsParsingAtTheConfiguredContextLimit() throws Exception {
+        StringBuilder data = new StringBuilder("{\"data\":{");
+        for (int i = 0; i < Forge1201MixinAnalyzer.MAX_REFMAP_CONTEXTS_PER_RESOURCE + 1; i++) {
+            if (i > 0) data.append(',');
+            data.append('"').append(String.format(java.util.Locale.ROOT, "ctx%02d", i)).append("\":{}");
+        }
+        data.append("}}");
+        Map<String, byte[]> archive = new LinkedHashMap<>();
+        archive.put("mixins.context-limit.json",
+                "{\"package\":\"com.example.contextlimit\",\"refmap\":\"contexts.refmap.json\",\"mixins\":[]}"
+                        .getBytes(StandardCharsets.UTF_8));
+        archive.put("contexts.refmap.json", data.toString().getBytes(StandardCharsets.UTF_8));
+        Path jar = writeJar("context-limit.jar", archive);
+
+        var result = Forge1201MixinAnalyzer.analyze(
+                jar,
+                List.of(new Forge1201MixinAnalyzer.ConfigDeclaration(
+                        "mixins.context-limit.json", Forge1201MixinAnalyzer.DiscoverySource.MANIFEST)),
+                null, Map.of(), "not-supplied");
+
+        var resource = result.refmapResources().getFirst();
+        assertEquals(Forge1201MixinAnalyzer.RefmapResourceStatus.LIMIT_EXCEEDED, resource.status());
+        assertEquals(Forge1201MixinAnalyzer.MAX_REFMAP_CONTEXTS_PER_RESOURCE + 1, resource.contextKeys().size());
+        assertEquals(Forge1201MixinAnalyzer.MAX_REFMAP_CONTEXTS_PER_RESOURCE, resource.tables().size());
+        assertEquals("ctx00", resource.tables().getFirst().contextKey());
+        assertEquals("ctx63", resource.tables().getLast().contextKey());
+    }
+
+    @Test
     void resolvesManifestAndHeuristicConfigsAndVisibleAndInvisibleMixinTargets() throws Exception {
         String configPath = "mixins.sample.json";
         String config = """
