@@ -238,3 +238,29 @@ The new code/test batch has not yet been run by the user. Do not claim compilati
 Latest test source commit for these two edge cases: `ba8428932da023f9c527a6b6eb0d6056626a88bb` (includes exact recursion-boundary assertion).
 
 These tests have not yet been run locally. Keep the Schema 1.3 real Symbiote report blocked until the complete forced loader test gate passes on the latest branch tip.
+## Slice 3 edge-case validation complete — 2026-11-14
+
+The user pulled Universal branch tip `b0d2b7b68915137aed44ef9153f4dfa304fa5819` and ran the forced clean loader test command:
+
+    :loader:clean :loader:test --no-daemon --console=plain --rerun-tasks
+    BUILD SUCCESSFUL in 31s
+    14 actionable tasks: 14 executed
+
+This validates the newly added raw duplicate-ZIP class-entry fixture and the 17-level ConstantDynamic recursion boundary test, in addition to the previously green structural/annotation fixture and nested archive/SRG test coverage. The transcript shows generated SRG-to-Mojang mapping output of 64,225 members. It does not show a JUnit count; do not invent one. The IntelliJ PSReadLine 2.0.0 startup warning is unrelated to the Gradle result.
+
+### Slice 3 test exit gate
+
+All currently planned focused Slice 3 test cases have now passed in the user's forced loader run. This establishes analyzer test coverage and compilation, not actual NeoForge runtime or gameplay compatibility.
+
+### Next action — real Symbiote Schema 1.3 report
+
+The testbench `archive/preflight/README.md` confirms no Slice 3 report exists yet and requires the canonical first-run root filenames:
+
+- `symbiote-1.1.3.jar-slice-3.json`
+- `symbiote-1.1.3.jar-slice-3.txt`
+
+The source jar is `C:/Users/Administrator/legacy-connector-testbench/symbiote-1.1.3.jar`, whose expected SHA-256 is `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c`. Preserve Slice 2 run-3 unchanged. Include the installed mods directory in the scan, as done for the earlier reports, if it still exists: `E:/Games/PolyMC/instances/Neoforge tester/.minecraft/mods`.
+
+Use root Gradle task `preflight1201` with explicit `-PpreflightJar`, `-PpreflightModsDirs`, `-PpreflightJson`, and `-PpreflightText` paths. The schema/analyzer versions in source are `1.3` / `1.3.0`; target is Minecraft `1.21.1` / NeoForge `21.1.258`. Validate the JSON parses and its source SHA matches the expected original before uploading the JSON/text files to the testbench root.
+
+After reviewing the report, update `archive/preflight/README.md` with output blob SHAs and report totals, then run the consolidated clean build. Actual NeoForge launch and gameplay remain a separate unverified gate.
