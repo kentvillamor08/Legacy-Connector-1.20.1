@@ -784,7 +784,14 @@ public final class Forge1201ArchiveGraph {
         int scanned = 0;
         int skipped = snapshot.skippedClassEntries();
         long captured = 0;
-        List<String> warnings = new ArrayList<>();
+        // Keep class-entry capture warnings with the per-archive class summary as well as
+        // the graph-wide warning list. Otherwise skipped oversized/unsafe/duplicate classes
+        // are counted, but their reason is missing from the summary that explains those counts.
+        List<String> warnings = new ArrayList<>(snapshot.warnings().stream()
+                .filter(warning -> warning.contains("class-entry path")
+                        || warning.contains("duplicated within the archive")
+                        || warning.contains("class payload exceeded"))
+                .toList());
         if (archiveKind == ArchiveKind.NEOFORGE_MOD) {
             skipped += snapshot.classEntries().size();
             if (!snapshot.classEntries().isEmpty()) {
