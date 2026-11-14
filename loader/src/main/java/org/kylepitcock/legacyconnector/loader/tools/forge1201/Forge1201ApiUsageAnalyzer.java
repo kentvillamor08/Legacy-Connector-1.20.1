@@ -84,7 +84,8 @@ public final class Forge1201ApiUsageAnalyzer {
         FIELD_HANDLE,
         CLASS_LITERAL,
         METHOD_TYPE,
-        CONSTANT_DYNAMIC
+        CONSTANT_DYNAMIC,
+        VALUE_DEPTH_LIMIT
     }
 
     /**
@@ -113,7 +114,10 @@ public final class Forge1201ApiUsageAnalyzer {
                     + (descriptor == null ? "" : descriptor)
                     + " <= " + archivePath + "!/" + classEntryPath
                     + " :: " + callerClass.replace('/', '.') + "#" + callerMethod + callerDescriptor
-                    + " [" + kind + ", " + context + ", instruction " + instructionOrdinal + "]";
+                    + " [" + kind + ", " + context
+                    + ((kind == ApiDynamicReferenceKind.METHOD_HANDLE || kind == ApiDynamicReferenceKind.FIELD_HANDLE)
+                            ? ", interfaceOwner=" + interfaceOwner : "")
+                    + ", instruction " + instructionOrdinal + "]";
         }
     }
 
@@ -256,7 +260,13 @@ public final class Forge1201ApiUsageAnalyzer {
                 Object value,
                 int instructionOrdinal,
                 int depth) {
-            if (value == null || depth > 16) return;
+            if (value == null) return;
+            if (depth > 16) {
+                recordDynamic(archivePath, classEntryPath, callerClass, callerMethod, callerDescriptor,
+                        ApiDynamicReferenceKind.VALUE_DEPTH_LIMIT, context, null, null, null,
+                        -1, false, instructionOrdinal);
+                return;
+            }
             if (value instanceof org.objectweb.asm.Handle handle) {
                 recordHandle(archivePath, classEntryPath, callerClass, callerMethod,
                         callerDescriptor, context, handle, instructionOrdinal);
