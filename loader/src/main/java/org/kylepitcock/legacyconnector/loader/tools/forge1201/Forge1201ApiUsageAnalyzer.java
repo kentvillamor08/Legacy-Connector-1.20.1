@@ -118,14 +118,19 @@ public final class Forge1201ApiUsageAnalyzer {
             int count) {
         public String display() {
             String target = owner == null ? "" : owner.replace('/', '.') + "#";
+            String caller = callerClass == null ? "<unknown-class>" : callerClass.replace('/', '.');
+            if (callerMethod != null) caller += "#" + callerMethod
+                    + (callerDescriptor == null ? "" : callerDescriptor);
+            else caller += "#<class-context>";
             return target + (name == null ? "" : name)
                     + (descriptor == null ? "" : descriptor)
                     + " <= " + archivePath + "!/" + classEntryPath
-                    + " :: " + callerClass.replace('/', '.') + "#" + callerMethod + callerDescriptor
+                    + " :: " + caller
                     + " [" + kind + ", " + context
                     + ((kind == ApiDynamicReferenceKind.METHOD_HANDLE || kind == ApiDynamicReferenceKind.FIELD_HANDLE)
                             ? ", interfaceOwner=" + interfaceOwner : "")
-                    + ", instruction " + instructionOrdinal + "]";
+                    + (instructionOrdinal >= 0
+                            ? ", instruction " + instructionOrdinal : ", non-code context") + "]";
         }
     }
 
