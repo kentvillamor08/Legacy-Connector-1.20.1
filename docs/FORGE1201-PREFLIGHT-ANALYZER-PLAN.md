@@ -1,6 +1,9 @@
 # Forge 1.20.1 Preflight Compatibility Analyzer
 
-**Status:** Slice 1 implemented and archived; Slice 2 implementation committed, focused loader tests passed, and the real Symbiote 1.1.3 Schema 1.1 / Analyzer 1.1.0 JSON+text report generated and inspected; consolidated build and dependency-graph corrections remain pending  
+**Status:** Slice 1 implemented and archived; Slice 2 implementation committed, focused loader tests passed, and the real Symbiote 1.1.3 Schema 1.1 / Analyzer 1.1.0 JSON+text report generated and inspected; consolidated build and dependency-graph corrections remain pending
+
+**Report filename rule:** every analyzer output filename includes its slice number, e.g. `symbiote-1.1.3.jar-slice-2.json` and `symbiote-1.1.3.jar-slice-2.txt`. Repeated runs append a run number, e.g. `symbiote-1.1.3.jar-slice-2-run-2.json` and `.txt`. Use the root Gradle task's explicit `-PpreflightJson=<path>` and `-PpreflightText=<path>` options. Never overwrite the unsuffixed legacy root filenames or an earlier slice/run. The testbench archive index is `archive/preflight/README.md`.
+  
 **Working branch:** `feat/forge1201-preflight-analyzer`  
 **Baseline:** `dde40275b9b3bd48ff811afa4c863e475e8a0cdf`  
 **Target:** Forge 1.20.1-only mod JARs on NeoForge 1.21.1 / 21.1.x  
@@ -230,7 +233,7 @@ The focused loader tests are confirmed passing as recorded above. Treat the real
 3. GeckoLib's `geckoanimfix` edge is also `mandatory=true`; verify its metadata before deciding whether it is truly required.
 4. Qualified versions such as Rhino `2101.2.8-build.91` and Better Advanced Tooltips `2101.1.0-build.1` remain `UNPARSEABLE`. Keep the uncertainty explicit; do not treat them as verified matches.
 
-After implementing the fixes, run the forced loader test gate in the Universal worktree on the intended branch, then generate a new report under a new output directory such as `build/reports/preflight1201/slice-2/run-2`. Never overwrite the archived Slice 1 or Slice 2 reports. When reviewing the rerun, preserve the same original Symbiote SHA-256 `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c` and the saved source/mods paths recorded in the continuation handoff.
+After implementing the fixes, run the forced loader test gate in the Universal worktree on the intended branch, then generate a new report pair using explicit `-PpreflightJson` / `-PpreflightText` paths ending in `symbiote-1.1.3.jar-slice-2-run-2.json` and `symbiote-1.1.3.jar-slice-2-run-2.txt` under the testbench root. Never overwrite the archived Slice 1 or Slice 2 reports or the canonical Slice 2 filenames. When reviewing the rerun, preserve the original Symbiote SHA-256 `e40f48a8a9bf1f39ea173a7c163285df199b7d2cf1dfcbf3efa721fe7f2f942c` and saved input paths from the continuation handoff. Use `-run-3` for any further rerun.
 
 If the corrected report is consistent and tests pass, run the consolidated clean build:
 ```powershell
