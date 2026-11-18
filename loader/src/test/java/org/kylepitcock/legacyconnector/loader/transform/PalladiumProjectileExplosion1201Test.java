@@ -93,6 +93,39 @@ class PalladiumProjectileExplosion1201Test implements Opcodes {
     }
 
     @Test
+    void genericMinecraftConstructorMigrationMustNotRunBeforeThePalladiumAdapter() {
+        ClassNode node = fixture(true);
+        Mc1201Hierarchy hierarchy = new Mc1201Hierarchy();
+        hierarchy.add(node);
+
+        assertEquals(1, Mc1201Migration.apply(node, hierarchy).constructors);
+        assertThrows(IllegalStateException.class, () -> PalladiumProjectileExplosion1201.apply(node));
+    }
+
+    @Test
+    void palladiumAdapterRunsBeforeGenericMinecraftConstructorMigration() {
+        ClassNode node = fixture(true);
+        Mc1201Hierarchy hierarchy = new Mc1201Hierarchy();
+        hierarchy.add(node);
+
+        assertEquals(1, PalladiumProjectileExplosion1201.apply(node));
+        assertEquals(0, Mc1201Migration.apply(node, hierarchy).constructors);
+
+        MethodInsnNode helper = null;
+        for (var instruction : node.methods.get(0).instructions) {
+            if (instruction instanceof MethodInsnNode call
+                    && PalladiumProjectileExplosion1201.HELPER.equals(call.owner)
+                    && "createExplodePacket".equals(call.name)) {
+                helper = call;
+                break;
+            }
+        }
+        helper = assertInstanceOf(MethodInsnNode.class, helper);
+        assertEquals(INVOKESTATIC, helper.getOpcode());
+        assertEquals(PalladiumProjectileExplosion1201.HELPER_DESC, helper.desc);
+    }
+
+    @Test
     void rejectsPacketConstructorWhenExplosionLocalIsNotAvailable() {
         ClassNode node = fixture(false);
         assertThrows(IllegalStateException.class, () -> PalladiumProjectileExplosion1201.apply(node));

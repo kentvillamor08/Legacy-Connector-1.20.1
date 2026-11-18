@@ -420,6 +420,11 @@ public final class Forge1201Transformer {
             // The PalladiumCore adapter must see and retarget the original lookup before that generic pass.
             int palladiumPlayerSkinChange = PalladiumCorePlayerSkin1201.apply(node);
             palladiumPlayerSkinChanges += palladiumPlayerSkinChange;
+            // Palladium's explosion packet must retain metadata from its originating Explosion.
+            // The generic mc-calls constructor rule adds default metadata first, so adapt this
+            // one call before Mc1201Migration consumes the legacy six-argument constructor.
+            int palladiumProjectileExplosionChange = PalladiumProjectileExplosion1201.apply(node);
+            palladiumProjectileExplosionChanges += palladiumProjectileExplosionChange;
             Mc1201Migration.Counts changed = Mc1201Migration.apply(node, hierarchy);
             mc.add(changed);
             viaCalls += shape.apply(node);
@@ -433,8 +438,6 @@ public final class Forge1201Transformer {
             palladiumFlightTakeoffGraceChanges += palladiumFlightTakeoffGraceChange;
             int palladiumCustomProjectileChange = PalladiumCustomProjectile1201.apply(node);
             palladiumCustomProjectileChanges += palladiumCustomProjectileChange;
-            int palladiumProjectileExplosionChange = PalladiumProjectileExplosion1201.apply(node);
-            palladiumProjectileExplosionChanges += palladiumProjectileExplosionChange;
             int palladiumCustomProjectileRendererChange = PalladiumCustomProjectileRenderer1201.apply(node);
             palladiumCustomProjectileRendererChanges += palladiumCustomProjectileRendererChange;
             int palladiumCoreOverlayChange = PalladiumCoreOverlay1201.apply(node);
