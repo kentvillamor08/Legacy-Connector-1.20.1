@@ -26,7 +26,26 @@ import org.kylepitcock.legacyconnector.v1_12_2.bridge.EntityBridge1122;
 public abstract class EntityLiving extends EntityLivingBase {
     /** Where a creature type spawns (1.12's {@code EntityLiving.SpawnPlacementType}). */
     public enum SpawnPlacementType {
-        ON_GROUND, IN_AIR, IN_WATER
+        ON_GROUND(null), IN_AIR(null), IN_WATER(null);
+
+        private final java.util.function.BiPredicate<legacyconnector.v1_12_2.net.minecraft.world.IBlockAccess,
+                legacyconnector.v1_12_2.net.minecraft.util.math.BlockPos> spawnPredicate;
+
+        /** A placement type with its own rule (Forge's {@code EnumHelper.addSpawnPlacementType}); null is the vanilla rule of the constant. */
+        SpawnPlacementType(java.util.function.BiPredicate<legacyconnector.v1_12_2.net.minecraft.world.IBlockAccess,
+                legacyconnector.v1_12_2.net.minecraft.util.math.BlockPos> spawnPredicate) {
+            this.spawnPredicate = spawnPredicate;
+        }
+
+        /** Whether a creature placed this way may spawn at the position (the mod's rule, or the vanilla one of the constant). */
+        public boolean canSpawnAt(legacyconnector.v1_12_2.net.minecraft.world.World world, legacyconnector.v1_12_2.net.minecraft.util.math.BlockPos pos) {
+            if (spawnPredicate != null) return spawnPredicate.test(world, pos);
+            return org.kylepitcock.legacyconnector.v1_12_2.bridge.WorldSynth1122.canCreatureTypeSpawnAtLocation(this, world, pos);
+        }
+
+        public boolean mcc$hasCustomRule() {
+            return spawnPredicate != null;
+        }
     }
 
     public int livingSoundTime;
@@ -388,6 +407,23 @@ public abstract class EntityLiving extends EntityLivingBase {
 
     public boolean canEquipItem(ItemStack stack) {
         return true;
+    }
+
+    /**
+     * A picked-up item lying on the ground replaces the held or worn item when it is better (1.12 protected hook of the pick-up loop):
+     * the modern mob decides which slot and whether the item is an upgrade, the replaced item is dropped, the pick-up is animated.
+     */
+    protected void updateEquipmentIfNeeded(legacyconnector.v1_12_2.net.minecraft.entity.item.EntityItem itemEntity) {
+        Mob m = mcc$mob();
+        if (m == null || itemEntity == null || !(itemEntity.mcc$entity instanceof net.minecraft.world.entity.item.ItemEntity ie)) return;
+        var stack = ie.getItem();
+        if (stack.isEmpty() || !canEquipItem(org.kylepitcock.legacyconnector.v1_12_2.bridge.Stacks1122.view(stack))) return;
+        var equipped = m.equipItemIfPossible(stack.copy());
+        if (equipped.isEmpty()) return;
+        m.onItemPickup(ie);
+        m.take(ie, equipped.getCount());
+        stack.shrink(equipped.getCount());
+        if (stack.isEmpty()) ie.discard();
     }
 
     /** Right-clicking the mob (after the leash and name tag handling); true when it used the click. */

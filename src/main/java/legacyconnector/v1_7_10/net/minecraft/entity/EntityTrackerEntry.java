@@ -28,6 +28,16 @@ public class EntityTrackerEntry {
         this.myEntity = entity;
     }
 
+    /** 1.7.10's constructor of the tracker: how far (blocks), how often (ticks) and whether velocity updates are sent; the modern tracker owns the real values. */
+    public EntityTrackerEntry(Entity entity, int blocksDistanceThreshold, int updateFrequency, boolean sendVelocityUpdates) {
+        this.myEntity = entity;
+        this.blocksDistanceThreshold = blocksDistanceThreshold;
+        this.updateFrequency = updateFrequency;
+        this.sendVelocityUpdates = sendVelocityUpdates;
+    }
+
+    public boolean sendVelocityUpdates = true;
+
     public static Set mcc$get$trackingPlayers(EntityTrackerEntry e) {
         return EntityTracker.mcc$trackingPlayers(e.myEntity);
     }
@@ -46,8 +56,23 @@ public class EntityTrackerEntry {
         if (myEntity instanceof EntityPlayerMP self) EntityTracker.mcc$send(self, packet);
     }
 
+    /** The packet that spawns the entity on a client (1.7.10 {@code func_151260_c}); the modern tracker builds it, so there is none to hand out. */
+    public Packet func_151260_c() {
+        return null;
+    }
+
     public void sendPacketToAllTrackingPlayers(Packet packet) {
         func_151259_a(packet);
+    }
+
+    /** Starts tracking the entity for each player of the list (the modern tracker decides by range; see {@link #tryStartWachingThis}). */
+    public void sendEventsToPlayers(java.util.List players) {
+        for (int i = 0; i < players.size(); i++) tryStartWachingThis((EntityPlayerMP) players.get(i));
+    }
+
+    /** 1.7.10's {@code sendLocationToAllClients}: refreshes who tracks the entity from the given players (the modern tracker owns the ranges). */
+    public void sendLocationToAllClients(java.util.List players) {
+        sendEventsToPlayers(players);
     }
 
     /** Starts sending the entity to the player if in range; the modern tracker does this every tick by itself. */

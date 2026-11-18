@@ -27,10 +27,25 @@ public class BlockStateContainer {
         Map<Map<IProperty<?>, Comparable<?>>, StateImplementation> byValues = new java.util.LinkedHashMap<>();
         for (StateImplementation s : states) byValues.put(s.getProperties(), s);
         for (StateImplementation s : states) {
-            s.link(states);
+            s.link(byValues);
             s.buildPropertyValueTable(byValues);
         }
         this.validStates = ImmutableList.copyOf(states);
+    }
+
+    private static final java.util.regex.Pattern NAME_PATTERN = java.util.regex.Pattern.compile("^[a-z0-9_]+$");
+
+    /**
+     * Vanilla's property check (mods' own containers call it while building states): the property's name. Invalid names are logged,
+     * not thrown as in 1.12, since the states are only stored as one {@code meta} property here and loading the block matters more.
+     */
+    public static String validateProperty(Block block, IProperty<?> property) {
+        String name = property.getName();
+        if (!NAME_PATTERN.matcher(name).matches()) {
+            org.slf4j.LoggerFactory.getLogger("LegacyConnector/BlockState").debug("Block {} has an invalidly named property: {}",
+                    block == null ? null : block.getClass().getName(), name);
+        }
+        return name;
     }
 
     /** Forge's {@code ExtendedBlockState} super call: listed properties plus unlisted ones (unlisted values live in the states' extended part). */
@@ -127,6 +142,13 @@ public class BlockStateContainer {
             this.values = values;
         }
 
+        /** Forge: a state with its neighbour table already built (mods' own state containers copy states this way). */
+        protected StateImplementation(Block block, ImmutableMap<IProperty<?>, Comparable<?>> values,
+                com.google.common.collect.ImmutableTable<IProperty<?>, Comparable<?>, IBlockState> propertyValueTable) {
+            this(block, values);
+            this.propertyValueTable = propertyValueTable;
+        }
+
         /** The state for each other value of each property (vanilla's neighbour table; mods' state classes read it). */
         protected com.google.common.collect.ImmutableTable<IProperty<?>, Comparable<?>, IBlockState> propertyValueTable;
 
@@ -150,19 +172,32 @@ public class BlockStateContainer {
             this.propertyValueTable = com.google.common.collect.ImmutableTable.copyOf(table);
         }
 
-        void link(List<StateImplementation> all) {
-            for (StateImplementation other : all) {
-                if (other == this) continue;
-                // a neighbour differs from this state in exactly one property
-                IProperty<?> differing = null;
-                int diffs = 0;
-                for (var e : values.entrySet()) {
-                    if (!e.getValue().equals(other.values.get(e.getKey()))) {
-                        differing = e.getKey();
-                        diffs++;
-                    }
+        /** Neighbour table key: the value's serialized name (an enum's own text may be shared: quartz lines_x, lines_y and lines_z all print "lines"). */
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        private static String neighbourKey(IProperty<?> property, Object value) {
+            String name;
+            try {
+                name = ((IProperty) property).getName((Comparable) value);
+            } catch (RuntimeException e) {
+                name = String.valueOf(value);
+            }
+            return property.getName() + "=" + name;
+        }
+
+        /**
+         * Fills the neighbour table: for every property and every other allowed value, the state that differs in exactly that property. One hash lookup per
+         * (property, value), not a scan of all states (a fence with many properties has tens of thousands of states: the scan took minutes).
+         */
+        void link(Map<Map<IProperty<?>, Comparable<?>>, StateImplementation> byValues) {
+            for (var entry : values.entrySet()) {
+                IProperty<?> property = entry.getKey();
+                for (Comparable<?> value : property.getAllowedValues()) {
+                    if (value.equals(entry.getValue())) continue;
+                    Map<IProperty<?>, Comparable<?>> wanted = new HashMap<>(values);
+                    wanted.put(property, value);
+                    StateImplementation other = byValues.get(wanted);
+                    if (other != null) neighbours.put(neighbourKey(property, value), other);
                 }
-                if (diffs == 1) neighbours.put(differing.getName() + "=" + other.values.get(differing), other);
             }
         }
 
@@ -188,7 +223,7 @@ public class BlockStateContainer {
             Comparable<?> current = property == null ? null : values.get(property);
             if (current == null) return this; // vanilla blocks carry no properties here: the state stays as it is
             if (current.equals(value)) return this;
-            StateImplementation next = neighbours.get(property.getName() + "=" + value);
+            StateImplementation next = neighbours.get(neighbourKey(property, value));
             return next != null ? next : this;
         }
 

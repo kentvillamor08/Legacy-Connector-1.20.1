@@ -6,6 +6,20 @@ import legacyconnector.v1_12_2.net.minecraftforge.registries.IForgeRegistryEntry
 
 /** 1.12.2 {@code Item}: a registry entry with an unlocalized name, stack/damage limits and a creative tab. */
 public class Item extends IForgeRegistryEntry.Impl<Item> {
+    /** Forge: the horse armour tier of this item, which gives the armour points and the layer texture. */
+    public legacyconnector.v1_12_2.net.minecraft.entity.passive.HorseArmorType getHorseArmorType(ItemStack stack) {
+        return legacyconnector.v1_12_2.net.minecraft.entity.passive.HorseArmorType.getByItem(this);
+    }
+
+    /** Forge: the texture path of the horse armour layer a horse wears with this item. */
+    public String getHorseArmorTexture(legacyconnector.v1_12_2.net.minecraft.entity.EntityLiving wearer, ItemStack stack) {
+        return getHorseArmorType(stack).getTextureName();
+    }
+
+    /** Forge: called every tick on the armour a horse wears. */
+    public void onHorseArmorTick(legacyconnector.v1_12_2.net.minecraft.world.World world, legacyconnector.v1_12_2.net.minecraft.entity.EntityLiving horse, ItemStack armor) {
+    }
+
     public static final legacyconnector.v1_12_2.net.minecraft.util.registry.RegistryNamespaced<legacyconnector.v1_12_2.net.minecraft.util.ResourceLocation, Item> REGISTRY = org.kylepitcock.legacyconnector.v1_12_2.bridge.Registries1122.view(org.kylepitcock.legacyconnector.v1_12_2.bridge.Registries1122.ITEMS, "air");
     protected int maxStackSize = 64;
     private int maxDamage;
@@ -224,23 +238,28 @@ public class Item extends IForgeRegistryEntry.Impl<Item> {
         }
 
         public int getMaxUses() {
-            return maxUses;
+            return org.kylepitcock.legacyconnector.v1_12_2.bridge.CoremodSites1122.material( // coremod hook site (no-op unless listed)
+                    org.kylepitcock.legacyconnector.v1_12_2.bridge.CoremodSites1122.MATERIAL_MAX_USES, this, maxUses);
         }
 
         public float getEfficiency() {
-            return efficiency;
+            return org.kylepitcock.legacyconnector.v1_12_2.bridge.CoremodSites1122.material(
+                    org.kylepitcock.legacyconnector.v1_12_2.bridge.CoremodSites1122.MATERIAL_EFFICIENCY, this, efficiency);
         }
 
         public float getAttackDamage() {
-            return attackDamage;
+            return org.kylepitcock.legacyconnector.v1_12_2.bridge.CoremodSites1122.material(
+                    org.kylepitcock.legacyconnector.v1_12_2.bridge.CoremodSites1122.MATERIAL_ATTACK_DAMAGE, this, attackDamage);
         }
 
         public int getHarvestLevel() {
-            return harvestLevel;
+            return org.kylepitcock.legacyconnector.v1_12_2.bridge.CoremodSites1122.material(
+                    org.kylepitcock.legacyconnector.v1_12_2.bridge.CoremodSites1122.MATERIAL_HARVEST_LEVEL, this, harvestLevel);
         }
 
         public int getEnchantability() {
-            return enchantability;
+            return org.kylepitcock.legacyconnector.v1_12_2.bridge.CoremodSites1122.material(
+                    org.kylepitcock.legacyconnector.v1_12_2.bridge.CoremodSites1122.MATERIAL_ENCHANTABILITY, this, enchantability);
         }
 
         public ToolMaterial setRepairItem(ItemStack stack) {
@@ -351,7 +370,9 @@ public class Item extends IForgeRegistryEntry.Impl<Item> {
     public int getMetadata(ItemStack stack) {
         // Forge: the stack's metadata. Items that do not map damage themselves (getMetadata(int) is 0) answer the damage value, which is
         // what CoFH's ItemHelper.getItemDamage reads through Items.DIAMOND to tell one subtype of a stack from another
-        int damage = stack.getItemDamage();
+        // the stored value, not getItemDamage(): that asks Item.getDamage, which an item may define through getMetadata(stack) (Chisels & Bits'
+        // ItemChisel.getDamage = max(getMetadata(stack), nbt damage)), a StackOverflowError that crashed the server on the first tick
+        int damage = stack.getMetadata();
         int meta = getMetadata(damage);
         return meta == 0 ? damage : meta;
     }

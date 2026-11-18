@@ -42,6 +42,26 @@ public final class LegacyRenderTypes extends RenderType {
                     .setDepthTestState(LEGACY_NO_DEPTH)
                     .createCompositeState(true)), "WATER_MASK"));
 
+    /**
+     * Translucent textured geometry drawn in the world without depth test, lighting and lightmap (what 1.7.10 left on at the
+     * block outline and RenderWorldLastEvent): the entity shader's directional light and lightmap darkened Thaumcraft's aspect icons
+     * over an aura node to about 0.72 of their colour. The eyes shader is plain texture times vertex colour.
+     */
+    private static final Function<ResourceLocation, RenderType> TRANSLUCENT_UNLIT_NO_DEPTH = Util.memoize(texture -> batchingClass(create(
+            "legacyconnector_translucent_unlit_no_depth", DefaultVertexFormat.NEW_ENTITY, VertexFormat.Mode.QUADS, 1536, false, true,
+            CompositeState.builder()
+                    .setShaderState(RENDERTYPE_EYES_SHADER)
+                    .setTextureState(new TextureStateShard(texture, false, false))
+                    .setTransparencyState(TRANSLUCENT_TRANSPARENCY)
+                    .setCullState(NO_CULL)
+                    .setDepthTestState(LEGACY_NO_DEPTH)
+                    .setWriteMaskState(COLOR_WRITE)
+                    .createCompositeState(false)), "WATER_MASK"));
+
+    public static RenderType translucentUnlitNoDepth(ResourceLocation texture) {
+        return TRANSLUCENT_UNLIT_NO_DEPTH.apply(texture);
+    }
+
     private static final Function<ResourceLocation, RenderType> TRANSLUCENT_NO_DEPTH = Util.memoize(texture -> batchingClass(create(
             "legacyconnector_translucent_no_depth", DefaultVertexFormat.NEW_ENTITY, VertexFormat.Mode.QUADS, 1536, true, true,
             CompositeState.builder()
@@ -78,6 +98,27 @@ public final class LegacyRenderTypes extends RenderType {
                     .setCullState(NO_CULL)
                     .setWriteMaskState(COLOR_WRITE)
                     .createCompositeState(false)));
+
+    /**
+     * glBlendFunc(GL_ONE, GL_ONE) with a texture in the world: glow layers of mob models. 1.7.10 drew them with its default alpha test
+     * (texels below 0.1 alpha dropped), and such textures keep white RGB in their transparent texels; the eyes type adds ONE, ONE and
+     * ignores alpha, so the whole model turned white. This type drops the transparent texels (the cutout shader) and adds the rest.
+     */
+    private static final Function<ResourceLocation, RenderType> ADDITIVE_CUTOUT = Util.memoize(texture -> create(
+            "legacyconnector_additive_cutout", DefaultVertexFormat.NEW_ENTITY, VertexFormat.Mode.QUADS, 1536, false, true,
+            CompositeState.builder()
+                    .setShaderState(RENDERTYPE_ENTITY_CUTOUT_NO_CULL_SHADER)
+                    .setTextureState(new TextureStateShard(texture, false, false))
+                    .setTransparencyState(ADDITIVE_TRANSPARENCY)
+                    .setCullState(NO_CULL)
+                    .setLightmapState(LIGHTMAP)
+                    .setOverlayState(OVERLAY)
+                    .setWriteMaskState(COLOR_WRITE)
+                    .createCompositeState(false)));
+
+    public static RenderType additiveCutout(ResourceLocation texture) {
+        return ADDITIVE_CUTOUT.apply(texture);
+    }
 
     private static final Function<ResourceLocation, RenderType> ADDITIVE_ALPHA_NO_DEPTH = Util.memoize(texture -> batchingClass(create(
             "legacyconnector_additive_alpha_no_depth", DefaultVertexFormat.NEW_ENTITY, VertexFormat.Mode.QUADS, 1536, false, true,

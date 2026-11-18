@@ -75,3 +75,27 @@ net/minecraft/core/registries/Registries	DECORATED_POT_PATTERNS	:*	DECORATED_POT
 net/minecraft/core/registries/BuiltInRegistries	DECORATED_POT_PATTERNS	:*	DECORATED_POT_PATTERN
 # --- Minecraft 1.21.1 renamed shader getter (used by Palladium TexturedIcon)
 net/minecraft/client/renderer/GameRenderer	getPositionColorTexShader	()Lnet/minecraft/client/renderer/ShaderInstance;	getPositionTexColorShader
+# 2026-11-13 ATM 9 gap round 2: BlockState.neighborChanged is handleNeighborChanged (same parameters)
+net/minecraft/world/level/block/state/BlockState	neighborChanged	*	handleNeighborChanged
+net/minecraft/world/level/block/state/BlockBehaviour$BlockStateBase	neighborChanged	*	handleNeighborChanged
+net/minecraft/network/syncher/EntityDataAccessor	getId	()I	id
+net/minecraft/network/syncher/EntityDataAccessor	getSerializer	*	serializer
+net/minecraft/world/level/block/state/BlockBehaviour$Properties	noParticlesOnBreak	*	noTerrainParticles
+net/minecraft/world/entity/decoration/PaintingVariant	getWidth	*	width
+net/minecraft/world/entity/decoration/PaintingVariant	getHeight	*	height
+net/minecraft/world/level/storage/ServerLevelData	getAllowCommands	*	isAllowCommands
+net/minecraft/world/entity/Entity	getPortalWaitTime	*	getDimensionChangingDelay
+net/minecraft/world/level/block/entity/JukeboxBlockEntity	getFirstItem	*	getTheItem
+net/minecraft/world/level/block/FlowerPotBlock	getContent	*	getPotted
+net/minecraft/server/MinecraftServer	tickTimes	:*	tickTimesNanos
+net/minecraft/advancements/Criterion	getTrigger	*	triggerInstance
+net/minecraft/world/level/storage/loot/functions/SetNbtFunction	setTag	(Lnet/minecraft/nbt/CompoundTag;)Lnet/minecraft/world/level/storage/loot/functions/LootItemConditionalFunction$Builder;	setCustomData
+net/minecraft/client/renderer/RenderType	translucentNoCrumbling	*	translucent
+net/minecraft/world/item/CreativeModeTab$Builder	withBackgroundLocation	*	backgroundTexture
+net/minecraft/client/gui/components/toasts/SystemToast$SystemToastIds	TUTORIAL_HINT	:*	PERIODIC_NOTIFICATION
+net/minecraft/client/gui/components/ChatComponent	refreshTrimmedMessage	*	refreshTrimmedMessages
+net/minecraft/network/chat/ClickEvent$Action	getName	*	getSerializedName
+net/minecraft/world/level/block/ChangeOverTimeBlock	onRandomTick	*	changeOverTime
+net/minecraft/server/level/ChunkHolder	getLastAvailableStatus	*	getLatestStatus
+net/minecraft/client/renderer/ViewArea	chunks	:*	sections
+net/minecraft/world/effect/MobEffect	isDurationEffectTick	*	shouldApplyEffectTickThisTick

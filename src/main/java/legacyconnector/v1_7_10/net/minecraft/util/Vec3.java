@@ -14,6 +14,14 @@ public class Vec3 {
         this.zCoord = z;
     }
 
+    /** Overwrites the three components (the vector is mutable, as in 1.7.10); returns this. */
+    public Vec3 setComponents(double x, double y, double z) {
+        this.xCoord = x == -0.0D ? 0.0D : x;
+        this.yCoord = y == -0.0D ? 0.0D : y;
+        this.zCoord = z == -0.0D ? 0.0D : z;
+        return this;
+    }
+
     public static Vec3 createVectorHelper(double x, double y, double z) {
         return new Vec3(x, y, z);
     }
@@ -107,5 +115,11 @@ public class Vec3 {
 
     public net.minecraft.world.phys.Vec3 mcc$modern() {
         return new net.minecraft.world.phys.Vec3(xCoord, yCoord, zCoord);
+    }
+
+    // Members125 batch 1
+
+    /** 1.2.5 {@code Vec3.resetPool()}: vectors are not pooled in this layer, so there is nothing to reset. */
+    public static void mcc125$resetPool() {
     }
 }

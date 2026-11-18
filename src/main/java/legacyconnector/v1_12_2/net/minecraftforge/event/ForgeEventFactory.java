@@ -233,6 +233,31 @@ public class ForgeEventFactory {
         return event;
     }
 
+    /** The placement event of several blocks placed at once (beds, doors, mod multiblocks): canceled when a mod canceled it; the modern multi-place event is fired. */
+    public static legacyconnector.v1_12_2.net.minecraftforge.event.world.BlockEvent.MultiPlaceEvent onPlayerMultiBlockPlace(EntityPlayer player,
+            List<legacyconnector.v1_12_2.net.minecraftforge.common.util.BlockSnapshot> blockSnapshots, legacyconnector.v1_12_2.net.minecraft.util.EnumFacing direction,
+            EnumHand hand) {
+        var first = blockSnapshots.get(0);
+        var world = first.getWorld();
+        var placedAgainst = world == null ? null : world.getBlockState(first.getPos().offset(direction.getOpposite()));
+        var event = new legacyconnector.v1_12_2.net.minecraftforge.event.world.BlockEvent.MultiPlaceEvent(blockSnapshots, placedAgainst, player, hand);
+        var modern = new java.util.ArrayList<net.neoforged.neoforge.common.util.BlockSnapshot>();
+        for (var s : blockSnapshots) {
+            var m = mcc$modernSnapshot(s);
+            if (m != null) modern.add(m);
+        }
+        if (modern.size() == blockSnapshots.size() && EventHooks.onMultiBlockPlace(player(player), modern, direction.mcc$modern())) event.setCanceled(true);
+        return event;
+    }
+
+    /** A loaded loot table goes through the LootTableLoadEvent: handlers edit or replace it, a canceled event leaves the empty table. */
+    public static legacyconnector.v1_12_2.net.minecraft.world.storage.loot.LootTable loadLootTable(legacyconnector.v1_12_2.net.minecraft.util.ResourceLocation name,
+            legacyconnector.v1_12_2.net.minecraft.world.storage.loot.LootTable table, legacyconnector.v1_12_2.net.minecraft.world.storage.loot.LootTableManager manager) {
+        var event = new legacyconnector.v1_12_2.net.minecraftforge.event.LootTableLoadEvent(name, table, manager);
+        return legacyconnector.v1_12_2.net.minecraftforge.common.MinecraftForge.EVENT_BUS.post(event)
+                ? legacyconnector.v1_12_2.net.minecraft.world.storage.loot.LootTable.EMPTY_LOOT_TABLE : event.getTable();
+    }
+
     /** The placement event of a block placed by an entity (canceled when a mod canceled the placement; a modern placement event is fired). */
     public static legacyconnector.v1_12_2.net.minecraftforge.event.world.BlockEvent.EntityPlaceEvent onBlockPlace(Entity entity,
             legacyconnector.v1_12_2.net.minecraftforge.common.util.BlockSnapshot blockSnapshot, legacyconnector.v1_12_2.net.minecraft.util.EnumFacing direction) {
@@ -312,7 +337,7 @@ public class ForgeEventFactory {
         var level = world == null ? null : world.mcc$level();
         if (mob == null || !(level instanceof net.minecraft.world.level.ServerLevelAccessor accessor)) return false;
         var event = new net.neoforged.neoforge.event.entity.living.FinalizeSpawnEvent(mob, accessor, x, y, z,
-                accessor.getCurrentDifficultyAt(mob.blockPosition()), net.minecraft.world.entity.MobSpawnType.NATURAL, null, null);
+                mcc$difficulty(accessor, mob.blockPosition()), net.minecraft.world.entity.MobSpawnType.NATURAL, null, null);
         return net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(event).isCanceled();
     }
 
@@ -400,6 +425,19 @@ public class ForgeEventFactory {
         return canEntitySpawnSpawner(entity, world, x, y, z);
     }
 
+    /**
+     * Local difficulty for a spawn event. Off the server thread (a world generator populating a chunk on a worker thread, whose legacy
+     * World wraps the real level) the chunk lookup of {@code getCurrentDifficultyAt} waits for the very chunk being generated and
+     * deadlocks it, so the chunk-independent values are used there.
+     */
+    private static net.minecraft.world.DifficultyInstance mcc$difficulty(net.minecraft.world.level.ServerLevelAccessor accessor,
+            net.minecraft.core.BlockPos pos) {
+        var server = accessor.getServer();
+        if (server == null || server.isSameThread()) return accessor.getCurrentDifficultyAt(pos);
+        var level = accessor.getLevel();
+        return new net.minecraft.world.DifficultyInstance(level.getDifficulty(), level.getDayTime(), 0L, level.getMoonBrightness());
+    }
+
     /** The spawn finalization of a mob a spawner made: true when a mod took over. */
     public static boolean doSpecialSpawn(legacyconnector.v1_12_2.net.minecraft.entity.EntityLiving entity, World world, float x, float y, float z,
             legacyconnector.v1_12_2.net.minecraft.tileentity.MobSpawnerBaseLogic spawner) {
@@ -407,7 +445,7 @@ public class ForgeEventFactory {
         var level = world == null ? null : world.mcc$level();
         if (mob == null || !(level instanceof net.minecraft.world.level.ServerLevelAccessor accessor)) return false;
         var event = new net.neoforged.neoforge.event.entity.living.FinalizeSpawnEvent(mob, accessor, x, y, z,
-                accessor.getCurrentDifficultyAt(mob.blockPosition()),
+                mcc$difficulty(accessor, mob.blockPosition()),
                 spawner != null ? net.minecraft.world.entity.MobSpawnType.SPAWNER : net.minecraft.world.entity.MobSpawnType.NATURAL, null, null);
         return net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(event).isCanceled();
     }
@@ -483,5 +521,11 @@ public class ForgeEventFactory {
         var event = new legacyconnector.v1_12_2.net.minecraftforge.event.village.MerchantTradeOffersEvent(merchant, player, copy);
         mcc$bus().post(event);
         return event.getList();
+    }
+
+    /** Posts the start of an item use; the returned duration (zero when cancelled) is the one the use runs for. */
+    public static int onItemUseStart(EntityLivingBase entity, ItemStack item, int duration) {
+        if (entity == null || !(entity.mcc$modern() instanceof net.minecraft.world.entity.LivingEntity living)) return duration;
+        return EventHooks.onItemUseStart(living, Stacks1122.toModern(item), duration);
     }
 }

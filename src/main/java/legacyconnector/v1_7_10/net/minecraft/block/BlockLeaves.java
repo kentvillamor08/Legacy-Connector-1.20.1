@@ -26,6 +26,7 @@ public class BlockLeaves extends legacyconnector.v1_7_10.net.minecraft.block.Blo
 
     protected BlockLeaves(legacyconnector.v1_7_10.net.minecraft.block.material.Material material) {
         super(material);
+        setTickRandomly(true); // 1.7.10's constructor: leaves tick at random so they can decay
     }
 
     public BlockLeaves() {
@@ -67,6 +68,12 @@ public class BlockLeaves extends legacyconnector.v1_7_10.net.minecraft.block.Blo
         return world.mcc$blockTint(x, y, z, 1);
     }
 
+    /**
+     * 1.2.x's working array of the decay search (32 x 32 x 32 entries, made on first use): a mod's own leaves class that copies the decay code reads and fills it. The shim's own
+     * decay does not need it.
+     */
+    public int[] adjacentTreeBlocks;
+
     /** The wood names of the leaf types, by metadata bits 0-1 (subclasses list theirs). */
     public String[] func_150125_e() {
         return new String[] {"oak", "spruce", "birch", "jungle"};
@@ -91,5 +98,95 @@ public class BlockLeaves extends legacyconnector.v1_7_10.net.minecraft.block.Blo
         java.util.ArrayList<legacyconnector.v1_7_10.net.minecraft.item.ItemStack> ret = new java.util.ArrayList<>();
         ret.add(new legacyconnector.v1_7_10.net.minecraft.item.ItemStack(this, 1, world.getBlockMetadata(x, y, z) & 3));
         return ret;
+    }
+
+    // ---- decay (1.7.10 BlockLeaves): metadata bit 8 = check for a log, bit 4 = never decays (player placed). Vanilla leaves decay natively.
+
+    private int[] field_150128_a;
+
+    @Override
+    public boolean isLeaves(legacyconnector.v1_7_10.net.minecraft.world.IBlockAccess world, int x, int y, int z) {
+        return true;
+    }
+
+    /** Forge: marks the leaf to check for a log on its next random tick. */
+    @Override
+    public void beginLeavesDecay(legacyconnector.v1_7_10.net.minecraft.world.World world, int x, int y, int z) {
+        if (mcc$vanilla != null) return;
+        world.setBlockMetadataWithNotify(x, y, z, world.getBlockMetadata(x, y, z) | 8, 4);
+    }
+
+    /** A leaf that decays drops what it would drop when broken, then goes. */
+    protected void removeLeaves(legacyconnector.v1_7_10.net.minecraft.world.World world, int x, int y, int z) {
+        dropBlockAsItem(world, x, y, z, world.getBlockMetadata(x, y, z), 0);
+        world.setBlockToAir(x, y, z);
+    }
+
+    /** Hook for extra drops of a decaying leaf (the oak's apples): nothing by default. */
+    protected void func_150124_c(legacyconnector.v1_7_10.net.minecraft.world.World world, int x, int y, int z, int meta, int chance) {
+    }
+
+    /** Breaking a leaf tells the leaves around it to check again. */
+    @Override
+    public void breakBlock(legacyconnector.v1_7_10.net.minecraft.world.World world, int x, int y, int z, legacyconnector.v1_7_10.net.minecraft.block.Block block, int meta) {
+        super.breakBlock(world, x, y, z, block, meta);
+        if (mcc$vanilla != null) return;
+        int range = 2;
+        if (!world.checkChunksExist(x - range, y - range, z - range, x + range, y + range, z + range)) return;
+        for (int i = -1; i <= 1; i++) {
+            for (int j = -1; j <= 1; j++) {
+                for (int k = -1; k <= 1; k++) {
+                    legacyconnector.v1_7_10.net.minecraft.block.Block b = world.getBlock(x + i, y + j, z + k);
+                    if (b != null && b.isLeaves(world, x + i, y + j, z + k)) b.beginLeavesDecay(world, x + i, y + j, z + k);
+                }
+            }
+        }
+    }
+
+    /** The decay check: a block that sustains leaves (a log) within four leaves keeps the leaf, else it drops and goes. */
+    @Override
+    public void updateTick(legacyconnector.v1_7_10.net.minecraft.world.World world, int x, int y, int z, java.util.Random rand) {
+        if (mcc$vanilla != null) {
+            super.updateTick(world, x, y, z, rand);
+            return;
+        }
+        if (world.isRemote) return;
+        int meta = world.getBlockMetadata(x, y, z);
+        if ((meta & 8) == 0 || (meta & 4) != 0) return;
+        final int r = 4, reach = r + 1, size = 32, area = size * size, half = size / 2;
+        if (field_150128_a == null) field_150128_a = new int[size * size * size];
+        int[] near = field_150128_a;
+        if (!world.checkChunksExist(x - reach, y - reach, z - reach, x + reach, y + reach, z + reach)) return;
+        for (int i = -r; i <= r; i++) {
+            for (int j = -r; j <= r; j++) {
+                for (int k = -r; k <= r; k++) {
+                    legacyconnector.v1_7_10.net.minecraft.block.Block b = world.getBlock(x + i, y + j, z + k);
+                    int at = (i + half) * area + (j + half) * size + k + half;
+                    if (b == null || !b.canSustainLeaves(world, x + i, y + j, z + k)) near[at] = b != null && b.isLeaves(world, x + i, y + j, z + k) ? -2 : -1;
+                    else near[at] = 0;
+                }
+            }
+        }
+        for (int step = 1; step <= 4; step++) {
+            for (int i = -r; i <= r; i++) {
+                for (int j = -r; j <= r; j++) {
+                    for (int k = -r; k <= r; k++) {
+                        if (near[(i + half) * area + (j + half) * size + k + half] != step - 1) continue;
+                        if (near[(i + half - 1) * area + (j + half) * size + k + half] == -2) near[(i + half - 1) * area + (j + half) * size + k + half] = step;
+                        if (near[(i + half + 1) * area + (j + half) * size + k + half] == -2) near[(i + half + 1) * area + (j + half) * size + k + half] = step;
+                        if (near[(i + half) * area + (j + half - 1) * size + k + half] == -2) near[(i + half) * area + (j + half - 1) * size + k + half] = step;
+                        if (near[(i + half) * area + (j + half + 1) * size + k + half] == -2) near[(i + half) * area + (j + half + 1) * size + k + half] = step;
+                        if (near[(i + half) * area + (j + half) * size + k + half - 1] == -2) near[(i + half) * area + (j + half) * size + k + half - 1] = step;
+                        if (near[(i + half) * area + (j + half) * size + k + half + 1] == -2) near[(i + half) * area + (j + half) * size + k + half + 1] = step;
+                    }
+                }
+            }
+        }
+        if (near[half * area + half * size + half] >= 0) {
+            world.setBlockMetadataWithNotify(x, y, z, meta & -9, 4);
+        } else {
+            dropBlockAsItem(world, x, y, z, world.getBlockMetadata(x, y, z), 0);
+            world.setBlockToAir(x, y, z);
+        }
     }
 }

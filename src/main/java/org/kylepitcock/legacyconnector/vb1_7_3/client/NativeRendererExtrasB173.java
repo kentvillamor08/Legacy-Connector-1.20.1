@@ -12,6 +12,9 @@ import org.kylepitcock.legacyconnector.vb1_7_3.*;
 final class NativeRendererExtrasB173 {
     private NativeRendererExtrasB173(){}
     static RendererContextB173.Extras create(net.minecraft.world.entity.Entity entity,PoseStack pose,MultiBufferSource buffers){
+        return create(entity.level(),entity.getId(),pose,buffers);
+    }
+    static RendererContextB173.Extras create(net.minecraft.world.level.Level level,int id,PoseStack pose,MultiBufferSource buffers){
         return new RendererContextB173.Extras(){
                 @Override public void item(legacyconnector.vb1_7_3.net.minecraft.entity.LivingEntity living,
                         legacyconnector.vb1_7_3.net.minecraft.item.ItemStack stack,Matrix4f transform,RendererContextB173.Style style){
@@ -21,7 +24,7 @@ final class NativeRendererExtrasB173 {
                         pose.mulPose(transform);
                         var nativeLiving=living!=null&&living.mcc$modern instanceof net.minecraft.world.entity.LivingEntity l?l:null;
                         Minecraft.getInstance().getItemRenderer().renderStatic(nativeLiving,modern,ItemDisplayContext.NONE,
-                                false,pose,buffers,entity.level(),RenderContext.vertexLight(),RenderContext.overlay(),entity.getId());
+                                false,pose,buffers,level,RenderContext.vertexLight(),RenderContext.overlay(),id);
                     }finally{pose.popPose();}
                 }
                 @Override public void text(String text,float x,float y,int argb,boolean shadow,Matrix4f transform,RendererContextB173.Style style){
@@ -37,6 +40,16 @@ final class NativeRendererExtrasB173 {
                     drawQuad(vertices,transform,texture,style,pose,NativeRendererExtrasB173::spriteBounds);
                 }
                 @Override public int width(String text){return Minecraft.getInstance().font.width(text);}
+                @Override public void line(RendererContextB173.Vertex start,RendererContextB173.Vertex end,Matrix4f transform,RendererContextB173.Style style){
+                    if(start.x()==end.x()&&start.y()==end.y()&&start.z()==end.z())return;
+                    applyStyle(style);pose.pushPose();
+                    try{
+                        pose.mulPose(transform);
+                        double[] a={start.x(),start.y(),start.z(),0,0,start.argb(),RenderContext.vertexLight(),1};
+                        double[] b={end.x(),end.y(),end.z(),0,0,end.argb(),RenderContext.vertexLight(),1};
+                        if(!RenderContext.line(a,b))throw new IllegalStateException("Beta line requires an active native render context");
+                    }finally{pose.popPose();}
+                }
                 @Override public legacyconnector.vb1_7_3.net.minecraft.entity.LivingEntity camera(){
                     var camera=Minecraft.getInstance().getCameraEntity();
                     var view=EntityViewsB173.wrap(camera);return view instanceof legacyconnector.vb1_7_3.net.minecraft.entity.LivingEntity living?living:null;

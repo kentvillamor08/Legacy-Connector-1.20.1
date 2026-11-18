@@ -3,6 +3,7 @@ package org.kylepitcock.legacyconnector.loader.transform;
 import org.kylepitcock.legacyconnector.loader.BetaJars;
 import org.kylepitcock.legacyconnector.loader.LegacyJar;
 import org.kylepitcock.legacyconnector.loader.mapping.BetaMappings;
+import org.kylepitcock.legacyconnector.loader.shim.ShimIndex;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.ClassWriter;
@@ -47,6 +48,10 @@ public final class BetaDeobfuscator {
 
     /** Renames the classes of {@code jar} in place (keys become the new names); returns report notes. */
     public static List<String> apply(LegacyJar jar, Map<String, byte[]> classes) {
+        return apply(jar,classes,ShimIndex.empty());
+    }
+
+    public static List<String> apply(LegacyJar jar,Map<String,byte[]> classes,ShimIndex shim) {
         List<String> notes = new ArrayList<>();
         BetaMappings.Names names = BetaMappings.get().side(BetaJars.side(jar));
         String pkg = BetaJars.packageOf(jar);
@@ -80,7 +85,7 @@ public final class BetaDeobfuscator {
         }
         if (!apiCopies.isEmpty()) notes.add("Dropped bundled copies of the ModLoader/Forge API (provided by the layer): " + abbreviate(apiCopies));
 
-        Namer namer = new Namer(names, local, localMoved);
+        Namer namer = new Namer(names, local, localMoved,shim);
         // A mod class that declares a method under a name its override of a game method is renamed to would end up with two
         // identical methods: such members keep their obfuscated names in that class.
         for (var e : local.entrySet()) namer.preventCollisions(e.getKey(), e.getValue());
@@ -160,18 +165,40 @@ public final class BetaDeobfuscator {
         return new Local(reader.getSuperName(), reader.getInterfaces(), fields, methods);
     }
 
+    /** Suffix of a mod's own method renamed because its name is the readable name of an obfuscated game method it never overrode. */
+    static final String OWN_SUFFIX = "$b173own";
+
     private static final class Namer extends Remapper {
         private final BetaMappings.Names names;
         private final Map<String, Local> local;
         private final Map<String, String> localMoved;
+        private final ShimIndex shim;
         private final Map<String, String> memo = new HashMap<>();
         private final Set<String> keep = new HashSet<>();
         final TreeSet<String> unresolvedGame = new TreeSet<>();
 
-        Namer(BetaMappings.Names names, Map<String, Local> local, Map<String, String> localMoved) {
+        Namer(BetaMappings.Names names, Map<String, Local> local, Map<String, String> localMoved,ShimIndex shim) {
             this.names = names;
             this.local = local;
             this.localMoved = localMoved;
+            this.shim=shim;
+        }
+
+        /** Read only indexed API metadata: absent optional signatures must never be class-loaded here. */
+        private Local knownShim(String owner){
+            String mapped=map(owner);if(!mapped.startsWith("net/minecraft/"))return null;
+            var info=shim.get("legacyconnector/vb1_7_3/"+mapped);if(info==null)return null;
+            var inverse=new Remapper(){
+                @Override public String map(String name){
+                    String prefix="legacyconnector/vb1_7_3/";
+                    if(!name.startsWith(prefix))return name;
+                    String canonical=name.substring(prefix.length());
+                    return names.officialByNamed.getOrDefault(canonical,canonical);
+                }
+            };
+            var fields=new HashSet<String>();
+            for(String field:info.fields.keySet()){int colon=field.indexOf(':');fields.add(field.substring(0,colon)+":"+inverse.mapDesc(field.substring(colon+1)));}
+            return new Local(info.superName==null?null:inverse.map(info.superName),info.interfaces.stream().map(inverse::map).toArray(String[]::new),fields,List.of());
         }
 
         @Override
@@ -195,7 +222,39 @@ public final class BetaDeobfuscator {
             if (name.startsWith("<") || owner.startsWith("[")) return name;
             if (!keep.isEmpty() && keep.contains(owner + "." + name + descriptor)) return name;
             String hit = resolve(owner, name, descriptor, false);
-            return hit != null ? hit : name;
+            if (hit != null) return hit;
+            // the mod's own method that only shares the readable name of an obfuscated game method (Twilight Forest's critter
+            // canPlaceAt(World,x,y,z) beside the game's a(World,x,y,z)): renamed in the whole hierarchy so it does not override it
+            return shadowsGame(owner, name, descriptor) ? name + OWN_SUFFIX : name;
+        }
+
+        private boolean shadowsGame(String owner, String name, String desc) {
+            String key = "S" + owner + "." + name + desc;
+            String memoized = memo.get(key);
+            if (memoized != null) return !memoized.isEmpty();
+            boolean shadows = shadows(owner, name, desc, 0);
+            memo.put(key, shadows ? "y" : "");
+            return shadows;
+        }
+
+        private boolean shadows(String owner, String name, String desc, int depth) {
+            if (owner == null || depth > 64) return false;
+            if (names.isVanilla(owner)) return names.hidesObfuscated(owner, name, desc);
+            String superName;
+            String[] interfaces;
+            Local l = local.get(owner);
+            if (l != null) {
+                superName = l.superName;
+                interfaces = l.interfaces;
+            } else {
+                BetaJars.ClassMeta m = BetaJars.meta(owner);
+                if (m == null) return false;
+                superName = m.superName();
+                interfaces = m.interfaces();
+            }
+            if (shadows(superName, name, desc, depth + 1)) return true;
+            for (String i : interfaces) if (shadows(i, name, desc, depth + 1)) return true;
+            return false;
         }
 
         @Override
@@ -219,9 +278,11 @@ public final class BetaDeobfuscator {
                 String found=fieldOwner(own.superName,name,desc,depth+1);if(found!=null)return found;
                 for(String parent:own.interfaces){found=fieldOwner(parent,name,desc,depth+1);if(found!=null)return found;}
             }else{
-                var metadata=BetaJars.meta(owner);if(metadata==null)return null;
-                String found=fieldOwner(metadata.superName(),name,desc,depth+1);if(found!=null)return found;
-                for(String parent:metadata.interfaces()){found=fieldOwner(parent,name,desc,depth+1);if(found!=null)return found;}
+                var metadata=BetaJars.meta(owner);var api=metadata==null?knownShim(owner):null;
+                if(metadata==null&&api==null)return null;
+                if(api!=null&&api.fields.contains(name+":"+desc))return owner;
+                String found=fieldOwner(metadata!=null?metadata.superName():api.superName,name,desc,depth+1);if(found!=null)return found;
+                for(String parent:metadata!=null?metadata.interfaces():api.interfaces){found=fieldOwner(parent,name,desc,depth+1);if(found!=null)return found;}
             }
             return null;
         }
@@ -250,9 +311,11 @@ public final class BetaDeobfuscator {
                 interfaces = l.interfaces;
             } else {
                 BetaJars.ClassMeta m = BetaJars.meta(owner);
-                if (m == null) return null;
-                superName = m.superName();
-                interfaces = m.interfaces();
+                var api=m==null?knownShim(owner):null;
+                if(m==null&&api==null)return null;
+                if(api!=null&&field&&api.fields.contains(name+":"+desc))return null;
+                superName = m!=null?m.superName():api.superName;
+                interfaces = m!=null?m.interfaces():api.interfaces;
             }
             String hit = walk(superName, name, desc, field, depth + 1);
             if (hit != null) return hit;

@@ -185,6 +185,16 @@ public class Minecraft {
         return mc().isSameThread();
     }
 
+    /** Whether the unicode font is forced on. */
+    public boolean isUnicode() {
+        return mc().options.forceUnicodeFont().get();
+    }
+
+    /** The same for a task without a result. */
+    public com.google.common.util.concurrent.ListenableFuture addScheduledTask(Runnable task) {
+        return addScheduledTask(java.util.concurrent.Executors.callable(task));
+    }
+
     /** Runs the task on the client thread (now when already there); the future gives its result. */
     public com.google.common.util.concurrent.ListenableFuture addScheduledTask(java.util.concurrent.Callable task) {
         com.google.common.util.concurrent.SettableFuture future = com.google.common.util.concurrent.SettableFuture.create();
@@ -210,6 +220,7 @@ public class Minecraft {
     }
 
     public static EntityClientPlayerMP mcc$get$thePlayer(Minecraft m) {
+        if (org.kylepitcock.legacyconnector.v1_7_10.client.CoremodClientSites.hideLocalPlayer) return null;
         var p = mc().player;
         return p == null ? null : (EntityClientPlayerMP) EntityBridge.wrap(p);
     }
@@ -317,6 +328,11 @@ public class Minecraft {
 
     public void refreshResources() {
         mc().reloadResourcePacks();
+    }
+
+    /** Reloads the resource packs at the end of the tick (mods ask for it from anywhere; the reload itself runs on the render thread). */
+    public void scheduleResourcesRefresh() {
+        mc().execute(() -> mc().reloadResourcePacks());
     }
 
     public void shutdown() {
@@ -442,5 +458,43 @@ public class Minecraft {
 
     public void loadWorld(WorldClient world, String loadingMessage) {
         loadWorld(world);
+    }
+
+    // Members125 round 2: the lines of the F3 screen, which 1.2.5 mods read from the game (client only; empty without a world)
+
+    /** 1.2.5 {@code debugInfoRenders()}: the chunk statistics line ("C: 12/200. F: 0, ..."). */
+    public String debugInfoRenders() {
+        var renderer = mc().levelRenderer;
+        return renderer == null ? "" : renderer.getSectionStatistics();
+    }
+
+    /** 1.2.5 {@code getEntityDebug()}: the entity statistics line of the renderer ("E: 5/20, B: 0, ..."). */
+    public String getEntityDebug() {
+        var renderer = mc().levelRenderer;
+        return renderer == null ? "" : renderer.getEntityStatistics();
+    }
+
+    /** 1.2.5 {@code debugInfoEntities()}: "P: particles. T: entities of the world". */
+    public String debugInfoEntities() {
+        var level = mc().level;
+        return "P: " + mc().particleEngine.countParticles() + ". T: " + (level == null ? 0 : level.getEntityCount());
+    }
+
+    /** 1.2.5 {@code getWorldProviderName()}: the chunk provider's statistics string ("MultiplayerChunkCache: 25"). */
+    public String getWorldProviderName() {
+        var level = mc().level;
+        return level == null ? "" : level.gatherChunkSourceStats();
+    }
+
+    /** True while the F3 screen is shown (static, like {@code isGuiEnabled} and the other screen switches of 1.2.5's Minecraft). */
+    public static boolean isDebugInfoEnabled() {
+        return mc().getDebugOverlay().showDebugScreen();
+    }
+
+    // Members125 batch 3
+
+    /** 1.2.5's static version string ({@code Minecraft.C()}; the loader names it by its intermediary id). */
+    public static String mcc125$m_5378799() {
+        return "1.2.5";
     }
 }

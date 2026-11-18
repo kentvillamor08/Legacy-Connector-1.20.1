@@ -19,6 +19,16 @@ public final class LegacyB173Cow extends Cow {
     private LivingEntity legacy;
     public LivingEntity legacy(){return legacy;}
     public String texturePath(){return entityData.get(TEXTURE);}
+    /** The legacy mob posed like this host for its original renderer: Beta renderers read eye-height positions and body, head and limb angles. */
+    public LivingEntity prepareRenderView(float partial){
+        legacy.world=World.mcc$wrap(level());legacy.mcc$setTexture(texturePath());
+        legacy.prevX=xo;legacy.prevY=yo+legacy.standingEyeHeight;legacy.prevZ=zo;
+        legacy.setPosition(getX(),getY()+legacy.standingEyeHeight,getZ());legacy.pitch=getXRot();legacy.prevPitch=xRotO;
+        legacy.bodyYaw=yBodyRot;legacy.lastBodyYaw=yBodyRotO;legacy.yaw=getYHeadRot();legacy.prevYaw=yHeadRotO;
+        legacy.hurtTime=hurtTime;legacy.deathTime=deathTime;legacy.health=(int)Math.ceil(getHealth());legacy.age=tickCount;legacy.onGround=onGround();
+        legacy.lastWalkAnimationSpeed=walkAnimation.speed(0);legacy.walkAnimationSpeed=walkAnimation.speed(1);legacy.walkAnimationProgress=walkAnimation.position(1);
+        return legacy;
+    }
     public LegacyB173Cow(EntityType<? extends Cow> type,Level level,LivingEntity original){
         super(type,level);
         try{legacy=original!=null?original:(LivingEntity)MobsB173.info(type).registration().type().getConstructor(World.class).newInstance(World.mcc$wrap(level));}
@@ -46,7 +56,7 @@ public final class LegacyB173Cow extends Cow {
         legacy.despawnCounter=getNoActionTime();legacy.dead=isRemoved();
     }
     private void push(){
-        if(!Float.isFinite(legacy.width)||!Float.isFinite(legacy.height)||legacy.width<=0||legacy.height<=0)throw new IllegalStateException("Invalid legacy mob dimensions");
+        if(!Float.isFinite(legacy.width)||!Float.isFinite(legacy.height)||legacy.width<0||legacy.height<0)throw new IllegalStateException("Invalid legacy mob dimensions");
         setPos(legacy.x,legacy.y,legacy.z);setYRot(legacy.yaw);setXRot(legacy.pitch);
         setDeltaMovement(legacy.velocityX,legacy.velocityY,legacy.velocityZ);setHealth(legacy.health);setRemainingFireTicks(legacy.fireTicks);
         setNoActionTime(legacy.despawnCounter);
@@ -85,6 +95,12 @@ public final class LegacyB173Cow extends Cow {
             var views=EntityViewsB173.callbackScope()){
             pull();boolean allowed=legacy.canSpawn();push();return allowed;
         }catch(World.SpawnRegionUnavailable unavailable){return false;}
+    }
+    @Override public void thunderHit(net.minecraft.server.level.ServerLevel level,net.minecraft.world.entity.LightningBolt bolt){
+        if(legacy==null){super.thunderHit(level,bolt);return;}
+        try(var views=EntityViewsB173.callbackScope()){
+            pull();legacy.onStruckByLightning((legacyconnector.vb1_7_3.net.minecraft.entity.LightningEntity)EntityViewsB173.wrap(bolt));push();
+        }
     }
     @Override public boolean hurt(net.minecraft.world.damagesource.DamageSource source,float amount){boolean result=super.hurt(source,amount);pull();return result;}
     @Override public InteractionResult mobInteract(net.minecraft.world.entity.player.Player player,InteractionHand hand){

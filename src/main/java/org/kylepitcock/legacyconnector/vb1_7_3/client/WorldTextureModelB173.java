@@ -25,12 +25,14 @@ import org.kylepitcock.legacyconnector.vb1_7_3.*;
 final class WorldTextureModelB173 extends BakedModelWrapper<BakedModel> {
     private static final ModelProperty<int[]> FACES=new ModelProperty<>();
     private static final ModelProperty<List<BakedQuad>> CUSTOM=new ModelProperty<>();
+    private static final ModelProperty<Integer> VISIBLE=new ModelProperty<>();
+    private static final ModelProperty<List<BakedQuad>> SECOND=new ModelProperty<>();
     private final Block block;
     private final Map<Integer,String> palette;
     private WorldTextureModelB173(BakedModel base,Block block){super(base);this.block=block;palette=AssetsB173.worldTextures(block);}
     static void wrap(Map<ModelResourceLocation,BakedModel> models){
         for(var block:ContentB173.blocks()){
-            if(!(block.mcc$modern instanceof LegacyB173Block) || (!AssetsB173.usesWorldTextures(block) && !BlockRenderB173.hasRenderer(block.getRenderType())))continue;
+            if(!(block.mcc$modern instanceof LegacyB173Block) || (!AssetsB173.usesWorldTextures(block) && !BlockFacesB173.hasCallback(block) && !BlockRenderB173.capturesWorld(block)))continue;
             for(var state:block.mcc$modern.getStateDefinition().getPossibleStates()){
                 var key=BlockModelShaper.stateToModelLocation(state);var base=models.get(key);
                 if(base!=null)models.put(key,new WorldTextureModelB173(base,block));
@@ -39,15 +41,41 @@ final class WorldTextureModelB173 extends BakedModelWrapper<BakedModel> {
     }
     @Override public ModelData getModelData(BlockAndTintGetter level,BlockPos pos,BlockState state,ModelData data){
         var result=originalModel.getModelData(level,pos,state,data).derive().with(FACES,AssetsB173.faceTextures(block,level,pos,state));
-        if(BlockRenderB173.hasRenderer(block.getRenderType())){
-            var captured=BlockRenderB173.capture(block,new BlockQueryB173(level,pos,state),pos.getX(),pos.getY(),pos.getZ());
-            var quads=bake(captured,pos);if(!quads.isEmpty())result.with(CUSTOM,quads);
+        if(BlockFacesB173.hasCallback(block))result.with(VISIBLE,BlockFacesB173.visibleFaces(block,new BlockQueryB173(level,pos,state),pos.getX(),pos.getY(),pos.getZ()));
+        if(BlockRenderB173.capturesWorld(block)){
+            var captured=BlockRenderB173.captureOrNull(block,new BlockQueryB173(level,pos,state),pos.getX(),pos.getY(),pos.getZ());
+            if(captured!=null)result.with(CUSTOM,bake(captured,pos));
+            // Forge's second world pass (a lamp's glow) goes to the translucent layer
+            if(BlockRenderB173.secondPass(block)){
+                var second=BlockRenderB173.captureOrNull(block,new BlockQueryB173(level,pos,state),pos.getX(),pos.getY(),pos.getZ(),1);
+                if(second!=null&&!second.isEmpty())result.with(SECOND,bake(second,pos));
+            }
         }
         return result.build();
     }
+    @Override public net.neoforged.neoforge.client.ChunkRenderTypeSet getRenderTypes(BlockState state,RandomSource random,ModelData data){
+        if(BlockRenderB173.secondPass(block))return net.neoforged.neoforge.client.ChunkRenderTypeSet.of(RenderType.cutout(),RenderType.translucent());
+        return super.getRenderTypes(state,random,data);
+    }
     @Override public List<BakedQuad> getQuads(BlockState state,Direction side,RandomSource random,ModelData data,RenderType renderType){
+        if(renderType!=null&&BlockRenderB173.secondPass(block)){
+            if(renderType==RenderType.translucent()){var second=data.get(SECOND);return side==null&&second!=null?second:List.of();}
+            if(renderType!=RenderType.cutout())return List.of();
+        }
         var custom=data.get(CUSTOM);if(custom!=null)return side==null?custom:List.of();
-        var quads=originalModel.getQuads(state,side,random,data,renderType);int[] faces=data.get(FACES);
+        var visible=data.get(VISIBLE);
+        List<BakedQuad> quads;
+        if(visible!=null) {
+            // Unculled output lets the original callback decide visibility even against native opaque neighbours.
+            if(side!=null)return List.of();
+            var selected=new java.util.ArrayList<BakedQuad>();
+            for(var quad:originalModel.getQuads(state,null,random,data,renderType))
+                if((visible&(1<<quad.getDirection().get3DDataValue()))!=0)selected.add(quad);
+            for(var face:Direction.values())if((visible&(1<<face.get3DDataValue()))!=0)
+                selected.addAll(originalModel.getQuads(state,face,random,data,renderType));
+            quads=selected;
+        }else quads=originalModel.getQuads(state,side,random,data,renderType);
+        int[] faces=data.get(FACES);
         if(faces==null)return quads;
         return quads.stream().map(q->retexture(q,faces[q.getDirection().get3DDataValue()])).toList();
     }
@@ -59,16 +87,22 @@ final class WorldTextureModelB173 extends BakedModelWrapper<BakedModel> {
                     .cross((float)(c.x()-a.x()),(float)(c.y()-a.y()),(float)(c.z()-a.z()));
             if(normal.lengthSquared()<1e-12)continue;normal.normalize();
             double u=0,v=0;for(int i=0;i<4;i++){u+=vertices.get(q+i).u()/4;v+=vertices.get(q+i).v()/4;}
-            int tileU=(int)Math.floor(u*16),tileV=(int)Math.floor(v*16);String ref=palette.get(tileV*16+tileU);
+            int tileU=(int)Math.floor(u*16),tileV=(int)Math.floor(v*16);
+            boolean untextured=legacyconnector.vb1_7_3.net.minecraft.client.render.Tessellator.UNTEXTURED.equals(a.sheet());
+            // a Forge renderer may switch sheets between faces (RedPower's wires on its own sheet, their covers on terrain.png)
+            String ref=untextured?AssetsB173.WHITE:(a.sheet()==null?palette:AssetsB173.sheetTextures(a.sheet())).get(tileV*16+tileU);
             if(ref==null)continue;
             var sprite=Minecraft.getInstance().getTextureAtlas(InventoryMenu.BLOCK_ATLAS).apply(ResourceLocation.parse(ref));
+            if(untextured){tileU=0;tileV=0;}
             int[] packed=new int[32];int normalBits=((byte)(normal.x*127)&255)|(((byte)(normal.y*127)&255)<<8)|(((byte)(normal.z*127)&255)<<16);
             for(int i=0;i<4;i++){
                 var p=vertices.get(q+i);int o=i*8;
                 packed[o]=Float.floatToRawIntBits((float)(p.x()-pos.getX()));packed[o+1]=Float.floatToRawIntBits((float)(p.y()-pos.getY()));packed[o+2]=Float.floatToRawIntBits((float)(p.z()-pos.getZ()));
-                packed[o+3]=p.color();packed[o+4]=Float.floatToRawIntBits(sprite.getU((float)(p.u()*16-tileU)));packed[o+5]=Float.floatToRawIntBits(sprite.getV((float)(p.v()*16-tileV)));packed[o+7]=normalBits;
+                packed[o+3]=p.color();packed[o+4]=Float.floatToRawIntBits(sprite.getU(untextured?0.5F:(float)(p.u()*16-tileU)));packed[o+5]=Float.floatToRawIntBits(sprite.getV(untextured?0.5F:(float)(p.v()*16-tileV)));packed[o+7]=normalBits;
+                // a face drawn untextured is a glow (a lamp's halo, Beta drew it additively and unlit): baked full bright, the world light cannot darken it
+                if(untextured)packed[o+6]=net.minecraft.client.renderer.LightTexture.FULL_BRIGHT;
             }
-            result.add(new BakedQuad(packed,-1,Direction.getNearest(normal.x,normal.y,normal.z),sprite,true));
+            result.add(new BakedQuad(packed,-1,Direction.getNearest(normal.x,normal.y,normal.z),sprite,!untextured,!untextured));
         }
         return List.copyOf(result);
     }

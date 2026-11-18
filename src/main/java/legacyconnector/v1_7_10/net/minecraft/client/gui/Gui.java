@@ -31,12 +31,34 @@ public class Gui {
 
     public static void drawRect(int x1, int y1, int x2, int y2, int color) {
         var gui = RenderContext.gui();
-        if (gui != null) gui.fill(x1, y1, x2, y2, color);
+        if (gui != null) mcc$unmodulated(gui, () -> gui.fill(x1, y1, x2, y2, color));
+    }
+
+    /**
+     * 1.7.10's drawRect/drawGradientRect set their own GL colour, so a glColor4f left behind by earlier drawing never touched them.
+     * The modern fill is modulated by the shader colour at flush time: Mystcraft's pulsing panel (glColor4f(.5,.5,.5,alpha)) turned the
+     * black name field of the book binder translucent. The fill is drawn with a white modulator and flushed before the colour returns.
+     */
+    static void mcc$unmodulated(net.minecraft.client.gui.GuiGraphics gui, Runnable draw) {
+        float[] c = com.mojang.blaze3d.systems.RenderSystem.getShaderColor();
+        if (c[0] == 1f && c[1] == 1f && c[2] == 1f && c[3] == 1f) {
+            draw.run();
+            return;
+        }
+        float r = c[0], g = c[1], b = c[2], a = c[3];
+        gui.flush();
+        com.mojang.blaze3d.systems.RenderSystem.setShaderColor(1f, 1f, 1f, 1f);
+        try {
+            draw.run();
+            gui.flush();
+        } finally {
+            com.mojang.blaze3d.systems.RenderSystem.setShaderColor(r, g, b, a);
+        }
     }
 
     protected void drawGradientRect(int x1, int y1, int x2, int y2, int colorTop, int colorBottom) {
         var gui = RenderContext.gui();
-        if (gui != null) gui.fillGradient(x1, y1, x2, y2, colorTop, colorBottom);
+        if (gui != null) mcc$unmodulated(gui, () -> gui.fillGradient(x1, y1, x2, y2, colorTop, colorBottom));
     }
 
     public void drawCenteredString(FontRenderer font, String text, int x, int y, int color) {
@@ -60,7 +82,48 @@ public class Gui {
             gui.fill(x, y, x + width, y + height, RenderContext.argb());
             return;
         }
+        if (mcc$blitVanillaSheet(gui, x, y, u, v, width, height)) return;
         gui.blit(RenderContext.texture(), x, y, u, v, width, height);
+    }
+
+    /**
+     * Forge 1.4.7: a screen binds {@code /terrain.png} or {@code /gui/items.png} and draws a tile of it by pixel position (a tank gauge
+     * tiles the liquid's block texture, {@code index % 16 * 16, index / 16 * 16}; Thermal Expansion, BuildCraft, Forestry). Those sheets do
+     * not exist any more: each 16x16 cell is the sprite the sheet tables name ({@code SpriteSheets147}), so the rectangle is drawn cell by
+     * cell from the block atlas, partial cells included. False when another texture is bound.
+     */
+    private static boolean mcc$blitVanillaSheet(net.minecraft.client.gui.GuiGraphics gui, int x, int y, int u, int v, int width, int height) {
+        String sheet = RenderContext.sheet();
+        if (sheet == null) return false;
+        String norm = org.kylepitcock.legacyconnector.v1_6_4.bridge.SpriteSheets147.normalize(sheet);
+        boolean terrain = norm.equals(org.kylepitcock.legacyconnector.v1_6_4.bridge.SpriteSheets147.TERRAIN);
+        if (!terrain && !norm.equals(org.kylepitcock.legacyconnector.v1_6_4.bridge.SpriteSheets147.ITEMS)) return false;
+        if (u < 0 || v < 0 || width <= 0 || height <= 0) return true;
+        var atlas = net.minecraft.client.Minecraft.getInstance().getTextureAtlas(net.minecraft.world.inventory.InventoryMenu.BLOCK_ATLAS);
+        for (int py = v; py < v + height; ) {
+            int cellV = py >> 4, offV = py & 15, h = Math.min(16 - offV, v + height - py);
+            for (int px = u; px < u + width; ) {
+                int cellU = px >> 4, offU = px & 15, w = Math.min(16 - offU, u + width - px);
+                int index = cellV * 16 + cellU;
+                if (index < 256) {
+                    IIcon icon = org.kylepitcock.legacyconnector.v1_6_4.bridge.SpriteSheets147.icon(sheet, index, terrain);
+                    if (icon != null) {
+                        var sprite = atlas.apply(net.minecraft.resources.ResourceLocation.parse(icon.mcc$modernName()));
+                        int sw = sprite.contents().width(), sh = sprite.contents().height();
+                        float du = sprite.getU1() - sprite.getU0(), dv = sprite.getV1() - sprite.getV0();
+                        if (du > 0 && dv > 0) {
+                            int atlasW = Math.round(sw / du), atlasH = Math.round(sh / dv);
+                            gui.blit(sprite.atlasLocation(), x + px - u, y + py - v, w, h,
+                                    sprite.getU0() * atlasW + offU * sw / 16.0F, sprite.getV0() * atlasH + offV * sh / 16.0F,
+                                    Math.max(1, w * sw / 16), Math.max(1, h * sh / 16), atlasW, atlasH);
+                        }
+                    }
+                }
+                px += w;
+            }
+            py += h;
+        }
+        return true;
     }
 
     public void drawTexturedModelRectFromIcon(int x, int y, IIcon icon, int width, int height) {

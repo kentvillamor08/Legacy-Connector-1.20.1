@@ -19,6 +19,87 @@ public class TextureFXManager {
         return new java.awt.Dimension(16, 16);
     }
 
+    /**
+     * FML 1.4.7 {@code loadImageFromTexturePack(renderEngine, path)}: the image a texture pack path names, read the way the pack did: a mod's class path file
+     * first (its own sprite sheets and animation frames), then the loaded resource packs under the location 1.4.7's path maps to (vanilla and mod assets
+     * such as {@code /gui/items.png} or {@code /mods/<id>/textures/...}). Null for a path no pack has, as FML answered when the stream was missing.
+     */
+    public java.awt.image.BufferedImage loadImageFromTexturePack(legacyconnector.v1_7_10.net.minecraft.client.renderer.texture.TextureManager engine, String path) throws java.io.IOException {
+        if (path == null) return null;
+        try (java.io.InputStream in = openImage(path)) {
+            return in == null ? null : javax.imageio.ImageIO.read(in);
+        }
+    }
+
+    private static java.io.InputStream openImage(String path) throws java.io.IOException {
+        java.io.InputStream stream = org.kylepitcock.legacyconnector.v1_7_10.client.ClasspathTextures.open(path);
+        if (stream != null) return stream;
+        var location = org.kylepitcock.legacyconnector.v1_6_4.bridge.Textures152.location(path);
+        var minecraft = legacyconnector.v1_7_10.net.minecraft.client.Minecraft.getMinecraft();
+        if (location == null || minecraft == null || minecraft.getResourceManager() == null) return null;
+        try {
+            return minecraft.getResourceManager().getResource(location).getInputStream();
+        } catch (java.io.IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** The size of the texture {@code effect} animates (always the 16 by 16 tile, see {@link #getTextureDimensions(int)}). */
+    public java.awt.Dimension getTextureDimensions(TextureFX effect) {
+        return new java.awt.Dimension(16, 16);
+    }
+
+    /**
+     * 1.5.2 {@code getTextureDimensions(name)}: the size of a texture file, read from the mod's class path or the resource packs; 1 by 1 for a file nothing has
+     * (what FML answered for a texture it did not know).
+     */
+    public legacyconnector.v1_7_10.org.lwjgl.util.Dimension getTextureDimensions(String texture) {
+        try {
+            var image = loadImageFromTexturePack(null, texture);
+            if (image != null) return new legacyconnector.v1_7_10.org.lwjgl.util.Dimension(image.getWidth(), image.getHeight());
+        } catch (java.io.IOException | RuntimeException ignored) {
+            // unknown texture
+        }
+        return new legacyconnector.v1_7_10.org.lwjgl.util.Dimension(1, 1);
+    }
+
+    /** 1.4.7 {@code setTextureDimensions(id, width, height, effects)}: the sheet changed size (a texture pack); the effects that draw to it are told. */
+    public void setTextureDimensions(int id, int width, int height, java.util.List effects) {
+        if (effects == null) return;
+        for (Object fx : effects) {
+            if (fx instanceof ITextureFX ifx) ifx.onTextureDimensionsUpdate(width, height);
+        }
+    }
+
+    /** 1.4.7 {@code onPreRegisterEffect(effect)}: a tile about to be registered learns the size of its sheet. */
+    public void onPreRegisterEffect(TextureFX effect) {
+        if (effect instanceof ITextureFX ifx) ifx.onTextureDimensionsUpdate(16, 16);
+    }
+
+    /**
+     * 1.4.7 {@code onUpdateTextureEffect(effect)}: one tick of a tile; false (and the tile is marked errored) when it threw, so FML stopped animating it.
+     */
+    public boolean onUpdateTextureEffect(TextureFX effect) {
+        ITextureFX ifx = effect instanceof ITextureFX i ? i : null;
+        if (ifx != null && ifx.getErrored()) return false;
+        try {
+            effect.onTick();
+        } catch (RuntimeException e) {
+            if (ifx != null) ifx.setErrored(true);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 1.4.7 {@code onTexturePackChange(engine, pack, effects)}: the original re-read the sheets and told the tiles their new size. The host reloads its own
+     * atlases with the pack, so the tiles are told the size every sheet here has.
+     */
+    public void onTexturePackChange(legacyconnector.v1_7_10.net.minecraft.client.renderer.texture.TextureManager engine,
+            legacyconnector.v1_6_4.net.minecraft.client.texturepacks.ITexturePack pack, java.util.List effects) {
+        setTextureDimensions(0, 16, 16, effects);
+    }
+
     public void addAnimation(TextureFX anim) {
         Animations147.register(anim);
     }

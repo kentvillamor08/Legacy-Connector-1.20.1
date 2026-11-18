@@ -25,7 +25,7 @@ public final class LegacyMods {
      * (see the loader's {@code LegacyVersion.forward}); every other version is its own family.
      */
     public static String family(String version) {
-        return "1.6.4".equals(version) || "1.5.2".equals(version) || "1.4.7".equals(version) ? "1.7.10" : version;
+        return "1.6.4".equals(version) || "1.5.2".equals(version) || "1.4.7".equals(version) || "1.2.5".equals(version) ? "1.7.10" : version;
     }
 
     public static synchronized LegacyPlatform platform(String version) {
@@ -56,7 +56,7 @@ public final class LegacyMods {
         Map<String, LegacyModRecord> byId = new LinkedHashMap<>();
         MODS.stream().sorted(java.util.Comparator.comparing((LegacyModRecord m) -> !m.inCoreModJar())
                         .thenComparing(m -> m.legacyId, String.CASE_INSENSITIVE_ORDER))
-                .forEach(m -> byId.put(m.legacyId.toLowerCase(Locale.ROOT), m));
+                .forEach(m -> byId.put(key(m.version, m.legacyId), m));
         List<LegacyModRecord> out = new ArrayList<>();
         Map<LegacyModRecord, Integer> state = new HashMap<>();
         for (LegacyModRecord m : byId.values()) visit(m, byId, state, out);
@@ -76,11 +76,32 @@ public final class LegacyMods {
             int at = target.indexOf('@');
             if (at >= 0) target = target.substring(0, at);
             target = LegacyConfig.modAlias(target);
-            LegacyModRecord dep = byId.get(target.toLowerCase(Locale.ROOT));
+            LegacyModRecord dep = byId.get(key(m.version, target));
+            if (dep == null) dep = compatible(byId.values(), target, m.version);
             if (dep != null) visit(dep, byId, state, out);
         }
         state.put(m, 2);
         out.add(m);
+    }
+
+    private static String key(String version, String id) {
+        return version + ":" + id.toLowerCase(Locale.ROOT);
+    }
+
+    /** Match within the caller's runtime family, preferring the exact Minecraft version. */
+    private static LegacyModRecord compatible(Iterable<LegacyModRecord> mods, String id, String version) {
+        if (id == null) return null;
+        LegacyModRecord fallback = null;
+        for (LegacyModRecord mod : mods) {
+            if (!mod.legacyId.equalsIgnoreCase(id) && !mod.modernId.equalsIgnoreCase(id)) continue;
+            if (mod.version.equals(version)) return mod;
+            if (family(mod.version).equals(family(version))) fallback = mod;
+        }
+        return fallback;
+    }
+
+    public static synchronized LegacyModRecord byLegacyId(String id, String version) {
+        return compatible(MODS, id, version);
     }
 
     public static synchronized List<LegacyModRecord> all() {
@@ -93,6 +114,9 @@ public final class LegacyMods {
 
     /** Resolves either a legacy id ({@code BuildCraft|Core}) or a modern id ({@code buildcraft_core}). */
     public static synchronized LegacyModRecord find(String id) {
+        if (id == null) return null;
+        // The isolated FML id identifies one copy even when registry namespaces remain shared.
+        for (LegacyModRecord m : MODS) if (m.container != null && m.container.getModId().equals(id)) return m;
         LegacyModRecord r = byLegacyId(id);
         if (r != null) return r;
         for (LegacyModRecord m : MODS) if (m.modernId.equals(id)) return m;
@@ -112,6 +136,13 @@ public final class LegacyMods {
             other = true;
         }
         return other;
+    }
+
+    /** True when at least one loaded legacy mod runs on the platform family of {@code version} (see {@link #family}). */
+    public static synchronized boolean hasFamily(String version) {
+        String wanted = family(version);
+        for (LegacyModRecord mod : MODS) if (family(mod.version).equals(wanted)) return true;
+        return false;
     }
 
     public static synchronized boolean isEmpty() {

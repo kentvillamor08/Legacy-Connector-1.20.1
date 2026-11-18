@@ -28,7 +28,7 @@ public abstract class BlockFluidBase extends Block implements IFluidBlock {
         defaultDisplacements.put(Blocks.reeds, false);
     }
 
-    protected Map<Block, Boolean> displacements = new HashMap<>(defaultDisplacements);
+    public Map<Block, Boolean> displacements = new HashMap<>(defaultDisplacements);
 
     protected int quantaPerBlock = 8;
     protected float quantaPerBlockFloat = 8F;
@@ -39,6 +39,8 @@ public abstract class BlockFluidBase extends Block implements IFluidBlock {
     protected int renderPass = 0;
     protected int maxScaledLight = 0;
     protected final String fluidName;
+    /** The fluid this block was built for (Forge kept it next to the name). */
+    protected Fluid definedFluid;
 
     public BlockFluidBase(Fluid fluid, Material material) {
         super(material);

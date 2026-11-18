@@ -27,6 +27,27 @@ public class WorldProvider {
     }
 
     /** Whether it is day here (dimensions without a day cycle override it). */
+    /** The world's spawn point. */
+    public legacyconnector.v1_7_10.net.minecraft.util.ChunkCoordinates getSpawnPoint() {
+        return worldObj == null ? new legacyconnector.v1_7_10.net.minecraft.util.ChunkCoordinates(0, 64, 0) : worldObj.getSpawnPoint();
+    }
+
+    /** The spawn point of a new player: the world's, spread over the world type's spawn fuzz (not in adventure mode or a world without sky). */
+    public legacyconnector.v1_7_10.net.minecraft.util.ChunkCoordinates getRandomizedSpawnPoint() {
+        var c = new legacyconnector.v1_7_10.net.minecraft.util.ChunkCoordinates(getSpawnPoint());
+        if (worldObj == null || terrainType == null) return c;
+        int fuzz = terrainType.getSpawnFuzz();
+        if (fuzz > 1 && !hasNoSky) {
+            java.util.Random rand = new java.util.Random();
+            int x = c.posX + rand.nextInt(fuzz) - fuzz / 2;
+            int z = c.posZ + rand.nextInt(fuzz) - fuzz / 2;
+            c.posX = x;
+            c.posZ = z;
+            c.posY = worldObj.getTopSolidOrLiquidBlock(x, z);
+        }
+        return c;
+    }
+
     /** Moves the world's spawn point (1.7.10 {@code WorldProvider.setSpawnPoint}; the world info keeps it). */
     public void setSpawnPoint(int x, int y, int z) {
         if (worldObj != null) worldObj.getWorldInfo().setSpawnPosition(x, y, z);
@@ -237,6 +258,11 @@ public class WorldProvider {
 
     // ------------------------------------------------------------------ Forge's provider hooks: the defaults ask the world's *Body methods
 
+    /** The daylight factor of the world (Forge hook; mods' providers override it). */
+    public float getSunBrightnessFactor(float partialTicks) {
+        return worldObj == null ? 1.0F : worldObj.getSunBrightnessFactor(partialTicks);
+    }
+
     /** A new provider for a dimension id (the registered provider class of that dimension). */
     public static WorldProvider getProviderForDimension(int dimension) {
         return legacyconnector.v1_7_10.net.minecraftforge.common.DimensionManager.createProviderFor(dimension);
@@ -307,5 +333,40 @@ public class WorldProvider {
     /** Where entities arrive from the end portal (the obsidian platform of the End; none elsewhere). */
     public legacyconnector.v1_7_10.net.minecraft.util.ChunkCoordinates getEntrancePortalLocation() {
         return dimensionId == 1 ? new legacyconnector.v1_7_10.net.minecraft.util.ChunkCoordinates(100, 50, 0) : null;
+    }
+
+    /** Forge: whether hostile and peaceful mobs spawn naturally in this dimension (it also stops the spawner of a matching world). */
+    public void setAllowedSpawnTypes(boolean allowHostile, boolean allowPeaceful) {
+        if (worldObj != null) worldObj.setAllowedSpawnTypes(allowHostile, allowPeaceful);
+    }
+
+    /** Forge: whether a player may be placed here at the column (the overworld wants grass on top). */
+    public boolean canCoordinateBeSpawn(int x, int z) {
+        return worldObj != null && worldObj.getTopBlock(x, z) == legacyconnector.v1_7_10.net.minecraft.init.Blocks.grass;
+    }
+
+    /** Forge: whether lightning may strike in the chunk. */
+    public boolean canDoLightning(legacyconnector.v1_7_10.net.minecraft.world.chunk.Chunk chunk) {
+        return true;
+    }
+
+    /** Forge: whether rain and snow may form ice and snow layers in the chunk. */
+    public boolean canDoRainSnowIce(legacyconnector.v1_7_10.net.minecraft.world.chunk.Chunk chunk) {
+        return true;
+    }
+
+    /** Forge: the message shown when entering the dimension (the Nether and the End have one). */
+    public String getWelcomeMessage() {
+        return this instanceof WorldProviderEnd || dimensionId == 1 ? "Entering the End" : this instanceof WorldProviderHell || dimensionId == -1 ? "Entering the Nether" : null;
+    }
+
+    /** Forge: the message shown when leaving the dimension. */
+    public String getDepartMessage() {
+        return this instanceof WorldProviderEnd || dimensionId == 1 ? "Leaving the End" : this instanceof WorldProviderHell || dimensionId == -1 ? "Leaving the Nether" : null;
+    }
+
+    /** Forge: the dimension a player who dies here respawns in (the overworld). */
+    public int getRespawnDimension(legacyconnector.v1_7_10.net.minecraft.entity.player.EntityPlayerMP player) {
+        return 0;
     }
 }

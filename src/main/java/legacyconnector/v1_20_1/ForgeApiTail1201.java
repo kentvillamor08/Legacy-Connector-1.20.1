@@ -230,12 +230,113 @@ public final class ForgeApiTail1201 {
         return null;
     }
 
-    /** Brewing recipes are registered through RegisterBrewingRecipesEvent now; recipes added the old way are accepted and not brewed. */
+    /** Brewing recipes are registered through RegisterBrewingRecipesEvent now; recipes added the old way are kept and replayed into the real brewing recipes (LegacyBrewing). */
     public static boolean brewAddRecipe(net.minecraft.world.item.crafting.Ingredient ingredient, net.minecraft.world.item.crafting.Ingredient input, net.minecraft.world.item.ItemStack output) {
-        return true;
+        return org.kylepitcock.legacyconnector.v1_20_1.migrate.LegacyBrewing.addRecipe(ingredient, input, output);
     }
 
     public static java.util.List brewGetRecipes() {
-        return new java.util.ArrayList<>();
+        return org.kylepitcock.legacyconnector.v1_20_1.migrate.LegacyBrewing.recipes();
+    }
+
+    // ---- item pickup, sleeping and sapling growth hooks of Forge's ForgeEventFactory
+
+    /** Forge's result of the pickup event: -1 denied, 1 forced, 0 the vanilla rule. */
+    public static int onItemPickup(net.minecraft.world.entity.item.ItemEntity item, net.minecraft.world.entity.player.Player player) {
+        var pre = net.neoforged.neoforge.event.EventHooks.fireItemPickupPre(item, player);
+        return switch (pre.canPickup()) {
+            case TRUE -> 1;
+            case FALSE -> -1;
+            default -> 0;
+        };
+    }
+
+    public static void firePlayerItemPickupEvent(net.minecraft.world.entity.player.Player player, net.minecraft.world.entity.item.ItemEntity item,
+            net.minecraft.world.item.ItemStack copy) {
+        net.neoforged.neoforge.event.EventHooks.fireItemPickupPost(item, player, copy);
+    }
+
+    /** Forge's sleeping time check: an event could allow or deny; without one sleeping is possible at night. 1.21.1 has no such event, so the vanilla rule decides. */
+    public static boolean fireSleepingTimeCheck(net.minecraft.world.entity.player.Player player, java.util.Optional<net.minecraft.core.BlockPos> sleepingLocation) {
+        return !player.level().isDay();
+    }
+
+    /** Forge's sleep-in-bed event: a problem that stops the sleep, or null. NeoForge's {@code CanPlayerSleepEvent} answers it. */
+    public static net.minecraft.world.entity.player.Player.BedSleepingProblem onPlayerSleepInBed(net.minecraft.world.entity.player.Player player,
+            java.util.Optional<net.minecraft.core.BlockPos> pos) {
+        if (player instanceof net.minecraft.server.level.ServerPlayer sp && pos.isPresent()) {
+            return net.neoforged.neoforge.event.EventHooks.canPlayerStartSleeping(sp, pos.get(),
+                    com.mojang.datafixers.util.Either.right(net.minecraft.util.Unit.INSTANCE)).left().orElse(null);
+        }
+        return null;
+    }
+
+    /** Forge's sapling growth event, fired through NeoForge's block grow feature event; a cancellation shows as the DENY result the old API had. */
+    public static legacyconnector.v1_20_1.net.minecraftforge.event.level.SaplingGrowTreeEvent fireBlockGrowFeature(net.minecraft.world.level.LevelAccessor level,
+            net.minecraft.util.RandomSource random, net.minecraft.core.BlockPos pos, net.minecraft.core.Holder<?> feature) {
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        var real = net.neoforged.neoforge.event.EventHooks.fireBlockGrowFeature(level, random, pos, (net.minecraft.core.Holder) feature);
+        var event = new legacyconnector.v1_20_1.net.minecraftforge.event.level.SaplingGrowTreeEvent(level, random, pos);
+        if (real.isCanceled()) ForgeApi1201.eventSetResult(event, legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DENY);
+        return event;
+    }
+
+    /**
+     * {@code Stats.makeCustomStat(name, formatter)}: 1.20.1 parsed the name as a resource location (a mod passed {@code "modid:stat"}); 1.21.1 puts it behind the
+     * {@code minecraft} namespace, which rejects the colon.
+     */
+    public static net.minecraft.resources.ResourceLocation makeCustomStat(String name, net.minecraft.stats.StatFormatter formatter) {
+        net.minecraft.resources.ResourceLocation id = net.minecraft.resources.ResourceLocation.parse(name);
+        net.minecraft.core.Registry.register(net.minecraft.core.registries.BuiltInRegistries.CUSTOM_STAT, id, id);
+        net.minecraft.stats.Stats.CUSTOM.get(id, formatter);
+        return id;
+    }
+
+    /** {@code BuiltInLootTables.all()}: a set of locations in 1.20.1, of resource keys in 1.21.1 (the same erased type, so a mod's lambda failed with a ClassCastException). */
+    public static java.util.Set<net.minecraft.resources.ResourceLocation> builtInLootTableIds() {
+        java.util.Set<net.minecraft.resources.ResourceLocation> out = new java.util.LinkedHashSet<>();
+        for (var key : net.minecraft.world.level.storage.loot.BuiltInLootTables.all()) out.add(key.location());
+        return out;
+    }
+
+    /** {@code Ingredient.Value.serialize()} (an item or tag entry as JSON; 1.21.1 describes them through the value codec). */
+    public static com.google.gson.JsonObject ingredientValueSerialize(net.minecraft.world.item.crafting.Ingredient.Value value) {
+        com.google.gson.JsonElement json = net.minecraft.world.item.crafting.Ingredient.Value.CODEC.encodeStart(com.mojang.serialization.JsonOps.INSTANCE, value)
+                .getOrThrow(msg -> new IllegalStateException(msg));
+        return json.getAsJsonObject();
+    }
+
+    // ---- mod list
+
+    /**
+     * {@code ModList.get().isLoaded(id)} before FML has built the mod list (a mixin reaching a mod class initializer during the vanilla registry bootstrap, which 1.21.1
+     * runs before any mod loads): the loading list answers, as Forge's mod list was complete from the start.
+     */
+    public static boolean modListIsLoaded(net.neoforged.fml.ModList list, String modId) {
+        if (list != null) return list.isLoaded(modId);
+        var loading = net.neoforged.fml.loading.FMLLoader.getLoadingModList();
+        return loading != null && loading.getModFileById(modId) != null;
+    }
+
+    /** {@code ModList.get().getModFileById(id)}, with the same early fallback as {@link #modListIsLoaded}. */
+    public static net.neoforged.neoforgespi.language.IModFileInfo modListFileById(net.neoforged.fml.ModList list, String modId) {
+        if (list != null) return list.getModFileById(modId);
+        var loading = net.neoforged.fml.loading.FMLLoader.getLoadingModList();
+        return loading == null ? null : loading.getModFileById(modId);
+    }
+
+
+    /** {@code ModList.getModContainerByObject(mod)} (removed in NeoForge): the container whose jar holds the class of the mod instance. */
+    public static java.util.Optional<? extends net.neoforged.fml.ModContainer> modContainerByObject(net.neoforged.fml.ModList list, Object mod) {
+        if (mod == null) return java.util.Optional.empty();
+        String name = mod.getClass().getName();
+        for (net.neoforged.fml.ModContainer c : list.getSortedMods()) {
+            var scan = c.getModInfo().getOwningFile().getFile().getScanResult();
+            if (scan == null) continue;
+            for (var data : scan.getClasses()) {
+                if (data.clazz().getClassName().equals(name)) return java.util.Optional.of(c);
+            }
+        }
+        return java.util.Optional.empty();
     }
 }

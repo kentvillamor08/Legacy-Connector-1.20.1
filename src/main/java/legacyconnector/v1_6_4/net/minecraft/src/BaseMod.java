@@ -32,7 +32,10 @@ public abstract class BaseMod {
 
     @Mod.EventHandler
     public void mcc$modLoaderInit(FMLInitializationEvent event) {
+        // ModLoader read the @MLProp fields (block and item ids, options) before it called load()
+        org.kylepitcock.legacyconnector.core.MLPropConfig.load(getClass(), net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get(), MLProp.class);
         ModLoader.mcc$load(this);
+        if (this instanceof BaseModMp mp) ModLoaderMp.mcc$register(mp);
     }
 
     @Mod.EventHandler
@@ -96,6 +99,37 @@ public abstract class BaseMod {
 
     public void takenFromFurnace(EntityPlayer player, ItemStack item) {}
 
+    /** 1.2.5 to 1.5.2: a dispenser fired an item the mod registered with {@code ModLoader.dispenseEntity}; true when the mod spawned something. */
+    public boolean dispenseEntity(World world, double x, double y, double z, int xVel, int zVel, ItemStack item) {
+        return false;
+    }
+
+    /** A chat packet addressed to the mod's channel (the server's {@code ModLoader.serverChat}). */
+    public void receiveChatPacket(String text) {}
+
+    /** A custom payload on a channel the mod registered with {@code ModLoader.registerPacketChannel}. */
+    public void receiveCustomPacket(legacyconnector.v1_6_4.net.minecraft.network.packet.Packet250CustomPayload packet) {}
+
+    /** The client joined a multiplayer server / left it (not called for the integrated server, as in ModLoader). */
+    public void serverConnect(legacyconnector.v1_7_10.net.minecraft.client.network.NetHandlerPlayClient handler) {}
+
+    public void serverDisconnect() {}
+
+    // the server build's shapes (ModLoader's server half passes the sending player); a mod of a server jar overrides these
+    /** A custom payload on a channel the mod registered, from {@code player} (server side). */
+    public void receiveCustomPacket(legacyconnector.v1_6_4.net.minecraft.network.packet.Packet250CustomPayload packet,
+            legacyconnector.v1_7_10.net.minecraft.entity.player.EntityPlayerMP player) {
+        receiveCustomPacket(packet); // a mod of the other builds overrides the one-argument form
+    }
+
+    /** A chat packet addressed to the mod's channel, from {@code player} (server side). */
+    public void receiveChatPacket(String text, legacyconnector.v1_7_10.net.minecraft.entity.player.EntityPlayerMP player) {
+        receiveChatPacket(text);
+    }
+
+    /** A player left the server (server side). */
+    public void serverDisconnect(legacyconnector.v1_7_10.net.minecraft.entity.player.EntityPlayerMP player) {}
+
     public Entity spawnEntity(int entityId, World world, double scaledX, double scaledY, double scaledZ) {
         return null;
     }
@@ -104,4 +138,16 @@ public abstract class BaseMod {
     public String toString() {
         return getName() + " " + getVersion();
     }
+
+    // ------------------------------------------------------------------ client connection hooks (empty in the original BaseMod as well)
+
+    /** The client joined a server (ModLoader's {@code BaseMod.clientConnect}); the base class does nothing. */
+    public void clientConnect(legacyconnector.v1_7_10.net.minecraft.client.network.NetHandlerPlayClient handler) {}
+
+    /** The client left a server ({@code BaseMod.clientDisconnect}); the base class does nothing. */
+    public void clientDisconnect(legacyconnector.v1_7_10.net.minecraft.client.network.NetHandlerPlayClient handler) {}
+
+    /** A custom payload packet reached the client ({@code BaseMod.clientCustomPayload}); the base class does nothing. */
+    public void clientCustomPayload(legacyconnector.v1_7_10.net.minecraft.client.network.NetHandlerPlayClient handler,
+            legacyconnector.v1_6_4.net.minecraft.network.packet.Packet250CustomPayload packet) {}
 }

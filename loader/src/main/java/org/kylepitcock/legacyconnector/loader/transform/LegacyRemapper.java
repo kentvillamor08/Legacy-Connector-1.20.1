@@ -29,6 +29,9 @@ public final class LegacyRemapper extends Remapper {
             Map.entry("sun/misc/BASE64Encoder", "org/kylepitcock/legacyconnector/compat/jdk/BASE64Encoder"),
             Map.entry("sun/misc/BASE64Decoder", "org/kylepitcock/legacyconnector/compat/jdk/BASE64Decoder"),
             Map.entry("sun/reflect/Reflection", "org/kylepitcock/legacyconnector/compat/jdk/Reflection"),
+            // JDK 9+: only the serialization constructors are left; mods built enum constants through newConstructorAccessor (Constructor.newInstance rejects enums)
+            Map.entry("sun/reflect/ReflectionFactory", "org/kylepitcock/legacyconnector/compat/jdk/ReflectionFactory"),
+            Map.entry("sun/reflect/ConstructorAccessor", "org/kylepitcock/legacyconnector/compat/jdk/ConstructorAccessor"),
             Map.entry("java/lang/Compiler", "org/kylepitcock/legacyconnector/compat/jdk/Compiler"),
             // Not exported since Java 9; mods constructed it instead of asking ImageIO.
             Map.entry("com/sun/imageio/plugins/png/PNGImageReader", "org/kylepitcock/legacyconnector/compat/jdk/PNGImageReader"),
@@ -62,6 +65,8 @@ public final class LegacyRemapper extends Remapper {
     private final java.util.Set<String> keep = new java.util.HashSet<>();
     /** {@code owner.readableName+desc} of a mod's own method that shares its name with a mapped vanilla one. */
     private final java.util.Set<String> renameLocal = new java.util.HashSet<>();
+    /** Declarations (owner.name+desc as written in the jar) renamed to {@code name$mod} because an inherited method the class calls ends up with the same final name. */
+    private final java.util.Set<String> renameLocalRaw = new java.util.HashSet<>();
 
     private final ShimIndex shim;
     private final SynthDemand demand;
@@ -159,10 +164,99 @@ public final class LegacyRemapper extends Remapper {
 
     public void notchLocals(java.util.Map<String, String[]> locals) {
         this.notchLocals = locals;
+        this.localMethods = java.util.Map.of();
+        this.inheritedRenames.clear();
+    }
+
+    /** Overridable methods ({@code name+desc}, not private/static/constructors) each of the jar's own classes declares, for {@link #notchMethod}. */
+    private java.util.Map<String, java.util.Set<String>> localMethods = java.util.Map.of();
+    private final java.util.Map<String, String> inheritedRenames = new java.util.concurrent.ConcurrentHashMap<>();
+
+    public void localMethods(java.util.Map<String, java.util.Set<String>> methods) {
+        this.localMethods = methods;
+        this.inheritedRenames.clear();
+    }
+
+    /**
+     * The final name of a method of a notch-named jar. A jar's own base class can declare the method a subclass overrides from Minecraft
+     * (Thermal Expansion's abstract TileTeleportRoot.b() returns null; TileTeleportItem.b() is IInventory.getInvName, forwarded to
+     * getInventoryName): the subclass's declaration gets the new name, so the base class's declaration and every call through it must get it
+     * too, or the call reaches the base method (null name, NPE in the GUI). Resolved through the declaring class's local subclasses.
+     */
+    private String methodName(String owner, String name, String desc) {
+        String direct = methodNameOf(owner, name, desc);
+        if (!direct.equals(name) || localMethods.isEmpty() || name.startsWith("<") || name.startsWith("func_")) return direct;
+        String key = owner + "." + name + desc;
+        String cached = inheritedRenames.get(key);
+        if (cached != null) return cached.isEmpty() ? direct : cached;
+        String found = inheritedRename(owner, name, desc);
+        inheritedRenames.put(key, found == null ? "" : found);
+        return found == null ? direct : found;
+    }
+
+    private String methodNameOf(String owner, String name, String descriptor) {
+        if (notch != null && !name.startsWith("func_")) {
+            String srg = notch.method(owner, name, descriptor, notchLocals);
+            if (srg != null) name = srg;
+        }
+        String readable = mcp.method(name);
+        if (members != null) return members.method(legacyClass(owner), readable, legacyDesc(descriptor), this::localSupers);
+        return readable;
+    }
+
+    private String inheritedRename(String owner, String name, String desc) {
+        String member = name + desc;
+        String top = declaringLocal(owner, member, 0);
+        if (top == null) return null;
+        // the topmost local declaration: every class below it that declares the method overrides it, siblings included
+        for (int guard = 0; guard < 24; guard++) {
+            String above = null;
+            String[] up = notchLocals.get(top);
+            if (up != null) for (String s : up) if ((above = declaringLocal(s, member, 0)) != null) break;
+            if (above == null) break;
+            top = above;
+        }
+        for (String candidate : notchLocals.keySet()) {
+            java.util.Set<String> declared = localMethods.get(candidate);
+            if (declared == null || !declared.contains(member)) continue;
+            if (!candidate.equals(top) && !isLocalSubtype(candidate, top, 0)) continue;
+            String renamed = methodNameOf(candidate, name, desc);
+            if (!renamed.equals(name)) return renamed;
+        }
+        return null;
+    }
+
+    private String declaringLocal(String cls, String member, int depth) {
+        if (cls == null || depth > 24) return null;
+        java.util.Set<String> declared = localMethods.get(cls);
+        if (declared != null && declared.contains(member)) return cls;
+        String[] up = notchLocals.get(cls);
+        if (up == null) return null;
+        for (String s : up) {
+            String r = declaringLocal(s, member, depth + 1);
+            if (r != null) return r;
+        }
+        return null;
+    }
+
+    private boolean isLocalSubtype(String cls, String ancestor, int depth) {
+        if (cls == null || depth > 24) return false;
+        String[] up = notchLocals.get(cls);
+        if (up == null) return false;
+        for (String s : up) {
+            if (ancestor.equals(s) || isLocalSubtype(s, ancestor, depth + 1)) return true;
+        }
+        return false;
     }
 
     public void override(String from, String to) {
         overrides.put(from, to);
+    }
+
+    /** Maps a jar-owned class into the shared synth namespace without asking the synth jar to generate a duplicate. */
+    public void provideSynthClass(String from, String to) {
+        overrides.put(from, to);
+        if (demand != null) demand.provideClass(to);
     }
 
     /** A default-package class of another jar, which that jar moved to {@code to}; vanilla (notch) and ModLoader names are not taken for it. */
@@ -235,6 +329,7 @@ public final class LegacyRemapper extends Remapper {
      * and the references the jar makes to it), so the SRG call still reaches the vanilla method.
      */
     private void preventInheritedCallCollisions(org.objectweb.asm.tree.ClassNode original) {
+        preventForwardedCallCollisions(original);
         java.util.Set<String> declared = new java.util.HashSet<>();
         for (var m : original.methods) if (mcp.method(m.name).equals(m.name)) declared.add(m.name + m.desc);
         if (declared.isEmpty()) return;
@@ -251,6 +346,35 @@ public final class LegacyRemapper extends Remapper {
                 }
             }
         }
+    }
+
+    /**
+     * A class that declares a method AND calls an inherited method of another name on itself, where both end up with the same name once the
+     * notch/SRG/forward renames are applied, would call itself (The Lion King's quiver: {@code e()} = IInventory.onInventoryChanged calls
+     * {@code c()} = WorldSavedData.markDirty, both {@code markDirty()} in the 1.7.10 shim: StackOverflowError). The declaration is renamed
+     * locally ({@code $mod}) so the call reaches the inherited method.
+     */
+    private void preventForwardedCallCollisions(org.objectweb.asm.tree.ClassNode original) {
+        java.util.Set<String> declaredRaw = new java.util.HashSet<>();
+        for (var m : original.methods) declaredRaw.add(m.name + m.desc);
+        for (var m : original.methods) {
+            if (m.instructions == null) continue;
+            for (var insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                if (!(insn instanceof org.objectweb.asm.tree.MethodInsnNode call) || !call.owner.equals(original.name)
+                        || call.getOpcode() == org.objectweb.asm.Opcodes.INVOKESPECIAL || call.name.startsWith("<")
+                        || declaredRaw.contains(call.name + call.desc)) continue;
+                String callFinal = finalMethodName(original.name, call.name, call.desc);
+                for (var d : original.methods) {
+                    if (d.name.startsWith("<") || !d.desc.equals(call.desc) || d.name.equals(call.name)) continue;
+                    if (finalMethodName(original.name, d.name, d.desc).equals(callFinal)) renameLocalRaw.add(original.name + "." + d.name + d.desc);
+                }
+            }
+        }
+    }
+
+    private String finalMethodName(String owner, String name, String desc) {
+        String readable = readable(owner, name, desc);
+        return members == null ? readable : members.method(legacyClass(owner), readable, legacyDesc(desc), this::localSupers);
     }
 
     /** The readable (MCP) name of a method a class declares, as {@link #mapMethodName} will produce it (a notch-named jar's declarations go through the notch table first). */
@@ -303,15 +427,7 @@ public final class LegacyRemapper extends Remapper {
         for (var e : JDK_PACKAGE_RELOCATIONS.entrySet()) {
             if (internalName.startsWith(e.getKey())) return e.getValue() + internalName.substring(e.getKey().length());
         }
-        if (LegacyVersion.isRelocatedRoot(internalName)) return relocate(internalName);
-        // Beta GuiAPI uses TWL model/widget types; preserve their hierarchy through the versioned shims.
-        if (version == LegacyVersion.VB1_7_3 && internalName.startsWith("de/matthiasmann/twl/")) return relocate(internalName);
-        // b1.7.3 mods call LWJGL's OpenAL directly while they load (IndustrialCraft 2's audio): the real AL classes initialised on the
-        // mod-loading thread, before the sound engine made a context, fail for good and the client's resource reload then never ends.
-        // Their OpenAL goes to the synthesized API (silent) until the layer emulates it.
-        if (version == LegacyVersion.VB1_7_3 && internalName.startsWith("org/lwjgl/openal/")) return relocate(internalName);
-        // LWJGL 2's BufferUtils (direct NIO buffers): the shim's works without LWJGL, so client builds of mods load on a dedicated server
-        if (version == LegacyVersion.VB1_7_3 && internalName.equals("org/lwjgl/BufferUtils")) return relocate(internalName);
+        if (LegacyVersion.isRelocatedRoot(internalName) || relocatedForVersion(internalName)) return relocate(internalName);
         String moved = crossVersion.map(version, internalName);
         if (moved != null) return moved;
         // String literals keep keyword segments: "class.insecta" (Forestry) is an id, not a package.
@@ -356,6 +472,26 @@ public final class LegacyRemapper extends Remapper {
         return out == null ? internalName : out.append(internalName, end + 1, internalName.length()).toString();
     }
 
+    /**
+     * Names relocated into the shim (or the synthesized API) for this version only, on top of {@link LegacyVersion#isRelocatedRoot}.
+     * A jar that bundles such a class itself (a Beta library shipping TWL) keeps its copy under its private root unless the shim has
+     * the class (see {@code LegacyJarTransformer.relocateBundled}); otherwise the jar and the synthesized-API jar would both export the
+     * package and the module layer refuses to boot (#220).
+     */
+    boolean relocatedForVersion(String internalName) {
+        if (version != LegacyVersion.VB1_7_3) return false;
+        // Beta GuiAPI uses TWL model/widget types; preserve their hierarchy through the versioned shims.
+        if (internalName.startsWith("de/matthiasmann/twl/")) return true;
+        // InfSprites (a Beta sprite-sheet extension): mods built against it (a BuildCraft Transport build) call its API; the layer has no sheet limit
+        if (internalName.startsWith("net/mine_diver/infsprites/")) return true;
+        // b1.7.3 mods call LWJGL's OpenAL directly while they load (IndustrialCraft 2's audio): the real AL classes initialised on the
+        // mod-loading thread, before the sound engine made a context, fail for good and the client's resource reload then never ends.
+        // Their OpenAL goes to the synthesized API (silent) until the layer emulates it.
+        if (internalName.startsWith("org/lwjgl/openal/")) return true;
+        // LWJGL 2's BufferUtils (direct NIO buffers): the shim's works without LWJGL, so client builds of mods load on a dedicated server
+        return internalName.equals("org/lwjgl/BufferUtils");
+    }
+
     private String relocate(String legacyName) {
         String shimName = version.linkPrefix() + ForwardRenames.map(version, legacyName);
         // A forward version's own classes (1.6.4's network/tick API, which 1.7.10 lacks or shapes differently) win over the forwarded shim.
@@ -374,16 +510,20 @@ public final class LegacyRemapper extends Remapper {
     public String mapMethodName(String owner, String name, String descriptor) {
         if (owner.endsWith(LIVING_KEEP)) owner = owner.substring(0, owner.length() - LIVING_KEEP.length());
         if (!keep.isEmpty() && keep.contains(owner + "." + name + descriptor)) return name;
+        if (!renameLocalRaw.isEmpty() && renameLocalRaw.contains(owner + "." + name + descriptor)) return methodName(owner, name, descriptor) + "$mod";
+        if (!renameLocal.isEmpty() && !name.startsWith("func_")) {
+            String srg = notchSrg(owner, name, descriptor);
+            if (!srg.startsWith("func_") && renameLocal.contains(owner + "." + srg + descriptor)) return srg + "$mod";
+        }
+        return methodName(owner, name, descriptor);
+    }
+
+    private String notchSrg(String owner, String name, String descriptor) {
         if (notch != null && !name.startsWith("func_")) {
             String srg = notch.method(owner, name, descriptor, notchLocals);
-            if (srg != null) name = srg;
+            if (srg != null) return srg;
         }
-        if (!renameLocal.isEmpty() && !name.startsWith("func_") && renameLocal.contains(owner + "." + name + descriptor)) return name + "$mod";
-        String readable = mcp.method(name);
-        if (members != null) {
-            return members.method(legacyClass(owner), readable, legacyDesc(descriptor), this::localSupers);
-        }
-        return readable;
+        return name;
     }
 
     @Override

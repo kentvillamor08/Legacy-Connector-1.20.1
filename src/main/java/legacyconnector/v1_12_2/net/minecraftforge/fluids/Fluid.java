@@ -27,6 +27,10 @@ public class Fluid {
         this.flowing = flowing;
     }
 
+    public Fluid(String fluidName, ResourceLocation still, ResourceLocation flowing, java.awt.Color color) {
+        this(fluidName, still, flowing, color.getRGB());
+    }
+
     public Fluid(String fluidName, ResourceLocation still, ResourceLocation flowing, int color) {
         this(fluidName, still, flowing);
         this.color = color;
@@ -115,6 +119,11 @@ public class Fluid {
     public Fluid setGaseous(boolean gaseous) {
         this.isGaseous = gaseous;
         return this;
+    }
+
+    /** Forge: a fluid lighter than air (zero or negative density) rises. */
+    public boolean isLighterThanAir() {
+        return density <= 0;
     }
 
     public boolean isGaseous() {

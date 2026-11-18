@@ -31,8 +31,26 @@ public class EntityList {
         }
     }
 
+    /** Answers of {@link #getKey(Class)} for the registry state they were computed from (its snapshot list changes with every registration). */
+    private static final java.util.concurrent.ConcurrentHashMap<Class<?>, java.util.Optional<ResourceLocation>> KEYS = new java.util.concurrent.ConcurrentHashMap<>();
+    private static volatile java.util.List<?> keysFor;
+
     public static ResourceLocation getKey(Class<? extends Entity> cls) {
-        for (EntityEntry e : ForgeRegistries.ENTITIES.getValues()) {
+        var values = ForgeRegistries.ENTITIES.getValues();
+        if (values != keysFor) { // the registry changed (or first use)
+            KEYS.clear();
+            keysFor = values;
+        }
+        var hit = KEYS.get(cls);
+        if (hit == null) {
+            hit = java.util.Optional.ofNullable(computeKey(cls, values));
+            KEYS.put(cls, hit);
+        }
+        return hit.orElse(null);
+    }
+
+    private static ResourceLocation computeKey(Class<? extends Entity> cls, java.util.List<EntityEntry> values) {
+        for (EntityEntry e : values) {
             // vanilla entries stand on shared base classes (EntityLiving), which name no entity
             if (e.getEntityClass() == cls && !"minecraft".equals(e.getRegistryName().getNamespace())) return e.getRegistryName();
         }
@@ -175,5 +193,10 @@ public class EntityList {
         String n = name.indexOf(':') < 0 && !name.equals(name.toLowerCase(java.util.Locale.ROOT))
                 ? name.replaceAll("([a-z0-9])([A-Z])", "$1_$2").toLowerCase(java.util.Locale.ROOT) : name;
         return getClass(new ResourceLocation(n));
+    }
+
+    /** Forge: whether the entity is registered under that name. */
+    public static boolean isMatchingName(Entity entity, ResourceLocation name) {
+        return entity != null && name != null && name.equals(getKey(entity));
     }
 }

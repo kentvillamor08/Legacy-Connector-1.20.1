@@ -69,7 +69,7 @@ public final class BlockBridge {
 
 
     public static RegistryNamespaced legacyRegistry() {
-        return new legacyconnector.v1_7_10.cpw.mods.fml.common.registry.FMLControlledNamespacedRegistry<Block>(name -> byName(name), o -> nameOf((Block) o), BlockBridge::byId, o -> idOf((Block) o),
+        return new legacyconnector.v1_7_10.cpw.mods.fml.common.registry.FMLControlledNamespacedRegistry<Block>(name -> byName(name), o -> o instanceof Block b0 ? nameOf(b0) : null, BlockBridge::byId, o -> o instanceof Block b1 ? idOf(b1) : -1,
                 () -> all().iterator());
     }
 
@@ -271,8 +271,8 @@ public final class BlockBridge {
             String unlocalized = block.getUnlocalizedName();
             name = unlocalized != null && !unlocalized.isEmpty() ? unlocalized.replaceFirst("^tile\\.", "") : block.getClass().getSimpleName().toLowerCase(java.util.Locale.ROOT);
             // a block that was never named (Applied Energistics 1 registers its multi-blocks with a null name): the id its mod gave it
-            if (name.equals("null")) name = "block" + legacyconnector.v1_6_4.net.minecraft.util.Ids.blockId(block);
         }
+        if (name.equals("null") && legacyconnector.v1_6_4.net.minecraft.util.Ids.blockId(block) >= 0) name = "block" + legacyconnector.v1_6_4.net.minecraft.util.Ids.blockId(block);
         LegacyModContainer1710 owner = LegacyModContainer1710.active();
         // Immibis Core registers the blocks of every Immibis mod from its own code, so no mod is "active" then: the mod whose package holds the
         // block's class owns it (otherwise RedLogic's gates would be minecraft:redlogic.gates).
@@ -311,6 +311,7 @@ public final class BlockBridge {
     public static synchronized int registerImplicit() {
         int[] total = {0};
         legacyconnector.v1_6_4.net.minecraft.util.Ids.inEachSpace(() -> total[0] += registerImplicitInSpace());
+        implicitSweepDone = true;
         return total[0];
     }
 
@@ -323,27 +324,83 @@ public final class BlockBridge {
         for (int id = 1; id < list.length; id++) {
             Block block = list[id];
             if (block == null || block.mcc$modern != null || block.mcc$vanilla != null || NAMES.containsKey(block)) continue;
-            if (block.getClass().getName().startsWith("legacyconnector.")) continue;
-            org.kylepitcock.legacyconnector.core.LegacyModRecord owner = ownerOf(block.getClass());
-            if (owner == null) continue;
-            String name = block.getUnlocalizedName();
-            name = name != null && !name.isEmpty() && !name.equals("tile.null") ? name.replaceFirst("^tile\\.", "") : "block" + id;
-            try {
-                if (BY_NAME.containsKey(owner.legacyId + ":" + name)) name = name + "_" + id;
-                register(block, null, name, owner.legacyId, new Object[0]);
-                legacyconnector.v1_7_10.net.minecraft.item.Item item = legacyconnector.v1_6_4.net.minecraft.util.Ids.item(id);
-                if (item instanceof ItemBlock ib && ib.mcc$block() == block && block.mcc$modern != null) {
-                    ItemBridge.registerBlockItem(ib, block, BuiltInRegistries.BLOCK.getKey((net.minecraft.world.level.block.Block) block.mcc$modern), NAMES.get(block));
-                } else {
-                    ItemBridge.fromBlock(block);
-                }
-                count++;
-            } catch (RuntimeException | LinkageError e) {
-                LOG.warn("Could not register the unregistered legacy block {} (id {}): {}", block, id, e.toString());
-            }
+            if (registerImplicitOne(block, id)) count++;
         }
         if (count > 0) LOG.info("Registered {} legacy block(s) that their mods never registered (the numeric id table had them)", count);
         return count;
+    }
+
+    /** Set once the end-of-loading sweep ran: registries are frozen after it, so nothing registers on demand any more. */
+    private static boolean implicitSweepDone;
+
+    /**
+     * A legacy block of an id-based version that its mod constructed and never registered, asked for its item (Mystcraft builds
+     * {@code new ItemStack(block, 1, 0)} of a fluid block in postInit): the 1.6.4 game had an item for every block id. While registries are
+     * open (mods loading) it is registered now, as the end-of-loading sweep would, so the mod gets the item it asked for. Needs the
+     * block's name to be set (a mod names it right after constructing it); an unnamed block stays unregistered (the stack binds later).
+     */
+    public static synchronized boolean registerImplicitNow(Block block) {
+        if (implicitSweepDone || block == null || block.mcc$vanilla != null || !hasIdBasedMods()) return false;
+        // only fluid blocks (Mystcraft's): they register as blocks without an item. Any other block may still be registered by its mod with an ItemBlock class of its own
+        // (Forestry's subtype items) after it asked for the item; registering it here first took that class away and dropped 30 items.
+        if (block.getMaterial() == null || !block.getMaterial().isLiquid()) return false;
+        int id = legacyconnector.v1_6_4.net.minecraft.util.Ids.claimedBlockId(block);
+        if (id <= 0 || legacyconnector.v1_6_4.net.minecraft.util.Ids.block(id) != block) return false;
+        if (block.mcc$modern != null) return ensureItemBlock(block, id);
+        // A block the mod has not registered yet is left alone here: mods build stacks of their blocks before they call
+        // GameRegistry.registerBlock(block, itemClass), and registering it now with a plain ItemBlock would drop that item class and its
+        // subtypes (Forestry 1.4.7 lost 30 items that way). Blocks nobody registers are still picked up by the end-of-loading sweep.
+        return false;
+    }
+
+    private static boolean hasIdBasedMods() {
+        for (var m : org.kylepitcock.legacyconnector.core.LegacyMods.all()) {
+            if (m.version.equals("1.6.4") || m.version.equals("1.5.2") || m.version.equals("1.4.7")) return true;
+        }
+        return false;
+    }
+
+    /**
+     * A registered block of an id-based version without an item (a fluid block, which registers as a block only): 1.6.4 had an ItemBlock for every
+     * block id, and mods build stacks of such blocks. Its item (the one the mod put in {@code Item.itemsList}, else a plain ItemBlock) is registered now.
+     */
+    private static boolean ensureItemBlock(Block block, int id) {
+        String legacyName = NAMES.get(block);
+        if (legacyName == null || ItemBridge.fromBlock(block) != null) return false;
+        try {
+            legacyconnector.v1_7_10.net.minecraft.item.Item existing = legacyconnector.v1_6_4.net.minecraft.util.Ids.item(id);
+            ItemBlock item = existing instanceof ItemBlock ib && ib.mcc$block() == block ? ib : instantiateItemBlock(ItemBlock.class, block, new Object[0]);
+            if (item == null) return false;
+            ItemBridge.registerBlockItem(item, block, BuiltInRegistries.BLOCK.getKey((net.minecraft.world.level.block.Block) block.mcc$modern), legacyName);
+            return true;
+        } catch (RuntimeException | LinkageError e) {
+            LOG.warn("Could not give the legacy block {} (id {}) its item: {}", block, id, e.toString());
+            return false;
+        }
+    }
+
+    private static boolean registerImplicitOne(Block block, int id) {
+        if (block.getClass().getName().startsWith("legacyconnector.")) return false;
+        org.kylepitcock.legacyconnector.core.LegacyModRecord owner = ownerOf(block.getClass());
+        if (owner == null) return false;
+        String name = block.getUnlocalizedName();
+        name = name != null && !name.isEmpty() && !name.equals("tile.null") ? name.replaceFirst("^tile\\.", "") : "block" + id;
+        try {
+            if (BY_NAME.containsKey(owner.legacyId + ":" + name)) name = name + "_" + id;
+            legacyconnector.v1_7_10.net.minecraft.item.Item item = legacyconnector.v1_6_4.net.minecraft.util.Ids.item(id);
+            boolean hasItemBlock = item instanceof ItemBlock ib0 && ib0.mcc$block() == block;
+            // 1.6.4 had an item for every block id: a block whose mod put none in Item.itemsList gets a plain ItemBlock, as if registered
+            register(block, hasItemBlock ? null : ItemBlock.class, name, owner.legacyId, new Object[0]);
+            if (hasItemBlock && block.mcc$modern != null) {
+                ItemBridge.registerBlockItem((ItemBlock) item, block, BuiltInRegistries.BLOCK.getKey((net.minecraft.world.level.block.Block) block.mcc$modern), NAMES.get(block));
+            } else if (!hasItemBlock) {
+                ItemBridge.fromBlock(block);
+            }
+            return true;
+        } catch (RuntimeException | LinkageError e) {
+            LOG.warn("Could not register the unregistered legacy block {} (id {}): {}", block, id, e.toString());
+            return false;
+        }
     }
 
     /** The legacy mod whose main class lives in the package of (or above) {@code cls}; null when no mod's own package contains it. */
@@ -569,12 +626,24 @@ public final class BlockBridge {
 
     /** The generated Blocks class creates every vanilla wrapper; make sure it ran before any lookup. */
     private static void ensureVanilla() {
+        if (vanillaReady) return;
         try {
             Class.forName("legacyconnector.v1_7_10.net.minecraft.init.Blocks", true, BlockBridge.class.getClassLoader());
         } catch (ClassNotFoundException e) {
             throw new IllegalStateException(e);
         }
+        // Class.forName cost half of the render thread's time with a minimap mod reading every block of every section (Crafting Dead, #188).
+        // Ready once the generated class's last constant is assigned (a call during its own static initializer returns early, before that).
+        try {
+            var c = Class.forName("legacyconnector.v1_7_10.net.minecraft.init.Blocks", false, BlockBridge.class.getClassLoader());
+            var fields = c.getDeclaredFields();
+            if (fields.length > 0 && fields[fields.length - 1].get(null) != null) vanillaReady = true;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            // stays on the slow path
+        }
     }
+
+    private static volatile boolean vanillaReady;
 
     /**
      * 1.7.10's {@code Block.getBlockFromItem} was {@code getBlockById(Item.getIdFromItem(item))} on FML's block registry, which
@@ -609,12 +678,42 @@ public final class BlockBridge {
         }
         if (org.kylepitcock.legacyconnector.core.perf.Perf.BLOCK_LOOKUP_CACHE) {
             Object known = ((org.kylepitcock.legacyconnector.core.perf.LegacySlot) modern).legacyconnector$slot1710();
+            if (known == PER_STATE) return perStateBlock(state);
             if (known != null) return (Block) known;
+            if (VanillaFlattening.splitsAcrossIds(modern)) {
+                ((org.kylepitcock.legacyconnector.core.perf.LegacySlot) modern).legacyconnector$setSlot1710(PER_STATE);
+                return perStateBlock(state);
+            }
             Block made = legacyBlockLocked(state);
             ((org.kylepitcock.legacyconnector.core.perf.LegacySlot) modern).legacyconnector$setSlot1710(made);
             return made;
         }
+        if (VanillaFlattening.splitsAcrossIds(modern)) return perStateBlock(state);
         return legacyBlockLocked(state);
+    }
+
+    /** Marker in a modern block's lookup slot: its legacy block depends on the state (slab or double slab, lit or unlit furnace). */
+    private static final Object PER_STATE = new Object();
+    private static final Map<BlockState, Block> PER_STATE_BLOCKS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * The legacy block of a state of a modern block that several legacy ids flattened into. Thaumcraft's jar check compares
+     * {@code Blocks.wooden_slab} by identity, and every slab used to read as the double slab (the lowest id), with metadata 0.
+     */
+    private static Block perStateBlock(BlockState state) {
+        Block known = PER_STATE_BLOCKS.get(state);
+        if (known != null) return known;
+        int key = VanillaFlattening.nearestLegacyKey(state);
+        Block b = null;
+        if (key >= 0) {
+            ensureVanilla();
+            synchronized (BlockBridge.class) {
+                b = BY_ID.get(key >> 4);
+            }
+        }
+        if (b == null) b = legacyBlockLocked(state);
+        PER_STATE_BLOCKS.put(state, b);
+        return b;
     }
 
     private static Block stillLiquid(BlockState state) {

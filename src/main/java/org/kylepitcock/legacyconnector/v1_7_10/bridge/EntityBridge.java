@@ -68,6 +68,16 @@ public final class EntityBridge {
         modern.getPersistentData().put(EXTENDED_KEY, tag.mcc$modern());
     }
 
+    /** The legacy view of a modern entity if one exists already (never creates one). */
+    public static Entity knownView(net.minecraft.world.entity.Entity modern) {
+        if (modern == null) return null;
+        if (org.kylepitcock.legacyconnector.core.perf.Perf.ENTITY_VIEW_CACHE
+                && ((org.kylepitcock.legacyconnector.core.perf.LegacySlot) modern).legacyconnector$slot1710() instanceof Entity known) {
+            return known;
+        }
+        return VIEWS.get(modern);
+    }
+
     public static Entity wrap(net.minecraft.world.entity.Entity modern) {
         if (modern == null) return null;
         // perf.entityViewCache: the view kept on the entity (wrapped for every legacy event and callback of every entity each tick);
@@ -141,7 +151,8 @@ public final class EntityBridge {
     }
 
     public static boolean spawn(World world, Entity entity) {
-        Level level = world.mcc$fullLevel();
+        // the level object only (entity lookup, host creation); the entity is added through world.mcc$level(), the generation region while generating
+        Level level = world.mcc$levelObject();
         if (level == null) return false;
         if (entity.mcc$entity == null) {
             // Constructed without a world (or before the world was known): give it a host now.

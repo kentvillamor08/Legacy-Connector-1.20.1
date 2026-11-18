@@ -7,6 +7,8 @@ import legacyconnector.v1_12_2.net.minecraftforge.common.config.Configuration;
 public class ForgeModContainer extends legacyconnector.v1_12_2.net.minecraftforge.fml.common.DummyModContainer {
     public static boolean fullBoundingBoxLadders = false;
     public static double zombieSummonBaseChance = 0.1D;
+    /** The chance a spawned zombie is a baby (the game spawns its zombies by its own rule; this is the value mods read). */
+    public static float zombieBabyChance = 0.05F;
     public static boolean replaceVanillaBucketModel = true;
     public static boolean forgeLightPipelineEnabled = true;
     public static boolean selectiveResourceReloadEnabled = false;
@@ -36,7 +38,11 @@ public class ForgeModContainer extends legacyconnector.v1_12_2.net.minecraftforg
      * stacks' items against it. It is not a registered item here.
      */
     public static synchronized legacyconnector.v1_12_2.net.minecraftforge.fluids.UniversalBucket mcc$get$universalBucket(ForgeModContainer container) {
-        if (mcc$universalBucket == null) mcc$universalBucket = new legacyconnector.v1_12_2.net.minecraftforge.fluids.UniversalBucket();
+        if (mcc$universalBucket == null) {
+            // Forge's name for it; it stays unregistered: its stacks become the modern bucket of the fluid in their tag (FluidBridge1122)
+            mcc$universalBucket = new legacyconnector.v1_12_2.net.minecraftforge.fluids.UniversalBucket();
+            mcc$universalBucket.setRegistryName(new legacyconnector.v1_12_2.net.minecraft.util.ResourceLocation("forge", "bucketfilled"));
+        }
         return mcc$universalBucket;
     }
 

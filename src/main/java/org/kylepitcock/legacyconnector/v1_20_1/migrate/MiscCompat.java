@@ -161,6 +161,74 @@ public final class MiscCompat {
         MigrateContext.builder().define(accessor, value);
     }
 
+    /** 1.20.1 {@code LevelRenderer.renderSky(PoseStack, projection, partialTick, camera, foggy, fogSetup)}: 1.21.1 takes the model-view matrix instead of the stack. */
+    public static void renderSky(net.minecraft.client.renderer.LevelRenderer renderer, com.mojang.blaze3d.vertex.PoseStack pose, org.joml.Matrix4f projection,
+            float partialTick, net.minecraft.client.Camera camera, boolean foggy, Runnable fogSetup) {
+        renderer.renderSky(pose.last().pose(), projection, partialTick, camera, foggy, fogSetup);
+    }
+
+    private static net.minecraft.network.RegistryFriendlyByteBuf registryBuf(net.minecraft.network.FriendlyByteBuf buf) {
+        return buf instanceof net.minecraft.network.RegistryFriendlyByteBuf r ? r : new net.minecraft.network.RegistryFriendlyByteBuf(buf, MigrateContext.registries());
+    }
+
+    /** {@code EntityDataSerializer.write(FriendlyByteBuf, value)} of 1.20.1: 1.21.1 has a stream codec over the registry buffer (a plain buffer is wrapped). */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static void serializerWrite(net.minecraft.network.syncher.EntityDataSerializer serializer, net.minecraft.network.FriendlyByteBuf buf, Object value) {
+        serializer.codec().encode(registryBuf(buf), value);
+    }
+
+    /** {@code EntityDataSerializer.read(FriendlyByteBuf)} of 1.20.1. */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static Object serializerRead(net.minecraft.network.syncher.EntityDataSerializer serializer, net.minecraft.network.FriendlyByteBuf buf) {
+        return serializer.codec().decode(registryBuf(buf));
+    }
+
+    /** The stream codec of a legacy {@code EntityDataSerializer} (a mod class with {@code write(FriendlyByteBuf, T)} and {@code read(FriendlyByteBuf)}). */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static net.minecraft.network.codec.StreamCodec serializerCodec(Object serializer) {
+        java.lang.reflect.Method write = null;
+        java.lang.reflect.Method read = null;
+        for (java.lang.reflect.Method m : serializer.getClass().getDeclaredMethods()) {
+            if (m.isBridge() || m.isSynthetic()) continue;
+            if (m.getName().equals("write") && m.getParameterCount() == 2 && net.minecraft.network.FriendlyByteBuf.class.isAssignableFrom(m.getParameterTypes()[0])) write = m;
+            if (m.getName().equals("read") && m.getParameterCount() == 1 && net.minecraft.network.FriendlyByteBuf.class.isAssignableFrom(m.getParameterTypes()[0])) read = m;
+        }
+        if (write == null || read == null) throw new IllegalStateException("legacy EntityDataSerializer without write/read: " + serializer.getClass());
+        final java.lang.reflect.Method w = write;
+        final java.lang.reflect.Method r = read;
+        w.setAccessible(true);
+        r.setAccessible(true);
+        return new net.minecraft.network.codec.StreamCodec<net.minecraft.network.FriendlyByteBuf, Object>() {
+            @Override
+            public Object decode(net.minecraft.network.FriendlyByteBuf buf) {
+                try {
+                    return r.invoke(serializer, buf);
+                } catch (ReflectiveOperationException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+
+            @Override
+            public void encode(net.minecraft.network.FriendlyByteBuf buf, Object value) {
+                try {
+                    w.invoke(serializer, buf, value);
+                } catch (ReflectiveOperationException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        };
+    }
+
+    /** {@code ModList.getModObjectById(id)} of 1.20.1: the mod instance of the container. */
+    public static java.util.Optional<?> modObjectById(net.neoforged.fml.ModList list, String id) {
+        return list.getModContainerById(id).map(legacyconnector.v1_20_1.ForgeApi1201::modContainerGetMod);
+    }
+
+    /** {@code ItemStackLinkedSet.createTypeAndTagSet()} of 1.20.1: a set of stacks compared by item and tag (1.21.1: item and components). */
+    public static java.util.Set<net.minecraft.world.item.ItemStack> typeAndTagSet() {
+        return net.minecraft.world.item.ItemStackLinkedSet.createTypeAndComponentsSet();
+    }
+
     public static int getMaxStackSize(Item item) {
         return item.getDefaultMaxStackSize();
     }
@@ -349,6 +417,21 @@ public final class MiscCompat {
         return net.minecraft.world.entity.SpawnPlacementTypes.ON_GROUND;
     }
 
+    /** {@code SpawnPlacements.Type.valueOf(name)} (a mod reading the placement from its config): the enum constants are the four SpawnPlacementTypes now. */
+    public static net.minecraft.world.entity.SpawnPlacementType spawnPlacementValueOf(String name) {
+        return switch (name) {
+            case "ON_GROUND" -> net.minecraft.world.entity.SpawnPlacementTypes.ON_GROUND;
+            case "IN_WATER" -> net.minecraft.world.entity.SpawnPlacementTypes.IN_WATER;
+            case "IN_LAVA" -> net.minecraft.world.entity.SpawnPlacementTypes.IN_LAVA;
+            case "NO_RESTRICTIONS" -> net.minecraft.world.entity.SpawnPlacementTypes.NO_RESTRICTIONS;
+            default -> {
+                net.minecraft.world.entity.SpawnPlacementType custom = RoundCompat.CUSTOM_PLACEMENTS.get(name);
+                if (custom == null) throw new IllegalArgumentException("No enum constant SpawnPlacements.Type." + name);
+                yield custom;
+            }
+        };
+    }
+
     public static net.minecraft.world.entity.SpawnPlacementType spawnInWater() {
         return net.minecraft.world.entity.SpawnPlacementTypes.IN_WATER;
     }
@@ -396,6 +479,23 @@ public final class MiscCompat {
         return registerLate(registry, ResourceLocation.parse(name), value);
     }
 
+    /** {@code StructureType.register(name, codec)} (private in vanilla; mods open it with an access transformer): the codec becomes the type's MapCodec. */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static net.minecraft.world.level.levelgen.structure.StructureType registerStructureType(String name, com.mojang.serialization.Codec codec) {
+        net.minecraft.world.level.levelgen.structure.StructureType type = () -> EntityCompat.toMapCodec(codec);
+        return registerLate((net.minecraft.core.Registry) net.minecraft.core.registries.BuiltInRegistries.STRUCTURE_TYPE, name, type);
+    }
+
+    /** {@code new DimensionDataStorage(folder, fixer)}: 1.21.1's storage also wants the registries its saved data is read with. */
+    public static net.minecraft.world.level.storage.DimensionDataStorage dimensionDataStorage(java.io.File folder, com.mojang.datafixers.DataFixer fixer) {
+        return new net.minecraft.world.level.storage.DimensionDataStorage(folder, fixer, legacyconnector.v1_20_1.ForgeApi1201.registries());
+    }
+
+    /** {@code DataFixerBuilder.buildUnoptimized()} (Datafixer Upper 6): 8 builds a result holding the fixer; nothing is optimised here either. */
+    public static com.mojang.datafixers.DataFixer buildUnoptimized(com.mojang.datafixers.DataFixerBuilder builder) {
+        return builder.build().fixer();
+    }
+
     /** {@code new ShapedRecipe(id, group, category, width, height, ingredients, result)}: the shape is a pattern object now. */
     public static net.minecraft.world.item.crafting.ShapedRecipePattern pattern(int width, int height, NonNullList<Ingredient> ingredients) {
         return new net.minecraft.world.item.crafting.ShapedRecipePattern(width, height, ingredients, java.util.Optional.empty());
@@ -409,34 +509,119 @@ public final class MiscCompat {
         return java.util.Arrays.asList(array);
     }
 
+    /** {@code new StemBlock(fruit, seed, properties)}: 1.21.1 names the fruit, the attached stem and the seed by key (the fruit block and its attached stem follow vanilla's naming). */
+    public static net.minecraft.resources.ResourceKey<net.minecraft.world.level.block.Block> stemFruitKey(net.minecraft.world.level.block.Block fruit) {
+        return net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.BLOCK, net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(fruit));
+    }
+
+    public static net.minecraft.resources.ResourceKey<net.minecraft.world.level.block.Block> stemAttachedKey(net.minecraft.world.level.block.Block fruit) {
+        net.minecraft.resources.ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(fruit);
+        return net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.BLOCK, id.withPath("attached_" + id.getPath() + "_stem"));
+    }
+
+    /** The seed supplier is not resolvable while blocks register (the item does not exist yet): its item when it is, melon seeds otherwise (only the pick-block result and drops of the vanilla stem class use it). */
+    public static net.minecraft.resources.ResourceKey<net.minecraft.world.item.Item> stemSeedKey(java.util.function.Supplier<?> seed) {
+        try {
+            Object item = seed.get();
+            if (item instanceof net.minecraft.world.item.Item i) {
+                net.minecraft.resources.ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(i);
+                if (!id.equals(net.minecraft.core.registries.BuiltInRegistries.ITEM.getDefaultKey())) return net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.ITEM, id);
+            }
+        } catch (RuntimeException notYet) {
+            // the item is not registered yet
+        }
+        return net.minecraft.world.item.Items.MELON_SEEDS.builtInRegistryHolder().key();
+    }
+
+    /** {@code SwordItem.getDamage()}: the attack damage the sword was built with, kept as its main hand attack damage modifier in 1.21.1. */
+    public static float swordDamage(net.minecraft.world.item.SwordItem sword) {
+        return attackDamage(sword);
+    }
+
+    /** {@code DiggerItem.getAttackDamage()}: the same, for pickaxes, axes, shovels and hoes. */
+    public static float diggerDamage(net.minecraft.world.item.DiggerItem tool) {
+        return attackDamage(tool);
+    }
+
+    private static float attackDamage(net.minecraft.world.item.Item item) {
+        net.minecraft.world.item.component.ItemAttributeModifiers mods = item.components().get(net.minecraft.core.component.DataComponents.ATTRIBUTE_MODIFIERS);
+        double sum = 0;
+        if (mods != null) {
+            for (net.minecraft.world.item.component.ItemAttributeModifiers.Entry e : mods.modifiers()) {
+                if (e.attribute().is(net.minecraft.world.entity.ai.attributes.Attributes.ATTACK_DAMAGE.unwrapKey().orElseThrow())
+                        && e.modifier().operation() == net.minecraft.world.entity.ai.attributes.AttributeModifier.Operation.ADD_VALUE) sum += e.modifier().amount();
+            }
+        }
+        return (float) sum;
+    }
+
+    public static net.minecraft.resources.ResourceKey<net.minecraft.world.level.block.Block> stemOfFruitKey(net.minecraft.world.level.block.Block fruit) {
+        net.minecraft.resources.ResourceLocation id = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(fruit);
+        return net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.BLOCK, id.withPath(id.getPath() + "_stem"));
+    }
+
+    /** {@code FoodProperties.isFastFood()}: the flag became the eating time (0.8 s for fast food against the default 1.6 s). */
+    public static boolean isFastFood(net.minecraft.world.food.FoodProperties food) {
+        return food.eatSeconds() < 1.6F;
+    }
+
+    private static volatile java.lang.reflect.Method conditionsGetter;
+
+    /** {@code LootItemConditionalFunction.Builder.getConditions()}: protected, returned an array in 1.20.1 and a list in 1.21.1 (read through reflection, the caller is a mod class). */
+    public static net.minecraft.world.level.storage.loot.predicates.LootItemCondition[] builderConditions(net.minecraft.world.level.storage.loot.functions.LootItemConditionalFunction.Builder<?> builder) {
+        try {
+            java.lang.reflect.Method m = conditionsGetter;
+            if (m == null) {
+                m = net.minecraft.world.level.storage.loot.functions.LootItemConditionalFunction.Builder.class.getDeclaredMethod("getConditions");
+                m.setAccessible(true);
+                conditionsGetter = m;
+            }
+            @SuppressWarnings("unchecked")
+            List<net.minecraft.world.level.storage.loot.predicates.LootItemCondition> list = (List<net.minecraft.world.level.storage.loot.predicates.LootItemCondition>) m.invoke(builder);
+            return list.toArray(new net.minecraft.world.level.storage.loot.predicates.LootItemCondition[0]);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     // ------------------------------------------------------------------ dispenser: BlockSource became a record
 
     public static BlockPos sourcePos(net.minecraft.core.dispenser.BlockSource s) {
-        return s.pos();
+        return (Object) s instanceof LegacyBlockSource l ? l.getPos() : s.pos();
     }
 
     public static ServerLevel sourceLevel(net.minecraft.core.dispenser.BlockSource s) {
-        return s.level();
+        return (Object) s instanceof LegacyBlockSource l ? l.getLevel() : s.level();
     }
 
     public static net.minecraft.world.level.block.state.BlockState sourceState(net.minecraft.core.dispenser.BlockSource s) {
-        return s.state();
+        return (Object) s instanceof LegacyBlockSource l ? l.getBlockState() : s.state();
     }
 
     public static net.minecraft.world.level.block.entity.BlockEntity sourceEntity(net.minecraft.core.dispenser.BlockSource s) {
-        return s.blockEntity();
+        return (Object) s instanceof LegacyBlockSource l ? l.getEntity() : s.blockEntity();
     }
 
     public static double sourceX(net.minecraft.core.dispenser.BlockSource s) {
-        return s.pos().getX() + 0.5;
+        return (Object) s instanceof LegacyBlockSource l ? l.x() : s.pos().getX() + 0.5;
     }
 
     public static double sourceY(net.minecraft.core.dispenser.BlockSource s) {
-        return s.pos().getY() + 0.5;
+        return (Object) s instanceof LegacyBlockSource l ? l.y() : s.pos().getY() + 0.5;
     }
 
     public static double sourceZ(net.minecraft.core.dispenser.BlockSource s) {
-        return s.pos().getZ() + 0.5;
+        return (Object) s instanceof LegacyBlockSource l ? l.z() : s.pos().getZ() + 0.5;
+    }
+
+    /** The dispenser of a legacy block source (the record's slot is typed; a mod's source may answer another block entity, which then only the legacy getter sees). */
+    public static net.minecraft.world.level.block.entity.DispenserBlockEntity asDispenser(net.minecraft.world.level.block.entity.BlockEntity e) {
+        return e instanceof net.minecraft.world.level.block.entity.DispenserBlockEntity d ? d : null;
+    }
+
+    /** {@code BlockSource.center()} of a legacy block source: the centre of its position. */
+    public static net.minecraft.world.phys.Vec3 sourceCenter(BlockPos pos) {
+        return net.minecraft.world.phys.Vec3.atCenterOf(pos);
     }
 
     // ------------------------------------------------------------------ other signature changes
@@ -510,6 +695,37 @@ public final class MiscCompat {
         }
         net.minecraft.core.Registry registry = BuiltInRegistries.TRIGGER_TYPES;
         return (net.minecraft.advancements.CriterionTrigger) registerLate(registry, ResourceLocation.parse(name), trigger);
+    }
+
+    /**
+     * {@code CriteriaTriggers.CRITERIA} (a mixin accessor of YUNG's API and others): the id-to-trigger map is the {@code TRIGGER_TYPES} registry in 1.21.1. A view
+     * over it; {@code put} registers late (the registry may be frozen), the rest reads the registry.
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static java.util.Map<ResourceLocation, net.minecraft.advancements.CriterionTrigger<?>> criteriaTriggerMap() {
+        net.minecraft.core.Registry<net.minecraft.advancements.CriterionTrigger<?>> registry = BuiltInRegistries.TRIGGER_TYPES;
+        return new java.util.AbstractMap<>() {
+            @Override public net.minecraft.advancements.CriterionTrigger<?> put(ResourceLocation key, net.minecraft.advancements.CriterionTrigger<?> value) {
+                net.minecraft.advancements.CriterionTrigger<?> old = registry.get(key);
+                if (old == null) registerLate((net.minecraft.core.Registry) registry, key, value);
+                return old;
+            }
+            @Override public net.minecraft.advancements.CriterionTrigger<?> get(Object key) {
+                return key instanceof ResourceLocation id ? registry.get(id) : null;
+            }
+            @Override public boolean containsKey(Object key) {
+                return key instanceof ResourceLocation id && registry.containsKey(id);
+            }
+            @Override public int size() {
+                return registry.size();
+            }
+            @Override public java.util.Set<java.util.Map.Entry<ResourceLocation, net.minecraft.advancements.CriterionTrigger<?>>> entrySet() {
+                java.util.Set<java.util.Map.Entry<ResourceLocation, net.minecraft.advancements.CriterionTrigger<?>>> out = new java.util.LinkedHashSet<>();
+                for (java.util.Map.Entry<net.minecraft.resources.ResourceKey<net.minecraft.advancements.CriterionTrigger<?>>, net.minecraft.advancements.CriterionTrigger<?>> e : registry.entrySet())
+                    out.add(new java.util.AbstractMap.SimpleImmutableEntry<>(e.getKey().location(), e.getValue()));
+                return java.util.Collections.unmodifiableSet(out);
+            }
+        };
     }
 
     // ---- cauldron interaction maps (CauldronInteraction.WATER... were Map<Item, CauldronInteraction>, are InteractionMap records now)
@@ -589,5 +805,14 @@ public final class MiscCompat {
     /** {@code ParticleTypes.ENTITY_EFFECT} is a colour particle option now; the closest plain particle is the witch swirl. */
     public static net.minecraft.core.particles.SimpleParticleType entityEffectParticle() {
         return net.minecraft.core.particles.ParticleTypes.WITCH;
+    }
+
+    /**
+     * {@code MethodHandle.invokeExact(CapabilityProvider)} on a handle for {@code CapabilityProvider.serializeCaps()} (AE2's item keys read the stack's capability NBT
+     * this way): in 1.20.1 an ItemStack was a CapabilityProvider; here it is not, and it has no persisted capabilities, so the result is null.
+     */
+    public static net.minecraft.nbt.CompoundTag serializeCapsHandle(java.lang.invoke.MethodHandle handle, Object provider) throws Throwable {
+        if (provider instanceof legacyconnector.v1_20_1.net.minecraftforge.common.capabilities.CapabilityProvider<?> cp) return (net.minecraft.nbt.CompoundTag) handle.invoke(cp);
+        return null;
     }
 }

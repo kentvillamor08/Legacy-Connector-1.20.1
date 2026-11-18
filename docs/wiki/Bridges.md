@@ -78,7 +78,7 @@ above); *engine bridges* map a legacy system onto the 1.21 one it corresponds to
 | Items and ItemStacks | `Item`, `ItemStack` damage/NBT | one item per metadata subtype, `CUSTOM_DATA` NBT |
 | Recipes and smelting | `GameRegistry` / `CraftingManager` / `OreDictionary`, custom `IRecipe` classes (IC2, AE2, Blood Magic, Witchery ...) | data-pack recipes, tags; a custom recipe is a `legacyconnector:legacy_recipe` that matches and crafts through the legacy object |
 | Entities | `Entity`, spawn/save/load, mob AI | entity types, spawns, saving |
-| Fluids | Forge `Fluid` / containers | fluid types |
+| Fluids | Forge `Fluid` / containers, fluid blocks, buckets | fluid types; 1.12.2: source/flowing fluids held by the fluid blocks and buckets ([details](#1122-fluids)) |
 | Villagers | `VillagerRegistry` ids, skins, trade handlers, village creation handlers | `minecraft:villager_<id>` professions (a vanilla villager with another job, so Jade names its mod "Minecraft"; named after the mod's skin file, e.g. "Wizard"), trades, clothes layer; some new unemployed villagers take a legacy profession; legacy village buildings are elements of the vanilla village house pools with their 1.7.10 share (see [World generation](World-Generation.md)) |
 | GUIs and containers | `GuiHandler`, `Container` | menus and screens |
 | Networking | FML `SimpleNetworkWrapper` / channels | NeoForge payloads |
@@ -87,7 +87,7 @@ above); *engine bridges* map a legacy system onto the 1.21 one it corresponds to
 | Chest loot | `ChestGenHooks.addItem` for dungeon, mineshaft, pyramid, stronghold, village and bonus chests | an extra pool on the matching vanilla chest loot table; chests that legacy structures fill from one of these categories get the matching modern loot table instead, so the pack's loot (and modern mods' loot modifiers) applies |
 | Fishing loot | `FishingHooks` fish, junk and treasure entries (MineFactoryReloaded's junk) | a global loot modifier swaps a catch of the same category for a mod entry with its 1.7.10 weight share |
 | Brewing | `Item.getPotionEffect` ingredients, `PotionHelper` potion values and requirements | one brewing recipe running 1.7.10's potion values: mod ingredients and mod-effect potions brew as in 1.7.10 (redstone, glowstone, gunpowder apply), vanilla potions stay vanilla, water breathing (pufferfish) is back |
-| Biomes, world types, mod dimensions | `BiomeGenBase`, `GenLayer`, `WorldProvider` | data-driven biomes placed by a connector-owned multi-noise climate overlay (optional TerraBlender region when already installed), legacy world types as their own biome source, `legacyconnector:dim_<id>` |
+| Biomes, world types, mod dimensions | `BiomeGenBase`, `GenLayer`, `WorldProvider` | data-driven biomes placed by climate (a TerraBlender region), legacy world types as their own biome source, `legacyconnector:dim_<id>` |
 | World generation | `IWorldGenerator`, decorators | one placed feature per legacy generator (`<mod>:legacy_worldgen/<generator>`) and one per generator for the layer below y=0 (`<mod>:legacy_worldgen_deep/<generator>`), added by biome modifiers |
 | Events | Forge/FML event buses | NeoForge event bus |
 | Sounds, potions, creative tabs | `SoundHandler`, `Potion`, `CreativeTabs` | sound events ([details](#sounds)), effects, tabs |
@@ -105,7 +105,7 @@ above); *engine bridges* map a legacy system onto the 1.21 one it corresponds to
 | Block rendering (`ISimpleBlockRenderingHandler`, TESRs) | Handlers draw in the world (Tinkers' tables, AE2, AgriCraft crops), renderers can bind vanilla textures by their 1.7.10 names, blocks that colour themselves (leaves, grass, `colorMultiplier`) are biome tinted; a single-colour handler quad on a block face has 1.7.10's face shade divided out and gets modern shading and ambient occlusion (tinted blocks, OpenBlocks' elevators), other single colours get AO; per-vertex colour is still missing, some handlers (Tinkers' drying rack, barricades) still draw nothing |
 | Dimension sky/fog/clouds | Implemented (see *Mod dimensions*); Twilight Forest's fog and Galacticraft's planets work, but the skies of other mods' dimensions are not all verified |
 | Portal placement | Twilight Forest's portal works; other mods' portals are not verified |
-| Coremods that patch Minecraft itself | cannot run on the shim; the common cases (DragonAPI's recipe list and smelting hook) are handled one by one |
+| Coremods that patch Minecraft itself | 1.7.10, experimental: the hooks their transformers insert into the original classes are listed at translation time (`CoremodHookScan`, needs the 1.7.10 client jar) and called from the matching modern places (`CoremodSites`); places without a modern counterpart yet do nothing ([Coremods](Coremods.md); 1.12.2 and the pre-1.7 versions are replayed too). Without the jar: DragonAPI's recipe list and smelting hook and Fisk's hooks are handled one by one |
 | Mods built for a different version of another mod | only return-type drift is relinked (Binnie's mods against Forestry 4.2.16 still fail) |
 | 1.12.2 | alpha: most of the API mods use is implemented on both sides; see the status table and issue #64 |
 | 1.20.1, 1.16.5, 1.2.5 bridges | planned, in that order |
@@ -148,6 +148,27 @@ With the modern Patchouli (NeoForge 1.21.1) installed, 1.12.2 mods' Patchouli bo
   1.14 to 1.20 the files are already in `data/` with the modern structure, and the converter has to turn `mod:item{nbt}` stacks into
   `mod:item[components]`, move the contents to the resource pack (`use_resource_pack`), and map renamed fields (`extend`, multiblock `pattern`
   keys, `advancement`/`flag`). No converter is registered for them yet because those layers do not exist.
+
+## 1.12.2 fluids
+
+`FluidBridge1122` registers every Forge 1.12.2 `Fluid` the way a 1.21.1 mod adds a fluid. Each one gets a `FluidType` (density, viscosity
+as swim speed, temperature, luminosity, gaseous fluids are not swimmable, fill/empty sounds, the legacy name; on the client
+`client/Fluids1122` gives it the legacy still/flowing/overlay textures, added to the block atlas, and its colour). A fluid whose block is a
+fluid block (`BlockFluidClassic`, `BlockFluidFinite`, any `BlockFluidBase`, or a mod's `BlockLiquid`) gets a source and a flowing
+`BaseFlowingFluid` (`<mod>:<fluid>`, `<mod>:flowing_<fluid>`), and its block (`Legacy1122FluidBlock`) holds their states: level 0 is the
+source, other levels are flowing states with the level scaled to 1-8 (`quantaPerBlock`; finite fluids by their quanta). So the fluid renderer
+draws it in the block's legacy render layer (the block model is not drawn), entities swim and are pushed through vanilla code, and worldgen
+lakes placed with the fluid block are fluids too. The legacy block still flows by its own `updateTick` (the modern fluid never ticks or
+spreads), so `canDisplace`, `displaceIfPossible`, `onEntityCollision` effects, mixing in `neighborChanged` and `drain`/`place` keep running.
+A fluid with a block or a universal bucket (`FluidRegistry.addBucketForFluid`) gets a bucket: the mod's own `ItemBucket(fluidBlock)` when
+it has one, else a generated `BucketItem` `<mod>:<fluid>_bucket` (NeoForge's fluid container model: the vanilla bucket with the fluid's
+texture and colour; in the Tools tab). The empty vanilla bucket picks a source up through the legacy `drain` (`BucketPickup`); a filled bucket
+places the legacy block at level 0. Legacy code sees the generated bucket as Forge's universal bucket with the fluid in its tag (Forge's
+format), so `FluidUtil.getFilledBucket`, `UniversalBucket.getFilledBucket(ForgeModContainer.getInstance().universalBucket, fluid)` and
+`FluidBucketWrapper` work even in preInit, before the modern bucket exists, and recipes using that stack get the modern bucket. The buckets
+have NeoForge's fluid item capability (tanks and pipes fill and empty them). Not mapped: a fluid block that is neither `BlockFluidBase` nor
+`BlockLiquid` (a bare `IFluidBlock`) and a `BlockLiquid` of no registered Forge fluid stay plain legacy blocks; gases render like liquids
+(the modern fluid renderer has no upward fluids).
 
 ## 1.12.2 advancements
 
@@ -217,6 +238,17 @@ map like any legacy texture. Reika's handlers return class path files (`/Reika/R
 bind them through DragonAPI's `ReikaTextureHelper` (raw GL ids, see [Rendering](Rendering.md)); if such a name reaches the texture
 manager anyway (`new ResourceLocation("/Reika/...")`) it is read from the mods' class path with its original case and
 registered once as `legacyconnector:classpath/<path>` (a missing file gets the missing texture once, never a lookup per frame).
+
+## Creative listing of 1.4.7 to 1.6.4 mods
+
+A 1.4.7 to 1.6.4 block or item has a creative tab only when the mod called `setCreativeTab`. RedPower 2's world blocks (ores, rubber
+wood, leaves, sapling) set none and list their stacks through the Forge hook `Block.addCreativeItems(ArrayList)` (or `getSubBlocks`),
+which NEI and the search list read; no tab did. The modern creative screen and JEI only show what a tab lists, so those items existed but
+could not be found. Rule (`CreativeTabBridge.registerUnlistedTabs`): for mods of source version 1.4.7, 1.5.2 or 1.6.4, an item with
+no tab whose block or item class (the mod's own, below the shim base) declares `addCreativeItems`, `getSubBlocks` or `getSubItems` joins
+a tab `legacyconnector:unlisted_<mod>` named after its mod, with exactly the stacks that listing returns. Items without such a listing
+(multiblock parents, technical blocks) stay hidden, as in the original. The mod's own `addCreativeItems` is called directly when
+it declares one (shim `BlockFlower` is 1.7.10's coloured flower and would list nine vanilla subtypes for RedPower's plants block).
 
 ## Block subtypes (flattening)
 

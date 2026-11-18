@@ -82,6 +82,10 @@ python3 tools/extract_legacy_hierarchy.py 1.7.10
 - `./gradlew compileJava --rerun` is the compile check (compileJava is non-incremental: the shim access widener rewrites class files), then
   `./gradlew generateShimIndex`, which catches "phantom field access" errors: shim code must read legacy fields that exist only as virtual
   fields through the `mcc$get$`/`mcc$set$` accessors.
+- `./gradlew checkShimMembers` (part of `check`) compares the public/protected members of the shim with `tools/dev/shim-members.txt.gz`:
+  members may be added, never silently removed or changed (name, descriptor, static or instance), because a mod that linked against one turns
+  into an unresolved reference (`gap_shim` in the probe). Accept an intended removal or record additions with
+  `python tools/dev/check_shim_members.py --update` and say so in the commit.
 - `tools/dev/run-corpus.sh [dir]` runs the server self test over a whole directory of jars. Run only one server at a time and never compile
   while one runs.
 - Translation results are cached per jar and mod set (`run-*/.legacyconnector/cache`). After changing the loader, linker, stubber or shim,
@@ -116,6 +120,110 @@ python3 tools/extract_legacy_hierarchy.py 1.7.10
   (items, fluids, RF), persistence across a restart (`persist`, run twice) and the handbook data. Jars go in `run-subtest/mods/1.7.10`.
 - Legacy mod jars are supplied by the developer and never committed (`test-mods/` is gitignored).
 
+## Coremod probes
+
+Server scripts that check the coremod places of [Coremods](Coremods.md) without a player (run one server at a time, with the coremod jars of one version in
+the sub-test directory, and `-PcoremodReport` to list the places without equivalent):
+
+- `tools/dev/coremod-sites-1122-probe.js` (1.12.2 round 4 and 5 places: AppleCore, AutoRegLib, Charm, Quark, RandomThings),
+  `tools/dev/coremod-sites-1710-probe.js` (1.7.10 round 3, Fisk's Heroes first) and `coremod-sites-1710-probe2.js` (round 6: checks the hook mixins applied,
+  drives collision boxes and the light probe, times the hot paths with `CoremodHotPathBench`, `-Dcm.bench=false` skips that). Each loads every mixin target
+  (a mixin that does not apply throws there) and drives what a server can reach. Run:
+  `./gradlew runServerSubTest -PsubTestDir=run-cm -PserverTickScript=<abs path of the script> [-PautostopTicks=1500]`. With no player in the world,
+  chunks only tick when forced: the 1.12.2 probe calls `level.setChunkForced(0, 0, true)` first.
+- `./gradlew probeCoremodHooks -PlegacyJar=a.jar,b.jar [-Psites=true] [-PvanillaJar=client-<mc>.jar]` lists what each coremod's transformers change; results
+  go to `tools/dev/agent-tasks/coremod-sites-*.md` and `coremod-structural-additions.md`.
+- Gameplay probes of single issues, in the same style (`-PserverTickScript`, optionally `-PserverTickScriptFrom=<tick>`; they load `lib.js` or
+  `lib-reika.js` of their folder): `tools/dev/server-scripts/traincraft-diagonal.js`, `traincraft-slope.js`, `traincraft-fluids.js` (Traincraft, #105) and
+  `tools/dev/thaumcraft/` (`bone-bow.js`, `node-jar.js`, `node-jar-create.js`, `crucible-*.js`, `golem-gather.js`, `scan-thaumometer.js`; submit `lib.js`
+  first, read the result with `tools/dev/server-script.sh '<expression>'`; #152).
+- The link probe checks its own run matching with `python tools/compat/probe.py --self-test` (see Link probe below).
+- `run-perfmods/irisveil-0.4.0.jar` (Iris Veil Compat) crashes the client at start-up without the Veil library
+  (`ClassNotFoundException foundry.veil...`). `quick-shots.sh` and `verify-client.sh` therefore copy the performance mods through
+  `tools/dev/perfmods_filter.py`, which skips (with a printed line) every jar whose mandatory dependency (`neoforge.mods.toml`, `type="required"`)
+  no jar of the set or the game's mods folder provides; Veil, which the jar's toml only lists as optional although its mixins need it, is
+  listed in `EXTRA_REQUIRES`. Nothing is deleted from `run-perfmods/`. Unit tests: `python -m unittest test_perfmods_filter` in `tools/dev`.
+
+## Quiet merge gate
+
+`tools/dev/gate.sh [compile|index|check ...]` prints one line per step and ends with an unmistakable last line, `gate: ok` or
+`gate: FAILED (<stage>)`, and exits non-zero on failure. Pipes hide exit codes (`bash tools/dev/gate.sh | tail -3 && next` runs `next` even when the
+gate failed): check the last line, do not chain after a pipe (or use `set -o pipefail`).
+
+## Regression suites
+
+`tools/dev/verify.sh [--update] [suite ...]` runs the headless server self test unattended over named jar sets and compares the result with a
+committed baseline (no argument runs every suite; about 2 to 5 minutes per suite, 15 minutes at most).
+
+- **Suites** are `tools/dev/verify/suites/<name>.txt`, one `<version-folder> <jar-name-fragment>` per line (`1.7.10`, `1.12.2`, `1.6.4`, `1.5.2`,
+  `1.4.7`, `1.20.1`, `b1.7.3`; the fragment is matched case-insensitively against jar file names; `#` starts a comment). Use a version in the
+  fragment when other versions ship the same mod name (`CodeChickenCore-1.7.10`).
+- **Jars** are never downloaded or committed. They are looked up in the gitignored folders of the main checkout
+  (`JAR_ROOT`, default `Y:/Programming/Minecraft/Retrofit`: `test-mods*`, `run-subtest/mods`, `run-screenshots/mods`, ...; the list is `SEARCH` in the
+  script) by `tools/dev/verify/picker.py`. Each jar has an inferred Minecraft version (a version token in its file name, else its folder such as
+  `test-mods-164` or `1.12.2 test mods`); a line's version prefers jars of that version, never takes a jar of another version, and the picker
+  reports SETUP (the suite is not run and counts as a failure) when the pick is ambiguous (differently named unlabelled jars compete, or a `lib` line
+  matches several versions). `tools/dev/verify.sh --list [suite ...]` is the dry run that prints the pick per line without starting anything; a
+  real run prints the picks into the suite log (`build/devtools/verify-<suite>-jars.txt`, `run-verify/<suite>/logs/verify-jars.txt`). A suite
+  with a missing jar is reported as SKIP with the missing fragment, not as a failure. Fragments take `*` and `[`/`]` as wildcards.
+- **Run:** each suite gets a fresh game directory `run-verify/<suite>` (mods copied into `mods/<version>/`, eula and `server.properties` taken from the
+  main checkout's `run-subtest` with a free port, no world, no translation cache) and runs `./gradlew runServerSubTest -PsubTestDir=... -PautostopTicks=700`
+  (`AUTOSTOP`, `SUITE_TIMEOUT` override). Only the server of this checkout is killed on a timeout (`verify/kill-server.ps1`).
+- **Metrics** are parsed from `logs/latest.log` by `tools/dev/verify/verify.py` (`python verify.py parse <log> <crash-dir>`; unit tests:
+  `python -m unittest discover -s tools/dev/verify`): failed mods, block self test (placed, still there, with problems), entity self test, silent
+  failure checks, 1.12.2 item placement, legacy content counts, crash reports, `VerifyError` count and whether the block self test was reached.
+- **Baseline:** `tools/dev/verify/baseline.json`. A suite FAILS when a "bad" metric (failed mods, problems, failed or unspawned entities, silent
+  failures, crash reports, VerifyErrors) is higher than the baseline, when a "good" metric (blocks still there, entities alive, placed items, content
+  counts) is more than 2 percent lower (10 percent for entities alive, which varies between identical runs), or when the self test was not reached. A suite without a baseline entry is NEW. After an intended change run
+  `tools/dev/verify.sh --update [suite]` and commit `baseline.json`. The table is also written to `build/devtools/verify-report.txt`; the exit code is
+  non-zero when a suite failed.
+- **Watchdog:** `verify.sh`, `run-subset.sh` and `run-corpus.sh` write `max-tick-time=-1` into the `server.properties` of the run directory:
+  the dimension self test of big packs blocks the main thread for more than the 60 s watchdog, which killed the run. (A hand-made run directory
+  needs the same line.)
+- **Entity self test determinism:** the test pins the world to night with the daylight/weather cycles and mob griefing off (undead no longer burn
+  in sunlight, whose timing made `entOk` vary between identical runs); the AI still runs, so an entity that dies from its own code counts as removed.
+
+## Practices learned on 2026-11-16
+
+- **Wiki links.** `python tools/dev/check_wiki_links.py` checks every relative link and anchor in `docs/wiki` and `README.md` and lists pages Home.md does not link; run it after adding a page.
+- **A client that fails mod loading stays open.** NeoForge shows its error screen and the process never exits, so a script that only waits for the game to quit hangs. Poll
+  `logs/latest.log` (and the process) for the failure or success line, then stop the game yourself. `tools/dev/client-once.sh` is not on master yet; until it is,
+  the rule applies to every ad hoc client script (`verify/client.py` already kills the game after its steps).
+- **Combined suites find defects single suites miss.** `atm9-1201-all` (every mod of the ATM 9 batches together) found defects that the single suites (`atm9-1201-1` to `-7`) did not (for example a capability lookup recursing to a stack overflow in the server tick, commit 5bf6309c1).
+  Run a combined suite before judging a batch of 1.20.1 changes; it has no baseline entry yet.
+- **Port clashes between parallel runs.** `verify.sh` derives `server-port`, `query.port` and `rcon.port` from `VERIFY_PORT_BASE` (default 25570, plus the suite index). Two verify runs
+  at once (two worktrees) must use different bases, for example `VERIFY_PORT_BASE=25770`, or the second server fails to bind.
+- **The entity count of `mixed` varies.** `entities_alive` of that suite has been seen between 462 and 531 against a baseline of 526 on identical code (random spawns, AI deaths).
+  Re-run once before reading a drop as a regression; the other metrics of the suite (failed mods, problems, crash reports) do not vary.
+- **A server that exits with -1 during mod loading** (no crash report, log ends mid-load) may have been killed by another run: `pkill`-style cleanups, a timeout of a parallel
+  `verify.sh`, or `kill-server.ps1` of a second checkout. Check for a concurrent run before looking for a defect, and run one java at a time per machine as far as memory allows.
+
+## Client scenarios
+
+`tools/dev/verify-client.sh [scenario ...]` runs scripted checks in a real client (a game window opens for a few minutes per scenario; one client at a
+time; no argument runs every scenario). Scenarios are `tools/dev/verify/scenarios/<name>.txt`:
+
+```
+mods: 1.7.10 Thaumcraft-1.7.10        one line per jar: <version-folder> <jar fragment>, looked up like the server suites (SEARCH in verify/client.py)
+world: minecraft:flat                 optional (default flat)
+cmd /give @s thaumcraft:itemthaumonomicon   any RemoteControl verb as is (cmd, wait n, slot n, look yaw pitch, use, useitem, holduse n, ...)
+expect LegacyScreen :: mc.screen == null ? "none" : mc.screen.getClass().getName()
+shot tc4-book                         screenshot
+logabsent StackOverflowError          fails when logs/latest.log contains the pattern
+```
+
+`expect <regex> :: <JavaScript>` evaluates the JavaScript in the game (`js` verb, bindings `mc`, `server`, `log`, Nashorn: numbers come back as `15.0`)
+and passes when `re.search(regex, answer)` matches; it is retried for 15 s. A step whose answer starts with `error:`, `unknown command` or
+`use: no block` fails too. A missing jar gives SKIP; the first failing step gives `FAIL step line N '<step>': <answer>` and a `failure.png`.
+
+The runner (`tools/dev/verify/client.py`, unit tests `python -m unittest discover -s tools/dev/verify`) prepares `run-verify-client/<scenario>`
+(gitignored: jars in `mods/<version>/`, the jars of the main checkout's `run-perfmods/` except Iris Veil Compat, which needs the Veil library; `NOPERF=1`
+leaves them out; no translation cache, no world), starts `tools/dev/quick-shots.sh` with `SCENARIO=control`, polls until the player is in the world
+(8 minutes), runs the steps through `control/in/*.cmd`, then quits the game and kills only the java process of this checkout and game directory
+(`verify/kill-client.ps1`). Results: `build/devtools/verify-client/<scenario>/` (screenshots, `latest.log`, `gradle.log`, and `report.txt` one level up);
+exit code non-zero when a scenario failed. Shipped: `tc4-book`, `tc4-bow`, `villager-professions`, `fluid-bucket`, `te147-gauge`. The player spawns in
+the air at y=150: scenarios that need ground fill a stone floor at y=148 and `tp @s 0.5 150 0.5` first.
+
 ## Silent-failure checks
 
 The server self test (`-Dlegacyconnector.entitySelfTest=true`, on in `runServerSubTest`) also runs `core/SilentFailureChecks` once at server start. They are read-only and target bugs that crash nothing and log nothing, which link and translation checks cannot see (Sinytra Connector's "attribute registration bypassed, SWIM_SPEED stayed 0, nobody can swim" class). Output: `SILENT FAILURE CHECKS: N passed, M failed`, then one `SILENT FAILURE CHECK FAILED: <check>: <offenders by registry name>` line at ERROR level per failing check (`tools/dev/run-subset.sh` prints them). Add `-Dlegacyconnector.selfTestFailFast=true` to halt the JVM with exit code 3 on any failure.
@@ -148,11 +256,29 @@ python3 tools/compat/probe.py --from-json out.json --mc 1.7.10             # con
   and startup-test results, and the script never overwrites those. Re-running refreshes earlier probe entries.
 - Every run is also appended to `docs/data/probe.json` (counts per result plus the per-mod list of the last 10 runs per version), which the
   pie chart page `docs/probe.html` ("Automated results" on the compatibility site) shows with a run selector and a history table.
+  Runs carry a `source` (the jar population: `modrinth` in CI, `mcarchive`, none = the maintainer's local corpus). The page shows one source per
+  Minecraft version with a source switch (default: the source whose latest run has the most mods), and `probe.py` compares a run (`vs`,
+  `--fail-on-regression`) only with the previous run of the same version and source. Scheduled and manual CI runs record a nightly-style version
+  (`<latest release>-nightly.<run>.<sha>`); the workflow skips `b1.7.3` when Modrinth yields fewer than 20 jars. `python tools/compat/probe.py --self-test` checks the run matching.
+- **1.2.5** (`--mc 1.2.5`, alpha) passes `-Pmappings125` to `checkLegacyMod`; the jars are hosted through the 1.4.7 chain, so the records come back labelled 1.4.7 and `probe.py`
+  relabels them. Its history runs carry `stubCounts` (per mod: synthesized empty members it uses), `stubMembers` and `stubDistinct`, which the site shows in the Detail column and in a note on the 1.2.5 tab:
+  "Ready to test" there includes calls of empty placeholders, so it is weak evidence. `python -I tools/compat/test_site_data.py` checks that every version in the data files is known to `site.js`, the issue template and the probe workflow.
+- **Corpus results.** `tools/compat/from_corpus.py <report> <latest.log> <mc> [date] --dry-run` prints what a run would change; without `--force` it refuses to write when entries of other mod versions would be
+  refreshed (a run of another mod set once overwrote about 150 entries).
 - **Jar sources.** `tools/compat/fetch_probe_mods.py <mc> <dir> [--limit N]` downloads the most downloaded Forge mods of a version from Modrinth's
   public API (SHA-1 checked). The jars are only for the probe: keep them in a gitignored or temporary folder, never commit or redistribute them.
-- **CI.** `.github/workflows/probe.yml` runs fetch + probe for 1.7.10 and 1.12.2 on every published release, weekly and on demand
+- **CI.** `.github/workflows/probe.yml` runs fetch + probe for every supported version (1.2.5 in a separate, non-failing step: MCArchive jars, mapping download at build time) on every published release, weekly and on demand
   (`workflow_dispatch`, input `limit`), then commits `docs/data/mods.json` and `docs/data/probe.json`. The jars exist only on the runner.
   Local runs against your own corpus (`test-mods2`) work the same way, only the committed results matter.
+
+## Mixins next to performance mods
+
+Every mixin of the layer was checked against the mixin targets of Sodium, Iris, FerriteCore, ModernFix, C2ME and the other perf mods of `run-perfmods/`; the table, the rules for new mixins and the open points are in [Mixin-Audit](Mixin-Audit.md).
+
+**Rule for new mixins (learned 2026-11-16):** a mixin into a vanilla class must not name a type or member that a performance mod retypes or replaces: a handler
+parameter or `@Shadow` typed `Reference2ObjectArrayMap` crashed every pack with FerriteCore at boot (JVM verification), because FerriteCore changes the field's type.
+Prefer injectors that need no such type (inject at `RETURN`/`NEW`, public accessors, MixinExtras `WrapOperation`) and check the table in the audit. The suite
+`atm9-1201-stable` carries FerriteCore as a guard, so a regression of this kind fails `tools/dev/verify.sh` without a manual pack test.
 
 ## Keeping the core mod-agnostic
 
@@ -165,10 +291,55 @@ start sending per-mod fixes, the next step is a plugin interface plus a separate
 
 ## Bytecode check (VerifyError smoke test without the game)
 
-`checkLegacyMod` also runs `loader/.../tools/BytecodeCheck` on every translated jar: ASM's data-flow analyzer over each method, with type relations answered by
-`Hierarchy` (translated mod, shim, synthesized API, libraries). It finds what the JVM rejects as a `VerifyError` when the class first loads (a retyped value
-used as the wrong type); methods touching a type nobody knows (a mod that is not installed) are skipped. The line `bytecode verification: N method(s)
-analysed, M failing` is printed per jar, and failures go into the JSON record as `verifyFailures` / `verifyErrors`.
+`checkLegacyMod` also runs `loader/.../tools/BytecodeCheck` on every translated jar (on by default; `-Pverify=false` skips it): ASM's data-flow analyzer
+over each method of every class, client-only classes included, with type relations answered by `Hierarchy` from class files (nothing is loaded or
+initialised): the translated jar and the other jars of the set, the shim, the synthesized API, and the classpath the task runs on (JDK, libraries,
+Minecraft/NeoForge client classes, the layer's runtime). It finds what the JVM rejects as a `VerifyError` when the class first loads, which the link check
+(owner/name/descriptor of references) cannot see: a value of one type passed where another is required (a 1.20.1 `ModelResourceLocation` handed to a
+`ResourceLocation` parameter, a mixin handler typed with a field's old type), a wrong slot kind, a stack underflow.
+
+- Findings are grouped by (expected type, found type): `found is not assignable to expected` once, with a site count and up to three example sites
+  (`class.method(desc) insn #N (line L) INVOKEVIRTUAL owner.name(desc)`; `N` is the instruction index in the method, not the byte offset; the analyzer
+  reports the first failing instruction per method).
+- Unresolvable types are not errors (the link check owns missing classes): they count as assignable and are tallied as "unknown types"; a method whose
+  control-flow merge needs an unknown class is skipped and tallied as "methods skipped".
+- Output per jar: `verify: N classes, M methods, K findings in J groups (...)`, then the groups; a closing `verify: ... (all jars)` line sums the set.
+  The JSON record (`-PcheckJson`, read by `tools/compat/probe.py`) gets `verify` (counts and `groups[]` with `problem`, `expected`, `found`, `sites`,
+  `examples`) next to the older `verifyFailures` (failing methods) and `verifyErrors` (first 25 messages).
+- `-PverifyFail=true` makes the task exit 1 when anything was found (CI). The check of a 100-jar set is bounded by the translation itself; the library
+  class index is cached across jars.
+- `./gradlew verifyClasses [-PverifyPath=dir,a.jar]` runs the same verifier over class directories or jars (default: the layer's own compiled classes), so
+  a defect in the shim or bridges is found the same way. Unit tests: `loader/src/test/.../tools/BytecodeCheckTest` (synthetic ASM classes).
+
+- Class structure (what the JVM raises as `IncompatibleClassChangeError` while linking): a class that `implements` a non-interface, `extends` an
+  interface, or `extends` a final class (1.20.1 `BlockSource` is an interface, 1.21.1's a record). `final` is ignored for game classes that an access
+  transformer opens (`public-f net.minecraft...` lines of the layer's own `accesstransformer.cfg`, of the set's jars, and of the checked jar), so
+  TerraBlender's `OverworldBiomeBuilder` subclass and the layer's `$LegacyItemPredicate` stand-in are clean.
+- The closing report groups over the whole set (the same type pair in several jars is one group, with the jars listed), then prints the number of
+  distinct unknown types by package: those are the places the verifier is blind. The non-legacy jars of the set (Curios, GeckoLib...) are read into the
+  hierarchy, so what remains unknown is mostly optional integrations with mods that are not in the set (JEI/REI/Jade/Waila/TOP APIs).
+- Negative control used when the verifier was validated (2026-11-16; the switch and the `ModelLocation1201` pass are gone since legacy model locations are a
+  `ResourceLocation` subclass again, see [1.20.1 client events](Legacy-1.20.1-Client-Events.md)): with the id() conversion pass left out,
+  `checkLegacyMod` on ChemLib, SuperMartijn642 core lib and Wireless Chargers reports exactly one group `ModelResourceLocation is not assignable to
+  ResourceLocation` (3 sites in 3 jars: `ChemLib ClientEventHandler.onModelRegister`, `ClientRegistrationHandler.registerModelOverwrite`,
+  `WirelessChargersClient.register`); without the switch it is silent.
+
+Measured (2026-11-16, Windows, `-Xmx3g`): the 108 ATM 9 jars and libraries of `atm9-1201-all` (22,801 classes, 157,263 methods) take about 85 s in
+total, of which the verification is roughly 10 to 25 s over the translation alone; 110 1.12.2 jars (37,215 classes, 242,738 methods) about 2 minutes;
+the `mixed` suite (1.7.10 and one 1.12.2 jar, 6,338 classes) about a minute. Findings on that data are in `tools/dev/agent-tasks/1.20.1-client-verify-findings.md`.
+Shim-hosted versions are quiet (0 findings on 1.7.10 and `mixed`) apart from the synthesized LWJGL GLU classes in 1.12.2.
+
+What it cannot see (so a clean run is not "the game works"):
+
+- **Runtime casts.** A `checkcast` is accepted by the verifier whatever the type; a `ModelResourceLocation` cast to `ResourceLocation` out of a generic
+  container (`Map<?, ResourceLocation>.get`), an `instanceof` that is never true after a type change, a `ClassCastException` from an unchecked
+  generic, reflection and `MethodHandle` lookups by name: all fail only when the code runs.
+- **Registration order, duplicate registrations**, event bus ordering, missing registry entries, mixin target changes and failed injections (the mixin
+  check is `-PmixinExport`), `NoSuchMethodError`/`NoSuchFieldError` of members that exist in the link index but not on the real class.
+- **Rendering and data**: models, textures, shaders, GUI layout, recipes and loot (see the resource check below).
+- Stack-map frames (recomputed by the analyzer, not read), access checks (private/package access across classes), and types the verifier cannot
+  resolve (unknown types count as assignable; an unresolved class in a control-flow merge skips that method).
+- Methods the analyzer skips because of its limits are counted in `methods skipped`; none were skipped in the sets above.
 
 ## Resource check (rendering smoke test without the game)
 
@@ -187,6 +358,35 @@ first); the site shows them in the run summary and in each mod's detail, and `to
 What it cannot see: what a texture looks like, animations, lighting, translucency order, shaders, anything drawn by code, and 1.12 Forge-format blockstates
 (translated at runtime, so they are skipped; blockstate models in the vanilla namespace that the runtime generates can show up as possible layer problems).
 For those use the headless client tests (`tools/dev/survey.sh`, `quick-shots.sh`).
+
+
+## Runtime problems (report section and `/legacyconnector problems`)
+
+Besides the offline resource check above, the layer records broken content while the game runs, for every supported legacy version, attributed to the owning mod by registry namespace (never by mod name). One shared, thread-safe collector (`core/problems/LegacyProblems`) keeps at most 40 distinct subjects per mod and kind (later new ones only count as overflow), nothing is logged per record, and the result is one line in `latest.log` ("Legacy Connector problems (...): N in M mod(s)") plus a section at the end of `logs/legacyconnector-report.txt`, rewritten when the world is joined, when a dedicated server has started, and at exit.
+
+| Kind (report token) | Meaning | Recorded by |
+|---|---|---|
+| `missing_texture` | a baked model's particle or face uses the missing texture (the sprite did not resolve in the atlas) | client, `ModelEvent.BakingCompleted` |
+| `missing_model` | a blockstate or item model of the mod baked as the missing model | client, same event |
+| `no_item_model`, `no_block_model` | a registered item has no inventory model, or a visible block has a blockstate without a model | client, same event |
+| `no_lang_name` | the display name equals the raw translation key (blocks, items, entity types) | client, same event |
+| `dropped_recipe` | a generated recipe was left out because an ingredient is a missing item (or its translation threw) | `RecipeBridge`, `RecipeBridge1122` (client and server) |
+| `nbt_failure` | a legacy tile entity or entity threw (or produced a tag the chunk writer rejects) while saving its NBT; the chunk saved normally with that object's last good data | `NbtSaveGuard` (hosts of every version; server) |
+
+Only plain vanilla-loader models are scanned for textures; models that draw by code (legacy renderers, wrappers) are not asked. Blocks with more than 64 states are sampled.
+
+Section format (one `census` line per mod with registry counts, a `problems` line per mod with problems, indented example lines, a total line):
+
+```
+Runtime problems (written 2026-11-16T12:00:00; ...)
+  census examplemod: blocks=12 blocks_with_model=11 block_entities=2 block_entities_with_renderer=1 entities=3 entities_with_renderer=3 items=30 items_with_model=29
+  problems examplemod: missing_texture=1 missing_model=0 no_item_model=1 no_block_model=1 no_lang_name=0 dropped_recipe=2 nbt_failure=0 total=5
+    missing_texture examplemod:thing#facing=north: a face uses the missing texture
+    dropped_recipe examplemod:gizmo: an ingredient cannot be expressed (missing item or empty ore name)
+total: 5 problem(s) in 1 mod(s)
+```
+
+`blocks`, `items`, `entities` and `block_entities` come from the registries (also on a dedicated server); the `*_with_*` values only exist in a client session. `/legacyconnector problems` (any player, no cheats needed) prints the same numbers per mod in chat, worst mods first, and names the report file. `tools/compat/from_client.py` reads the `problems` lines: it appends them to a mod's note and rates a mod with problems in 10% or more of its content `partial` instead of `works`.
 
 
 ## Mod survey (per-mod evidence from a real client)

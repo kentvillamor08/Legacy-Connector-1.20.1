@@ -54,6 +54,8 @@ public final class Gap1201 {
     public static void main(String[] args) throws Exception {
         Gap1201 gap = new Gap1201();
         gap.loadSrg(Path.of(args[0]));
+        // EXPERIMENTAL 1.19.2 scoping: a second table whose names win (SRG ids are stable across versions: an id still present in 1.20.1 gets its 1.20.1 name)
+        if (System.getProperty("gap.srgOverlay") != null) gap.loadSrg(Path.of(System.getProperty("gap.srgOverlay")));
         for (String f : args[1].split(",")) gap.loadRenames(Path.of(f));
         // "@file": a list file (comma or line separated), for target lists longer than the Windows command line
         // (build.gradle appends the shim class directories after a comma: "@file,dir,dir")
@@ -132,7 +134,11 @@ public final class Gap1201 {
                 if (nestedMode == 1 && nestedJar) continue;
                 if (nestedMode == 2 && !nestedJar) continue;
                 if (nestedJar) {
-                    try (java.util.zip.ZipInputStream nested = new java.util.zip.ZipInputStream(zip.getInputStream(e))) {
+                    byte[] nestedBytes = zip.getInputStream(e).readAllBytes();
+                    // a library with a native 1.21.1 build that a mod carries as jar-in-jar (Ars Nouveau's GeckoLib 4.4.4): the game takes the native, newer one
+                    // (the 1.21.1 target jars keep theirs: Create 6 carries Ponder and Catnip, which is the native build)
+                    if (nestedMode == 0 && !Boolean.getBoolean("gap.keepNativeLibs") && nestedIsNativeLibrary(nestedBytes)) continue;
+                    try (java.util.zip.ZipInputStream nested = new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(nestedBytes))) {
                         for (ZipEntry ne; (ne = nested.getNextEntry()) != null; ) {
                             if (!ne.getName().endsWith(".class") || ne.getName().startsWith("META-INF/versions/")) continue;
                             try {
@@ -173,7 +179,7 @@ public final class Gap1201 {
     }
 
     private Cls jdk(String name) {
-        if (!(name.startsWith("java/") || name.startsWith("javax/") || name.startsWith("jdk/") || name.startsWith("sun/"))) return null;
+        if (!(name.startsWith("java/") || name.startsWith("javax/") || name.startsWith("jdk/") || name.startsWith("sun/") || name.startsWith("com/sun/"))) return null;
         try {
             Class<?> k = Class.forName(name.replace('/', '.'), false, ClassLoader.getPlatformClassLoader());
             Cls c = new Cls();
@@ -191,6 +197,8 @@ public final class Gap1201 {
 
     // ---- renaming -------------------------------------------------------------------------------------------------------------
 
+    private static final boolean TRANSLATED = Boolean.getBoolean("gap.translate");
+
     private String cls(String name) {
         if (name == null) return null;
         if (name.startsWith("[")) return desc(name);
@@ -198,6 +206,9 @@ public final class Gap1201 {
             String facade = "legacyconnector/v1_20_1/" + name;
             if (target.containsKey(facade)) return facade;
         }
+        // a translated jar already carries the final names: a class that exists in 1.21.1 under this very name is that class, not a legacy name to rename
+        // (the layer's own migration helpers take the real ModelResourceLocation although the mod-facing name is the LegacyModelResourceLocation stand-in)
+        if (TRANSLATED && target.containsKey(name)) return name;
         String r = classRenames.get(name);
         if (r != null) return r;
         int dollar = name.indexOf('$');
@@ -254,6 +265,7 @@ public final class Gap1201 {
     }
 
     private long totalForge;
+    private long mixinTotal;
 
     /** A symbol of the Forge/NeoForge API (not of Minecraft or a third-party mod). */
     private static boolean forgeSymbol(String s) {
@@ -263,12 +275,40 @@ public final class Gap1201 {
 
     /** Offline report of a translated run: the symbols the soft link replaced by stand-ins, per original jar (still unresolved references of the mod: kind "soft" in the detail file). */
     private static final Map<String, Set<String>> SOFT = new TreeMap<>();
+    /** The part of {@link #SOFT} inside mixin handler bodies (soft-linked since issue 302) and the references still unresolved inside mixin classes, per original jar. */
+    private static final Map<String, Set<String>> SOFT_MIXIN = new TreeMap<>();
+    private static boolean isMixin(ClassNode n) {
+        for (var list : java.util.List.of(n.invisibleAnnotations == null ? java.util.List.<org.objectweb.asm.tree.AnnotationNode>of() : n.invisibleAnnotations,
+                n.visibleAnnotations == null ? java.util.List.<org.objectweb.asm.tree.AnnotationNode>of() : n.visibleAnnotations))
+            for (var a : list) if ("Lorg/spongepowered/asm/mixin/Mixin;".equals(a.desc)) return true;
+        return false;
+    }
 
     private final Map<String, Set<String>> missingClasses = new TreeMap<>();
     private final Map<String, Set<String>> missingMethods = new TreeMap<>();
     private final Map<String, Set<String>> missingFields = new TreeMap<>();
 
     private static final java.util.regex.Pattern MOD_ID = java.util.regex.Pattern.compile("modId\\s*=\\s*\"([^\"]+)\"");
+
+    private static boolean nestedIsNativeLibrary(byte[] jar) {
+        try (java.util.zip.ZipInputStream in = new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(jar))) {
+            for (ZipEntry e; (e = in.getNextEntry()) != null; ) {
+                if (!e.getName().equals("META-INF/mods.toml") && !e.getName().equals("META-INF/neoforge.mods.toml")) continue;
+                java.util.regex.Matcher m = MOD_ID.matcher(new String(in.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
+                boolean any = false;
+                while (m.find()) {
+                    String id = m.group(1);
+                    if (id.equals("forge") || id.equals("minecraft") || id.equals("neoforge")) continue;
+                    any = true;
+                    if (!org.kylepitcock.legacyconnector.loader.NativeLibraries1201.table().containsKey(id.toLowerCase(java.util.Locale.ROOT))) return false;
+                }
+                return any;
+            }
+        } catch (IOException | RuntimeException ignored) {
+            // unreadable: a normal library
+        }
+        return false;
+    }
 
     private static boolean isNativeLibrary(Path jar) {
         try (ZipFile zip = new ZipFile(jar.toFile())) {
@@ -325,9 +365,9 @@ public final class Gap1201 {
         PrintStream out = new PrintStream(Files.newOutputStream(report));
         // per jar detail (jar TAB kind TAB symbol), input of tools/compat/gap1201_rank.py
         PrintStream detail = new PrintStream(Files.newOutputStream(report.resolveSibling(report.getFileName() + ".detail.tsv")));
-        out.println("Gap report: Forge 1.20.1 jars against Minecraft 1.21.1 + NeoForge (SRG renamed, Forge packages renamed)\n");
+        out.println("Gap report: Forge " + System.getProperty("gap.mc", "1.20.1") + " jars against Minecraft 1.21.1 + NeoForge (SRG renamed, Forge packages renamed)\n");
         for (Path mod : mods) {
-            Set<String> mc = new TreeSet<>(), mm = new TreeSet<>(), mf = new TreeSet<>();
+            Set<String> mc = new TreeSet<>(), mm = new TreeSet<>(), mf = new TreeSet<>(), mixinSyms = new TreeSet<>();
             int refs = 0;
             try (ZipFile zip = new ZipFile(mod.toFile())) {
                 for (var en = zip.entries(); en.hasMoreElements(); ) {
@@ -339,7 +379,18 @@ public final class Gap1201 {
                     } catch (RuntimeException ex) {
                         continue;
                     }
-                    refs += check(n, own, mc, mm, mf);
+                    boolean mixin = isMixin(n);
+                    Set<String> c2 = mixin ? new TreeSet<>() : mc, m2 = mixin ? new TreeSet<>() : mm, f2 = mixin ? new TreeSet<>() : mf;
+                    refs += check(n, own, c2, m2, f2);
+                    if (mixin) {
+                        // a mixin body is merged into a vanilla class: a reference that does not link there throws on every use of the handler (CoFH Core getXa()I, issue 302)
+                        mc.addAll(c2);
+                        mm.addAll(m2);
+                        mf.addAll(f2);
+                        c2.forEach(x -> mixinSyms.add("class " + x + "  <- " + n.name));
+                        m2.forEach(x -> mixinSyms.add("method " + x + "  <- " + n.name));
+                        f2.forEach(x -> mixinSyms.add("field " + x + "  <- " + n.name));
+                    }
                 }
             }
             String jar = mod.getFileName().toString();
@@ -362,6 +413,13 @@ public final class Gap1201 {
             long forgeApi = java.util.stream.Stream.of(mc, mm, mf).flatMap(Set::stream).filter(Gap1201::forgeSymbol).count();
             out.printf("%s: %d references, %d missing classes, %d missing methods, %d missing fields, %d unresolved Forge-API symbols%n", jar, refs, mc.size(), mm.size(), mf.size(), forgeApi);
             totalForge += forgeApi;
+            mixinSyms.addAll(SOFT_MIXIN.getOrDefault(jar, Set.of()).stream().map(x -> x + "  (stood in by the soft link)").toList());
+            if (!mixinSyms.isEmpty()) {
+                out.println("  inside mixin classes (" + mixinSyms.size() + "):");
+                mixinSyms.forEach(x -> out.println("    " + x));
+                System.out.println("mixin-body unresolved in " + jar + ": " + mixinSyms.size());
+                mixinTotal += mixinSyms.size();
+            }
             final String jarName = jar;
             mc.forEach(x -> detail.println(jarName + "	class	" + x));
             mm.forEach(x -> detail.println(jarName + "	method	" + x));
@@ -371,7 +429,8 @@ public final class Gap1201 {
             mm.forEach(s -> missingMethods.computeIfAbsent(s, k -> new TreeSet<>()).add(jarName));
             mf.forEach(s -> missingFields.computeIfAbsent(s, k -> new TreeSet<>()).add(jarName));
         }
-        out.printf("%nTOTAL unresolved Forge-API symbols: %d%n", totalForge);
+        out.printf("%nTOTAL unresolved Forge-API symbols: %d%nTOTAL unresolved symbols inside mixin classes: %d%n", totalForge, mixinTotal);
+        System.out.println("TOTAL mixin-body unresolved: " + mixinTotal);
         ranked(out, "Missing classes (by number of jars)", missingClasses);
         ranked(out, "Missing methods", missingMethods);
         ranked(out, "Missing fields", missingFields);
@@ -399,13 +458,27 @@ public final class Gap1201 {
         Path dir = keep != null ? Files.createDirectories(Path.of(keep)) : Files.createTempDirectory("gap1201-");
         var transformer = new org.kylepitcock.legacyconnector.loader.transform.Forge1201Transformer(shimIndex());
         List<Path> out = new ArrayList<>();
+        // the classes of all the jars: a mod class that extends a library class of another jar is judged with that class's supertypes and methods
+        var peerSet = new org.kylepitcock.legacyconnector.loader.transform.PeerClasses();
+        for (Path m : mods) {
+            if (!Boolean.getBoolean("gap.keepNativeLibs") && isNativeLibrary(m)) continue;   // replaced by the native build at run time: nobody extends its 1.20.1 classes
+            try {
+                var lj = new org.kylepitcock.legacyconnector.loader.LegacyJar(m);
+                lj.version = org.kylepitcock.legacyconnector.loader.LegacyVersion.V1_20_1;
+                peerSet.add(transformer.scan(lj));
+            } catch (RuntimeException | IOException e) {
+                System.out.println("scan failed for " + m.getFileName() + ": " + e);
+            }
+        }
+        var peers = peerSet.classes();
         for (Path m : mods) {
             Path t = dir.resolve(m.getFileName());
             try {
                 var lj = new org.kylepitcock.legacyconnector.loader.LegacyJar(m);
                 lj.version = org.kylepitcock.legacyconnector.loader.LegacyVersion.V1_20_1;
-                var res = transformer.transform(lj, t);
+                var res = transformer.transform(lj, t, peers);
                 if (res.softLinked > 0) SOFT.computeIfAbsent(m.getFileName().toString(), k -> new TreeSet<>()).addAll(res.softSymbols);
+                if (!res.softMixinSymbols.isEmpty()) SOFT_MIXIN.computeIfAbsent(m.getFileName().toString(), k -> new TreeSet<>()).addAll(res.softMixinSymbols);
                 if (res.softLinked > 0) System.out.println("soft-linked " + res.softLinked + " symbol(s) in " + m.getFileName());
                 if (res.softLinked > 0 && Boolean.getBoolean("gap.softlist")) res.notes.stream().filter(n -> n.startsWith("Soft link: ") && n.length() > 40).forEach(n -> System.out.println("  " + m.getFileName() + " " + n));
                 out.add(t);

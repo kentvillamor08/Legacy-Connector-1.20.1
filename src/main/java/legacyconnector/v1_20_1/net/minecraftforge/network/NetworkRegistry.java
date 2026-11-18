@@ -8,6 +8,8 @@ import net.minecraft.resources.ResourceLocation;
 /** Forge 1.20.1's channel factory. Version negotiation is not enforced: NeoForge's payload registration is marked optional. */
 public class NetworkRegistry {
     public static final String ABSENT = "ABSENT 🤔";
+    /** Mods of Forge 47.x read {@code NetworkRegistry.ABSENT} as a {@code ChannelData}; the loader points those reads here (mc-fields.tsv), the string stays for older builds. */
+    public static final ServerStatusPing$ChannelData ABSENT_DATA = new ServerStatusPing$ChannelData(ResourceLocation.fromNamespaceAndPath("fml", "absent"), ABSENT, true);
     public static final String ACCEPTVANILLA = "ALLOWVANILLA 👌";
 
     public static SimpleChannel newSimpleChannel(ResourceLocation name, Supplier<String> networkProtocolVersion, Predicate<String> clientAcceptedVersions,
@@ -17,7 +19,7 @@ public class NetworkRegistry {
 
     public static legacyconnector.v1_20_1.net.minecraftforge.network.event.EventNetworkChannel newEventChannel(ResourceLocation name, Supplier<String> version,
             Predicate<String> clientAcceptedVersions, Predicate<String> serverAcceptedVersions) {
-        return new legacyconnector.v1_20_1.net.minecraftforge.network.event.EventNetworkChannel(name);
+        return new legacyconnector.v1_20_1.net.minecraftforge.network.event.EventNetworkChannel(name, version);
     }
 
     public static Predicate<String> acceptMissingOr(String version) {
@@ -56,6 +58,11 @@ public class NetworkRegistry {
 
         public SimpleChannel simpleChannel() {
             return new SimpleChannel(name, version, v -> true, v -> true);
+        }
+
+        /** {@code ...eventNetworkChannel()}: the raw channel (CoFH Core's packet handler), see {@link legacyconnector.v1_20_1.net.minecraftforge.network.event.EventNetworkChannel}. */
+        public legacyconnector.v1_20_1.net.minecraftforge.network.event.EventNetworkChannel eventNetworkChannel() {
+            return new legacyconnector.v1_20_1.net.minecraftforge.network.event.EventNetworkChannel(name, version);
         }
     }
 }

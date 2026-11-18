@@ -24,6 +24,19 @@ public class Loader {
         return "7.10.99.99";
     }
 
+    /**
+     * FML 1.5.2 {@code getCrashInformation()}: the "FML" section of a crash report, one line per mod with its id, name and version (the original listed the mod
+     * states too). Empty before the mods are known, as FML answered before its setup.
+     */
+    public String getCrashInformation() {
+        StringBuilder out = new StringBuilder();
+        for (ModContainer mod : getIndexedModList().values()) {
+            if (out.length() > 0) out.append('\n');
+            out.append('\t').append(mod.getModId()).append(' ').append(mod.getName()).append(' ').append(mod.getVersion());
+        }
+        return out.toString();
+    }
+
     /** FML's private game directory field; CodeChickenCore reads it reflectively (CommonUtils.getMinecraftDir). */
 
     public static Loader instance() {
@@ -187,6 +200,11 @@ public class Loader {
         for (String id : new String[] {"Forge", "FML", "mcp", "Minecraft"}) out.computeIfAbsent(id, Loader::pseudo);
         for (String bridged : System.getProperty("legacyconnector.bridgedMods", "").split(",")) {
             if (!bridged.isEmpty()) out.computeIfAbsent(bridged, Loader::pseudo);
+        }
+        // While the coremods run (before any mod container exists) isModLoaded already answers true for the legacy mods found on disk:
+        // the index must hold an entry for each, or code that tests isModLoaded and then reads the container dereferences null.
+        for (String present : System.getProperty("legacyconnector.presentLegacyMods", "").split(",")) {
+            if (!present.isEmpty()) out.computeIfAbsent(present, Loader::pseudo);
         }
         ModMetadata.mcc$linkFamilies(out);
         return out;

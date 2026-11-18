@@ -13,6 +13,7 @@ import javax.imageio.ImageIO;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.LdcInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
@@ -28,7 +29,7 @@ import org.objectweb.asm.tree.MethodNode;
  */
 public final class SheetCutter {
     /** Calls whose string argument is a sprite sheet. */
-    private static final Set<String> SHEET_CALLS = Set.of("setTextureFile", "getUniqueSpriteIndex", "preloadTexture", "loadTexture", "bindTexture", "addOverride", "registerSheet");
+    private static final Set<String> SHEET_CALLS = Set.of("setTextureFile", "getUniqueSpriteIndex", "preloadTexture", "loadTexture", "bindTexture", "changeTexture", "addOverride", "registerSheet");
     /** Vanilla sheets: the runtime maps their indices to the game's own textures, nothing is cut. */
     private static final Set<String> VANILLA = Set.of("terrain.png", "gui/items.png", "particles.png", "misc/mapicons.png", "gui/gui.png");
 
@@ -39,39 +40,96 @@ public final class SheetCutter {
 
     /** Looks for sheet and override paths in the (already remapped) classes. */
     public void scan(Iterable<ClassNode> nodes) {
+        Map<String, Set<String>> pngFields = pngStaticFields(nodes);
         for (ClassNode node : nodes) {
             if (node.superName != null && node.superName.endsWith("TextureFX")) animated = true;
             for (MethodNode method : node.methods) {
                 if (method.instructions == null) continue;
                 boolean getter = method.name.equals("getTextureFile");
                 String[] recent = new String[6];
+                java.util.List<String> arrayLiterals = new java.util.ArrayList<>();
                 int seen = 0;
+                // the paths of the last png-holding static field read, when that read is more recent than the last png literal
+                Set<String> lastField = null;
                 for (AbstractInsnNode insn = method.instructions.getFirst(); insn != null; insn = insn.getNext()) {
                     if (insn instanceof LdcInsnNode ldc && ldc.cst instanceof String s) {
                         if (s.toLowerCase(Locale.ROOT).endsWith(".png")) {
+                            // a literal stored into an array element (TE's Proxy fills String[] with its renderers' textures, then preloads and passes them on)
+                            AbstractInsnNode nextReal = insn.getNext();
+                            while (nextReal != null && nextReal.getOpcode() < 0) nextReal = nextReal.getNext();
+                            if (nextReal != null && nextReal.getOpcode() == Opcodes.AASTORE) arrayLiterals.add(s);
                             if (getter) sheets.add(normalize(s));
                             recent[seen++ % recent.length] = s;
+                            lastField = null;
                         }
-                    } else if (insn instanceof MethodInsnNode call && call.getOpcode() != Opcodes.INVOKEDYNAMIC && SHEET_CALLS.contains(call.name) && seen > 0) {
+                    } else if (insn instanceof FieldInsnNode field && field.getOpcode() == Opcodes.GETSTATIC
+                            && pngFields.containsKey(field.owner + "." + field.name)) {
+                        lastField = pngFields.get(field.owner + "." + field.name);
+                        if (getter) for (String v : lastField) sheets.add(normalize(v));
+                    } else if (insn instanceof MethodInsnNode call && call.getOpcode() != Opcodes.INVOKEDYNAMIC
+                            && (SHEET_CALLS.contains(call.name) || renderConstructor(call)) && (seen > 0 || lastField != null)) {
                         int count = Math.min(seen, recent.length);
-                        // addOverride(sheet, file): the file (the last string) is one tile, the first string is the sheet it joins
-                        if (call.name.equals("addOverride") && count >= 2 && call.desc.startsWith("(Ljava/lang/String;Ljava/lang/String;")) {
+                        if (!arrayLiterals.isEmpty() && !call.name.equals("addOverride") && (!call.name.equals("bindTexture") && !call.name.equals("loadTexture") && !call.name.equals("changeTexture") || node.name.contains("Render"))) {
+                            for (String v : arrayLiterals) sheets.add(normalize(v));
+                            arrayLiterals.clear();
+                        }
+                        boolean renderer = node.name.contains("Render") && !node.name.contains("Gui") && !node.name.contains("GUI");
+                        if (lastField != null) {
+                            // setTextureFile(Props.blockSheet): every path the field is ever given (a mod's colour-blind sheet too)
+                            boolean bind = call.name.equals("bindTexture") || call.name.equals("loadTexture") || call.name.equals("changeTexture");
+                            if (!call.name.equals("addOverride") && (!bind || renderer)) for (String v : lastField) sheets.add(normalize(v));
+                        } else if (call.name.equals("addOverride") && count >= 2 && call.desc.startsWith("(Ljava/lang/String;Ljava/lang/String;")) {
+                            // addOverride(sheet, file): the file (the last string) is one tile, the first string is the sheet it joins
                             singles.add(normalize(recent[(seen - 1) % recent.length]));
-                        } else if (call.name.equals("bindTexture") || call.name.equals("loadTexture")) {
+                        } else if (call.name.equals("bindTexture") || call.name.equals("loadTexture") || call.name.equals("changeTexture")) {
                             // bound whole images are not sheets unless named by one of the sheet calls, except in a block/tile renderer: those draw
                             // tile-position UVs of what they bind (RedPower's wires bind /eloraam/wiring/redpower1.png and draw tessellator quads)
-                            if (node.name.contains("Render") && !node.name.contains("Gui") && !node.name.contains("GUI")) {
-                                sheets.add(normalize(recent[(seen - 1) % recent.length]));
-                            }
+                            if (renderer) sheets.add(normalize(recent[(seen - 1) % recent.length]));
+                        } else if (renderConstructor(call)) {
+                            // the textures of a renderer: one path, or an array of them (TE's tesseract and conduit renderers take String[] filled with literals)
+                            for (int i = 0; i < count; i++) if (recent[i] != null) sheets.add(normalize(recent[i]));
                         } else {
                             sheets.add(normalize(recent[(seen - 1) % recent.length]));
                         }
                         seen = 0;
+                        lastField = null;
                     }
                 }
             }
         }
         for (String v : VANILLA) sheets.remove(normalize(v));
+    }
+
+    /**
+     * A renderer built with the path of its texture ({@code new RenderBlockX("/mod/gfx/render/x.png")}, which later binds the field through a helper such
+     * as {@code CCRenderState.changeTexture(texture)}): the png literal before such a constructor is a texture the renderer draws, bound whole or as a sheet.
+     */
+    private static boolean renderConstructor(MethodInsnNode call) {
+        return call.name.equals("<init>") && call.owner.contains("Render") && !call.owner.contains("Gui") && !call.owner.contains("GUI")
+                && (call.desc.contains("Ljava/lang/String;"));
+    }
+
+    /**
+     * Static String fields that are assigned a png literal anywhere in the jar ({@code Props.blockSheet = "/mod/gfx/blocks.png"},
+     * switched to a colour-blind sheet by a config option): owner.name to every path assigned. Mods keep their sheet path in such a field and
+     * pass the field to {@code setTextureFile}/{@code preloadTexture}, so the call sites have no literal (#248: none of the mod's blocks had tiles).
+     */
+    private static Map<String, Set<String>> pngStaticFields(Iterable<ClassNode> nodes) {
+        Map<String, Set<String>> out = new java.util.HashMap<>();
+        for (ClassNode node : nodes) {
+            for (MethodNode method : node.methods) {
+                if (method.instructions == null) continue;
+                for (AbstractInsnNode insn = method.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                    if (!(insn instanceof FieldInsnNode put) || put.getOpcode() != Opcodes.PUTSTATIC || !put.desc.equals("Ljava/lang/String;")) continue;
+                    AbstractInsnNode prev = put.getPrevious();
+                    while (prev != null && prev.getOpcode() < 0) prev = prev.getPrevious();
+                    if (prev instanceof LdcInsnNode ldc && ldc.cst instanceof String s && s.toLowerCase(Locale.ROOT).endsWith(".png")) {
+                        out.computeIfAbsent(put.owner + "." + put.name, k -> new TreeSet<>()).add(s);
+                    }
+                }
+            }
+        }
+        return out;
     }
 
     public boolean found() {
@@ -98,7 +156,12 @@ public final class SheetCutter {
                 if (single) {
                     out.put("assets/legacy147/textures/blocks/override/" + slug(key) + ".png", e.getValue());
                 }
-                if (sheet) cutSheet(image, slug(key), out, animated);
+                if (sheet) {
+                    cutSheet(image, slug(key), out, animated);
+                    // a non-square image is a model texture (a ModelBase's 128x64 skin, drawn by a block renderer): its UVs name regions of any size,
+                    // not 16x16 tiles, so the image also goes to the atlas whole (IsbrhQuads maps such a sheet's UVs onto it; #248, TE's energy cell)
+                    if (image.getWidth() != image.getHeight()) out.put("assets/legacy147/textures/blocks/whole/" + slug(key) + ".png", e.getValue());
+                }
             } catch (IOException | RuntimeException ex) {
                 // an unreadable image stays a whole texture
             }

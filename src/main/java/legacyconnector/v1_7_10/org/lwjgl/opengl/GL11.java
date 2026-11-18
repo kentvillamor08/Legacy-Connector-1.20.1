@@ -74,7 +74,7 @@ public class GL11 extends GL11Guard {
     /** The matrix stack is emulated, so the current model-view and projection matrices come from the render context. */
     public static void glGetFloat(int pname, FloatBuffer params) {
         if (pname == GL_MODELVIEW_MATRIX && RenderContext.pose() != null) {
-            RenderContext.pose().last().pose().get(params.position(), params);
+            RenderContext.readModelView(params);
         } else if (pname == GL_PROJECTION_MATRIX && RenderSystem.isOnRenderThread()) {
             RenderSystem.getProjectionMatrix().get(params.position(), params);
         } else if (pname == GL_CURRENT_COLOR) {
@@ -151,6 +151,9 @@ public class GL11 extends GL11Guard {
     }
 
     public static void glTexGen(int coord, int pname, FloatBuffer params) {
+        if (params == null || params.remaining() < 4) return;
+        int p = params.position();
+        org.kylepitcock.legacyconnector.v1_7_10.client.RenderContext.mcc$texGenPlane(coord, pname, params.get(p), params.get(p + 1), params.get(p + 2), params.get(p + 3));
     }
 
     public static void glTexEnv(int target, int pname, FloatBuffer params) {
@@ -180,15 +183,15 @@ public class GL11 extends GL11Guard {
     public static void glLoadMatrix(FloatBuffer m) {
         if (m == null || m.remaining() < 16) return;
         org.joml.Matrix4f matrix = new org.joml.Matrix4f().set(m.position(), m);
-        if (DisplayLists.recording() && DisplayLists.record(() -> RenderContext.loadMatrix(matrix))) return;
-        RenderContext.loadMatrix(matrix);
+        if (DisplayLists.recording() && DisplayLists.record(() -> RenderContext.loadModelViewMatrix(matrix))) return;
+        RenderContext.loadModelViewMatrix(matrix);
     }
 
     public static void glLoadMatrix(java.nio.DoubleBuffer m) {
         if (m == null || m.remaining() < 16) return;
         org.joml.Matrix4f matrix = new org.joml.Matrix4f(new org.joml.Matrix4d().set(m.position(), m));
-        if (DisplayLists.recording() && DisplayLists.record(() -> RenderContext.loadMatrix(matrix))) return;
-        RenderContext.loadMatrix(matrix);
+        if (DisplayLists.recording() && DisplayLists.record(() -> RenderContext.loadModelViewMatrix(matrix))) return;
+        RenderContext.loadModelViewMatrix(matrix);
     }
 
     public static void glOrtho(double left, double right, double bottom, double top, double zNear, double zFar) {
@@ -200,6 +203,45 @@ public class GL11 extends GL11Guard {
     }
 
     public static void glClipPlane(int plane, java.nio.DoubleBuffer equation) {
+    }
+
+    /** Copies the framebuffer into the texture the mod bound (bindings live in the render context, not in GL: see RenderContext.bindCurrentTextureToGl). */
+    public static void glCopyTexSubImage2D(int target, int level, int xoffset, int yoffset, int x, int y, int width, int height) {
+        if (DisplayLists.recording() && DisplayLists.record(() -> glCopyTexSubImage2D(target, level, xoffset, yoffset, x, y, width, height))) return;
+        if (!RenderSystem.isOnRenderThread()) return;
+        if (target == org.lwjgl.opengl.GL11.GL_TEXTURE_2D) RenderContext.bindCurrentTextureToGl();
+        GL11Guard.glCopyTexSubImage2D(target, level, xoffset, yoffset, x, y, width, height);
+    }
+
+    /**
+     * Texture parameters (the filter of a panorama's blur texture) go to the texture the mod bound, not to whatever GL has bound.
+     * The modern renderer resets a texture's filter to nearest whenever it draws with it (TextureStateShard), so a mod texture
+     * remembers a linear magnification filter the legacy code asked for and keeps it through those resets.
+     */
+    public static void glTexParameteri(int target, int pname, int param) {
+        if (DisplayLists.recording() && DisplayLists.record(() -> glTexParameteri(target, pname, param))) return;
+        if (!RenderSystem.isOnRenderThread()) return;
+        if (target == org.lwjgl.opengl.GL11.GL_TEXTURE_2D) {
+            var tex = RenderContext.bindCurrentTextureToGl();
+            if (pname == org.lwjgl.opengl.GL11.GL_TEXTURE_MAG_FILTER && tex instanceof legacyconnector.v1_7_10.net.minecraft.client.renderer.texture.DynamicTexture.Modern m) {
+                m.mcc$linear = param == org.lwjgl.opengl.GL11.GL_LINEAR;
+            }
+        }
+        GL11Guard.glTexParameteri(target, pname, param);
+    }
+
+    public static void glTexParameterf(int target, int pname, float param) {
+        if (DisplayLists.recording() && DisplayLists.record(() -> glTexParameterf(target, pname, param))) return;
+        if (!RenderSystem.isOnRenderThread()) return;
+        if (target == org.lwjgl.opengl.GL11.GL_TEXTURE_2D) RenderContext.bindCurrentTextureToGl();
+        GL11Guard.glTexParameterf(target, pname, param);
+    }
+
+    public static void glCopyTexImage2D(int target, int level, int internalFormat, int x, int y, int width, int height, int border) {
+        if (DisplayLists.recording() && DisplayLists.record(() -> glCopyTexImage2D(target, level, internalFormat, x, y, width, height, border))) return;
+        if (!RenderSystem.isOnRenderThread()) return;
+        if (target == org.lwjgl.opengl.GL11.GL_TEXTURE_2D) RenderContext.bindCurrentTextureToGl();
+        GL11Guard.glCopyTexImage2D(target, level, internalFormat, x, y, width, height, border);
     }
 
     /** Binds a GL texture the mod created itself, and makes the emulated renderer draw with it. */
@@ -368,6 +410,7 @@ public class GL11 extends GL11Guard {
             case 3042 -> org.kylepitcock.legacyconnector.v1_7_10.client.RenderContext.setBlend(on); // GL_BLEND
             case 2929 -> org.kylepitcock.legacyconnector.v1_7_10.client.RenderContext.setDepthTest(on); // GL_DEPTH_TEST
             case 2896 -> org.kylepitcock.legacyconnector.v1_7_10.client.RenderContext.setLighting(on); // GL_LIGHTING
+            case 0x0C60, 0x0C61, 0x0C62, 0x0C63 -> org.kylepitcock.legacyconnector.v1_7_10.client.RenderContext.mcc$texGenEnable(cap - 0x0C60, on); // GL_TEXTURE_GEN_S..Q
             default -> {
             }
         }

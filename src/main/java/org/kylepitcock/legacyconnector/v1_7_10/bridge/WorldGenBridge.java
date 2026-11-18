@@ -102,19 +102,24 @@ public final class WorldGenBridge {
         long chunkSeed = chunkSeed(level.getSeed(), chunkX, chunkZ);
         Random fmlRandom = new Random(chunkSeed);
         // ---- InPlaceStructureGuard: a call that builds into a modern structure is undone (see the class)
-        World.mcc$setOreSplit(splitsOres(level, e));
+        World.mcc$setOreMode(oreMode(level, e));
         try {
             org.kylepitcock.legacyconnector.core.worldgen.InPlaceStructureGuard.run(level, e.generator,
-                    () -> org.kylepitcock.legacyconnector.core.LegacyModLocks.generation(e.lock, () -> e.generator.generate(fmlRandom, chunkX, chunkZ, world, DUMMY, world.getChunkProvider())));
+                    () -> org.kylepitcock.legacyconnector.core.LegacyModLocks.generation(e.lock, () -> e.generator.generate(fmlRandom, chunkX, chunkZ, world, GeneratorProviders1710.forLevel(level, DUMMY), world.getChunkProvider())));
         } finally {
             World.mcc$setOreSplit(false);
         }
     }
 
     /** Whether the generator's deep layer runs here, so its ores in legacy y 0-63 are shared with it (World.mcc$splitDrops). */
-    private static boolean splitsOres(WorldGenLevel level, Entry e) {
-        return level.getMinBuildHeight() < 0 && org.kylepitcock.legacyconnector.core.LegacyConfig.deepLayerEnabled()
-                && org.kylepitcock.legacyconnector.core.LegacyConfig.deepLayerAllows(e.generator.getClass().getName());
+    /** 0: the generator has no deep layer here, 1: split by cell, 2: shifted (its ores come from the shifted pass, the normal pass refuses them). */
+    private static int oreMode(WorldGenLevel level, Entry e) {
+        if (level.getMinBuildHeight() >= 0) return 0;
+        return switch (DeepLayer1710.mode(e.generator)) {
+            case OFF -> 0;
+            case SPLIT -> 1;
+            case SHIFTED -> 2;
+        };
     }
 
     /** FML's per-chunk seed ({@code GameRegistry.generateWorld}): every generator starts from it. */
@@ -173,17 +178,18 @@ public final class WorldGenBridge {
         IChunkProvider chunkProvider = world.getChunkProvider();
         // the chunk provider's populate came first in 1.7.10, with its terrain events
         if (!modDimension) org.kylepitcock.legacyconnector.core.worldgen.InPlaceStructureGuard.run(level, "populate events",
-                () -> TerrainEvents1710.populate(level, world, chunkX, chunkZ, DUMMY));
+                () -> TerrainEvents1710.populate(level, world, chunkX, chunkZ, GeneratorProviders1710.forLevel(level, DUMMY)));
         // 1.7.10 decorated one chunk at a time on the server thread, and generators keep their state in plain fields and
         // HashMaps (CustomOreGen's per-world caches and geometry buffers): a mod's generators run on one thread at a time.
+        IChunkProvider ordinary = modDimension ? chunkGenerator : GeneratorProviders1710.forLevel(level, DUMMY);
         for (Entry e : gens) {
             fmlRandom.setSeed(chunkSeed);
-            IChunkProvider provider = modDimension ? chunkGenerator : DUMMY;
+            IChunkProvider provider = modDimension ? chunkGenerator : ordinary;
             try {
                 Runnable call = () -> org.kylepitcock.legacyconnector.core.LegacyModLocks.generation(e.lock, () -> e.generator.generate(fmlRandom, chunkX, chunkZ, world, provider, chunkProvider));
                 if (modDimension) call.run();
                 else {
-                    World.mcc$setOreSplit(splitsOres(level, e));
+                    World.mcc$setOreMode(oreMode(level, e));
                     try {
                         org.kylepitcock.legacyconnector.core.worldgen.InPlaceStructureGuard.run(level, e.generator, call); // InPlaceStructureGuard
                     } finally {
@@ -225,6 +231,11 @@ public final class WorldGenBridge {
     /** The placeholder chunk provider legacy generators get (deep layer, DeepLayer1710). */
     static IChunkProvider dummyProvider() {
         return DUMMY;
+    }
+
+    /** The generator argument of a legacy generator run in {@code world} (see {@link GeneratorProviders1710}). */
+    static IChunkProvider providerFor(World world) {
+        return world != null && world.mcc$level() instanceof WorldGenLevel level ? GeneratorProviders1710.forLevel(level, DUMMY) : DUMMY;
     }
 
     static List<IWorldGenerator> generators() {

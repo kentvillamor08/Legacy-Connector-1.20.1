@@ -26,6 +26,10 @@ public class LaunchClassLoader extends URLClassLoader {
     private final Set<String> classLoaderExceptions = new HashSet<>();
     private final Set<String> transformerExceptions = new HashSet<>();
     private final Map<String, Class<?>> cachedClasses = new HashMap<>();
+    /** LaunchWrapper's private caches: coremods reach them by reflection (LogisticsPipes clears {@code invalidClasses}). */
+    private final Set<String> invalidClasses = new HashSet<>();
+    private final Set<String> negativeResourceCache = new HashSet<>();
+    private final Map<String, byte[]> resourceCache = new HashMap<>();
 
     /** The class cache; FML 1.5.2's RelaunchClassLoader declared its own {@code cachedClasses} (CodeChickenCore reaches it by reflection). */
     protected Map<String, Class<?>> mcc$cache() {
@@ -42,7 +46,31 @@ public class LaunchClassLoader extends URLClassLoader {
         for (String p : new String[] {"java.", "sun.", "org.lwjgl.", "org.apache.logging.", "net.minecraft.launchwrapper."}) addClassLoaderExclusion(p);
         for (String p : new String[] {"javax.", "argo.", "org.objectweb.asm.", "com.google.common.", "org.bouncycastle.",
                 "net.minecraft.launchwrapper.injector.", "cpw.mods.fml.repackage.", "cpw.mods.fml.relauncher.",
-                "cpw.mods.fml.common.asm.transformers."}) addTransformerExclusion(p);
+                "cpw.mods.fml.common.asm.transformers.", "net.minecraftforge.fml.relauncher.", "net.minecraftforge.fml.common.asm.transformers."}) addTransformerExclusion(p);
+    }
+
+    private final Set<String> mcc$isolated = new HashSet<>();
+
+    /**
+     * Class name prefixes this loader takes only from its own jars, never from the parent: a legacy plugin that bundles a library the running game
+     * also has (SpongePowered Mixin) must get its own copy, not drive the game's.
+     */
+    public void mcc$isolate(String prefix) {
+        mcc$isolated.add(prefix);
+    }
+
+    @Override
+    protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+        for (String prefix : mcc$isolated) {
+            if (!name.startsWith(prefix)) continue;
+            synchronized (getClassLoadingLock(name)) {
+                Class<?> c = findLoadedClass(name);
+                if (c == null) c = findClass(name);
+                if (resolve) resolveClass(c);
+                return c;
+            }
+        }
+        return super.loadClass(name, resolve);
     }
 
     public void registerTransformer(String transformerClassName) {

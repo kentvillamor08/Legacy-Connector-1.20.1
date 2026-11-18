@@ -8,6 +8,18 @@ public class ItemStack {
     public int bobbingAnimationTime;
     public int itemId;
     private int damage;
+    private net.minecraft.world.item.ItemStack mcc$nativeSnapshot;
+    private int mcc$nativeId;
+
+    /** Native component patches are bridge state, never a replacement for Beta's mutable id/count/damage. */
+    public net.minecraft.world.item.ItemStack mcc$nativeSnapshot() {
+        if (mcc$nativeId != itemId) mcc$nativeSnapshot = null;
+        return mcc$nativeSnapshot;
+    }
+    public void mcc$nativeSnapshot(net.minecraft.world.item.ItemStack snapshot) {
+        mcc$nativeSnapshot = snapshot == null || snapshot.isEmpty() ? null : snapshot.copy();
+        mcc$nativeId = itemId;
+    }
 
     public ItemStack(Block block) {
         this(block, 1);
@@ -47,21 +59,30 @@ public class ItemStack {
         nbt.putShort("id", (short) itemId);
         nbt.putByte("Count", (byte) count);
         nbt.putShort("Damage", (short) damage);
+        org.kylepitcock.legacyconnector.vb1_7_3.StacksB173.writeNative(this, nbt);
         return nbt;
     }
+
+    /** Original vanilla removal notification is empty; subclasses retain virtual override behavior. */
+    public void onRemoved(legacyconnector.vb1_7_3.net.minecraft.entity.player.PlayerEntity player){}
 
     public void readNbt(legacyconnector.vb1_7_3.net.minecraft.nbt.NbtCompound nbt) {
         itemId = nbt.getShort("id");
         count = nbt.getByte("Count");
         damage = nbt.getShort("Damage");
+        mcc$nativeSnapshot = null;
+        org.kylepitcock.legacyconnector.vb1_7_3.StacksB173.readNative(this, nbt);
     }
 
     public ItemStack split(int amount) {
         this.count -= amount;
-        return new ItemStack(itemId, amount, damage);
+        ItemStack split = new ItemStack(itemId, amount, damage);
+        split.mcc$nativeSnapshot(mcc$nativeSnapshot());
+        return split;
     }
 
     public Item getItem() {
+        if (itemId == org.kylepitcock.legacyconnector.vb1_7_3.NativeStackItemB173.ID) org.kylepitcock.legacyconnector.vb1_7_3.NativeStackItemB173.get();
         return itemId >= 0 && itemId < Item.ITEMS.length ? Item.ITEMS[itemId] : null;
     }
 
@@ -71,12 +92,19 @@ public class ItemStack {
         if (item != null) item.onCraft(this, world, player);
     }
 
+    public void useOnEntity(legacyconnector.vb1_7_3.net.minecraft.entity.LivingEntity target) {
+        Item item = getItem();
+        if (item != null) item.useOnEntity(this, target);
+    }
+
     public int getTextureId() {
         Item item = getItem();
         return item == null ? 0 : item.getTextureId(this);
     }
 
     public int getMaxCount() {
+        var nativeStack = org.kylepitcock.legacyconnector.vb1_7_3.NativeStackItemB173.is(itemId) ? mcc$nativeSnapshot() : null;
+        if (nativeStack != null) return nativeStack.getMaxStackSize();
         Item item = getItem();
         return item == null ? 64 : item.getMaxCount();
     }
@@ -135,7 +163,9 @@ public class ItemStack {
     }
 
     public ItemStack copy() {
-        return new ItemStack(itemId, count, damage);
+        ItemStack copy = new ItemStack(itemId, count, damage);
+        copy.mcc$nativeSnapshot(mcc$nativeSnapshot());
+        return copy;
     }
 
     public static boolean areEqual(ItemStack a, ItemStack b) {

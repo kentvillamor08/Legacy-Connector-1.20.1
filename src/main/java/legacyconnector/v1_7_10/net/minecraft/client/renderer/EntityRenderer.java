@@ -1,7 +1,7 @@
 package legacyconnector.v1_7_10.net.minecraft.client.renderer;
 
 /** 1.7.10's world renderer object: mods set a couple of its debug fields; rendering itself is the modern game's. */
-public class EntityRenderer {
+public class EntityRenderer implements legacyconnector.v1_7_10.net.minecraft.client.resources.IResourceManagerReloadListener {
     /** 3D anaglyph mode (gone from the modern game: always off). */
     public static boolean anaglyphEnable;
     public final ItemRenderer itemRenderer;
@@ -13,6 +13,11 @@ public class EntityRenderer {
 
     public EntityRenderer() {
         this(null, null);
+    }
+
+    /** 1.5.2/1.6.4 shape {@code new EntityRenderer(mc)} (renderer replacements such as Morph's and More Player Models'). */
+    public EntityRenderer(legacyconnector.v1_7_10.net.minecraft.client.Minecraft mc) {
+        this(mc, null);
     }
 
     /** Mods subclass it for alternative views (Witchery's entity viewer, Fisk's Heroes' camera); the modern game still renders. */
@@ -28,6 +33,18 @@ public class EntityRenderer {
     }
 
     /** Finds what the crosshair is on (block or entity), from the current camera entity: the modern pick. */
+    /** The field of view in degrees: the player's setting (or 70 when {@code useSetting} is false) scaled by speed and effects. */
+    public float getFOVModifier(float partialTicks, boolean useSetting) {
+        var mc = net.minecraft.client.Minecraft.getInstance();
+        float fov = useSetting ? mc.options.fov().get().floatValue() : 70.0F;
+        if (mc.player != null) {
+            fov *= mc.player.getFieldOfViewModifier();
+            if (mc.player.getHealth() <= 0.0F) fov /= (1.0F - 500.0F / (Math.min(mc.player.deathTime + partialTicks, 20.0F) + 500.0F)) * 2.0F + 1.0F;
+            if (mc.player.isEyeInFluid(net.minecraft.tags.FluidTags.WATER)) fov = fov * 60.0F / 70.0F;
+        }
+        return fov;
+    }
+
     public void getMouseOver(float partialTicks) {
         var mc = net.minecraft.client.Minecraft.getInstance();
         if (mc.gameRenderer != null && mc.level != null && mc.getCameraEntity() != null) mc.gameRenderer.pick(partialTicks);
@@ -44,8 +61,17 @@ public class EntityRenderer {
         if (camera != null && camera.isInitialized()) ActiveRenderInfo.mcc$update(camera.getYRot(), camera.getXRot());
     }
 
+    /** How far behind the player the third person camera sits (mods set it by reflection: Legends' giant characters). */
+    public float thirdPersonDistance = 4.0F;
+    public float thirdPersonDistanceTemp = 4.0F;
+
+    /**
+     * The frame. A mod's subclass overrides this to set things up, calls {@code super} and undoes them afterwards: the call to here is the point where the
+     * modern frame is drawn (see {@code LegacyRendererOverrides}).
+     */
     public void updateCameraAndRender(float partialTicks) {
         if (theShaderGroup != null) theShaderGroup.loadShaderGroup(partialTicks);
+        org.kylepitcock.legacyconnector.v1_7_10.client.LegacyRendererOverrides.yieldToModernFrame();
     }
 
     private legacyconnector.v1_7_10.net.minecraft.client.shader.ShaderGroup theShaderGroup;
@@ -75,6 +101,32 @@ public class EntityRenderer {
                 legacyconnector.v1_7_10.net.minecraft.client.renderer.texture.TextureManager.INSTANCE, null, null, location);
     }
 
+    /** How bright night vision makes the world, 0 to 1 (flashes when the effect is about to end). */
+    public float getNightVisionBrightness(legacyconnector.v1_7_10.net.minecraft.entity.player.EntityPlayer player, float partialTicks) {
+        return player != null && player.mcc$entity instanceof net.minecraft.world.entity.LivingEntity living
+                ? net.minecraft.client.renderer.GameRenderer.getNightVisionScale(living, partialTicks) : 0.0F;
+    }
+
+    /** The per-tick update of the renderer (the modern renderer's tick: light, item in hand, rain). */
+    public void updateRenderer() {
+        var gameRenderer = net.minecraft.client.Minecraft.getInstance().gameRenderer;
+        if (gameRenderer != null) gameRenderer.tick();
+        rendererUpdateCount++;
+    }
+
+    /** The camera shake of a hit: tilts the current matrix as the player's damage animation does. */
+    public void hurtCameraEffect(float partialTicks) {
+        var pose = org.kylepitcock.legacyconnector.v1_7_10.client.RenderContext.pose();
+        if (pose != null) net.minecraft.client.Minecraft.getInstance().gameRenderer.bobHurt(pose, partialTicks);
+    }
+
+    /** The walking sway of the camera: rotates and offsets the current matrix as the view bobbing option does (nothing when it is off). */
+    public void setupViewBobbing(float partialTicks) {
+        var pose = org.kylepitcock.legacyconnector.v1_7_10.client.RenderContext.pose();
+        var mc = net.minecraft.client.Minecraft.getInstance();
+        if (pose != null && mc.options.bobView().get()) mc.gameRenderer.bobView(pose, partialTicks);
+    }
+
     public void disableLightmap(double partialTicks) {
     }
 
@@ -88,5 +140,13 @@ public class EntityRenderer {
     }
 
     public void setupOverlayRendering() {
+    }
+
+    /**
+     * 1.7.10's EntityRenderer is a resource reload listener (it reloaded its post shaders); mods that replace it register their
+     * subclass with the resource manager, so the interface must be there. The modern game reloads its own shaders.
+     */
+    @Override
+    public void onResourceManagerReload(legacyconnector.v1_7_10.net.minecraft.client.resources.IResourceManager manager) {
     }
 }

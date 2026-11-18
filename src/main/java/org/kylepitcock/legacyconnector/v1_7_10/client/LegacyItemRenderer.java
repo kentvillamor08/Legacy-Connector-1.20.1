@@ -40,6 +40,7 @@ public class LegacyItemRenderer extends BlockEntityWithoutLevelRenderer {
             int light, int overlay) {
         ItemStack view = ItemStack.mcc$wrap(stack);
         if (view == null || view.getItem() == null) return;
+        if (context == ItemDisplayContext.GUI) light = net.minecraft.client.renderer.LightTexture.FULL_BRIGHT; // 1.7.10's slot pipeline was full-bright whatever the caller passed
         ItemRenderType type = switch (context) {
             case GUI -> ItemRenderType.INVENTORY;
             case FIRST_PERSON_LEFT_HAND, FIRST_PERSON_RIGHT_HAND -> ItemRenderType.EQUIPPED_FIRST_PERSON;
@@ -67,8 +68,12 @@ public class LegacyItemRenderer extends BlockEntityWithoutLevelRenderer {
             org.slf4j.LoggerFactory.getLogger("LegacyConnector/Render").info("GUI item {} ({}): pose translate ({}, {}, {}) scale ({}, {}, {}), type {}",
                     renderer.getClass().getName(), view.getItem().getClass().getSimpleName(), m.m30(), m.m31(), m.m32(), m.m00(), m.m11(), m.m22(), type);
         }
+        // Lock order handler monitor -> render lock, as the chunk mesher's ISBRH capture takes them (IsbrhBlockModel.capture): taking the
+        // render lock first (beginWorld) and the renderer's monitor second deadlocked with a mesh thread that held the monitor
+        // (placing a Thermal Expansion tesseract froze the client: RenderTesseract is item renderer and block handler at once).
+        synchronized (renderer) {
         pose.pushPose();
-        RenderContext.beginWorld(pose, buffers, light, overlay);
+        RenderContext.beginItem(pose, buffers, light, overlay);
         try {
             Object[] data;
             switch (type) {
@@ -97,13 +102,16 @@ public class LegacyItemRenderer extends BlockEntityWithoutLevelRenderer {
                     data = new Object[] {renderBlocks, Minecraft.getInstance().player == null ? null : EntityBridge.wrap(Minecraft.getInstance().player)};
                 }
             }
+            // a renderer that is also a block handler (CodeChickenLib models keep their draw state in statics: Thermal Dynamics' ducts) is not
+            // run by the render thread while a mesh thread captures its blocks: ISBRH capture locks the handler (IsbrhBlockModel.capture)
             renderer.renderItem(type, view, data);
         } catch (RuntimeException | LinkageError e) {
             // a broken legacy renderer must not take the inventory down
             logOnce(renderer.getClass().getName(), e);
         } finally {
-            RenderContext.end();
+            RenderContext.endItem();
             pose.popPose();
+        }
         }
     }
 
@@ -150,8 +158,9 @@ public class LegacyItemRenderer extends BlockEntityWithoutLevelRenderer {
         }
         var handler = legacyconnector.v1_7_10.cpw.mods.fml.client.registry.RenderingRegistry.mcc$blockHandler(renderId);
         if (handler == null) return false;
+        synchronized (handler) { // same lock order as renderByItem
         pose.pushPose();
-        RenderContext.beginWorld(pose, buffers, light, overlay);
+        RenderContext.beginItem(pose, buffers, light, overlay);
         try {
             if (!handler.shouldRender3DInInventory(renderId)) return false;
             RenderContext.bindTexture(net.minecraft.client.renderer.texture.TextureAtlas.LOCATION_BLOCKS);
@@ -177,8 +186,9 @@ public class LegacyItemRenderer extends BlockEntityWithoutLevelRenderer {
             logOnce(handler.getClass().getName(), e);
             return true; // a broken legacy renderer must not take the inventory down
         } finally {
-            RenderContext.end();
+            RenderContext.endItem();
             pose.popPose();
+        }
         }
     }
 

@@ -34,16 +34,31 @@ public class TileEntity {
     static {
         // a spawner a mod's own block hosts (Aether's dungeon spawners) saves under the vanilla id
         addMapping(TileEntityMobSpawner.class, "MobSpawner");
+        // 1.7.10's vanilla ids: a mod's block that hosts a vanilla tile entity class (a dispenser, hopper, chest...) saves under them
+        addMapping(TileEntityFurnace.class, "Furnace");
+        addMapping(TileEntityChest.class, "Chest");
+        addMapping(TileEntityEnderChest.class, "EnderChest");
+        addMapping(TileEntityDispenser.class, "Trap");
+        addMapping(TileEntityDropper.class, "Dropper");
+        addMapping(TileEntitySign.class, "Sign");
+        addMapping(TileEntityNote.class, "Music");
+        addMapping(TileEntityPiston.class, "Piston");
+        addMapping(TileEntityBrewingStand.class, "Cauldron");
+        addMapping(TileEntityEnchantmentTable.class, "EnchantTable");
+        addMapping(TileEntityEndPortal.class, "Airportal");
+        addMapping(TileEntityCommandBlock.class, "Control");
+        addMapping(TileEntityBeacon.class, "Beacon");
+        addMapping(TileEntitySkull.class, "Skull");
+        addMapping(TileEntityHopper.class, "Hopper");
+        addMapping(TileEntityComparator.class, "Comparator");
+        addMapping(TileEntityFlowerPot.class, "FlowerPot");
     }
 
     public static void addMapping(Class<?> cls, String id) {
-        if (nameToClassMap.containsKey(id) && nameToClassMap.get(id) != cls) {
-            org.slf4j.LoggerFactory.getLogger("LegacyConnector/TileEntities").warn("Duplicate tile entity id {} ({} and {})", id, nameToClassMap.get(id).getName(), cls.getName());
-            return;
-        }
-        nameToClassMap.put(id, cls);
-        classToNameMap.put(cls, id);
-        TileEntityBridge.addMapping(cls, id);
+        // the bridge answers the id the class is saved under (the given one unless another class holds it)
+        String used = TileEntityBridge.addMapping(cls, id);
+        nameToClassMap.putIfAbsent(used, cls);
+        classToNameMap.put(cls, used);
     }
 
     public static TileEntity createAndLoadEntity(NBTTagCompound tag) {
@@ -57,8 +72,8 @@ public class TileEntity {
     }
 
     public void writeToNBT(NBTTagCompound tag) {
-        String id = TileEntityBridge.idOf(getClass());
-        if (id == null) throw new RuntimeException(getClass() + " is missing a mapping! This is a bug!");
+        // 1.7.10 threw "is missing a mapping" for a class nothing registered, and the tile saved nothing; it saves under a fallback id instead
+        String id = TileEntityBridge.idOrFallback(getClass());
         tag.setString("id", id);
         tag.setInteger("x", xCoord);
         tag.setInteger("y", yCoord);
@@ -140,10 +155,14 @@ public class TileEntity {
     }
 
     public void invalidate() {
+        var site = org.kylepitcock.legacyconnector.v1_7_10.bridge.CoremodSites.TILE_INVALIDATE; // coremod hook site (no-op unless listed)
+        if (site.listed() && site.active()) site.fire(this);
         tileEntityInvalid = true;
     }
 
     public void validate() {
+        var site = org.kylepitcock.legacyconnector.v1_7_10.bridge.CoremodSites.TILE_VALIDATE; // coremod hook site (no-op unless listed)
+        if (site.listed() && site.active()) site.fire(this);
         tileEntityInvalid = false;
     }
 
@@ -157,6 +176,18 @@ public class TileEntity {
     }
 
     public void onChunkUnload() {
+    }
+
+    /**
+     * Hooks that CoFH Core's class transformer adds to {@code net.minecraft.tileentity.TileEntity} and its patched world calls when a tile entity
+     * enters the world's list ({@code cofh_validate}) and leaves it ({@code cofh_invalidate}); mods built on CoFH Core override them to set up
+     * and tear down (a MineFactory Reloaded machine creates its random generator there). The transformer targets Minecraft's class by name and
+     * finds nothing here, so the host calls them: after {@link #validate()}, and after {@link #invalidate()}.
+     */
+    public void cofh_validate() {
+    }
+
+    public void cofh_invalidate() {
     }
 
     /**

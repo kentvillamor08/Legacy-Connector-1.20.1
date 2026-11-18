@@ -33,6 +33,7 @@ Thumbs.db
 !gradle/wrapper/gradle-wrapper.jar
 *.tmp
 /test-mods/
+/test-mods-issues/
 /test-mods2/
 /test-mods3/
 /test-mods4/
@@ -42,6 +43,7 @@ Thumbs.db
 /test-mods-b173/
 /1.12.2 test mods/
 /test-mods-147/
+/test-mods-125/
 /test-mods-1201/
 /test-mods-1201-libs/
 /test-mods-1201-terramity/
@@ -53,3 +55,17 @@ __pycache__/
 /run-survey/
 /test-mods-1201-batch*/
 /run-survey-main/
+test-mods-mcarchive/
+run-verify/
+test-mods-dantdm/
+tools/dev/verify/suites/zz-*
+.lwjgl/
+# Local clutter of test sessions (2026-11-16)
+/test-mods*/
+*.stackdump
+/cache.aside/
+/irisveil.bak
+/build-baseline/
+/tmp_ac/
+.claude/tmp/
+.claude/worktrees/

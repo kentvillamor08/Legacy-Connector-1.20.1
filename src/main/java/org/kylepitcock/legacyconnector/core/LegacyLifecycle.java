@@ -46,6 +46,11 @@ public final class LegacyLifecycle {
     }
 
     /** True if the legacy mod with this modern id (or registry namespace) failed to load and is disabled. */
+    /** True when the mod failed in a loading phase: it is disabled, so the server lifecycle must not dispatch to it either. */
+    public static boolean hasFailed(LegacyModRecord mod) {
+        return FAILED.containsKey(mod);
+    }
+
     public static boolean isFailed(String modernId) {
         if (modernId == null) return false;
         for (LegacyModRecord m : FAILED.keySet()) if (m.modernId.equals(modernId)) return true;
@@ -105,6 +110,21 @@ public final class LegacyLifecycle {
         LOG.info("Legacy mods loaded in {} ms ({} failed)", System.currentTimeMillis() - start, FAILED.size() - CLIENT_ONLY.size());
     }
 
+    /**
+     * The required dependencies of this legacy mod that the loader found not installed ("X requires Y (range), which is not installed"), empty
+     * when none. The mod still loads; if it fails, {@link LegacyModException} starts its message with these.
+     */
+    public static List<String> missingDependencies(String legacyId) {
+        String lines = System.getProperty("legacyconnector.missingDependencies", "");
+        List<String> out = new ArrayList<>();
+        if (lines.isBlank() || legacyId == null) return out;
+        for (String line : lines.split("\n")) {
+            int tab = line.indexOf('\t');
+            if (tab > 0 && line.substring(0, tab).equalsIgnoreCase(legacyId)) out.add(line.substring(tab + 1));
+        }
+        return out;
+    }
+
     public static void onCommonSetup(FMLCommonSetupEvent event) {
         event.enqueueWork(() -> {
             phase(LegacyMods.ordered(), "loadComplete", m -> LegacyMods.platform(m.version).loadComplete(m));
@@ -135,6 +155,32 @@ public final class LegacyLifecycle {
         return CLIENT_ONLY.contains(mod);
     }
 
+    /**
+     * The missing member's owner when {@code t} is a linkage error (NoSuchMethodError, NoSuchFieldError, IncompatibleClassChangeError) during the mod's
+     * init, imc, postInit or loadComplete whose owner class belongs to a different legacy mod than {@code mod}; else null.
+     */
+    private static String foreignApiMismatch(LegacyModRecord mod, String phaseName, Throwable t) {
+        if (mod.mainClass == null || !(phaseName.equals("init") || phaseName.equals("imc") || phaseName.equals("postInit") || phaseName.equals("loadComplete"))) return null;
+        Throwable c = t;
+        for (int i = 0; i < 8 && c.getCause() != null && c.getCause() != c; i++) c = c.getCause();
+        if (!(c instanceof NoSuchMethodError || c instanceof NoSuchFieldError)) return null;
+        String msg = c.getMessage();
+        if (msg == null) return null;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("Class ([\\w.$]+) does not have member|'[\\w\\[\\]]+ ([\\w.$]+)\\.[\\w$<>]+\\(").matcher(msg);
+        if (!m.find()) return null;
+        String owner = m.group(1) != null ? m.group(1) : m.group(2);
+        try {
+            Class<?> o = Class.forName(owner, false, mod.mainClass.getClassLoader());
+            if (o.getModule() == mod.mainClass.getModule() || o.getModule().getName() == null) return null;
+            for (LegacyModRecord other : LegacyMods.all()) {
+                if (other != mod && other.mainClass != null && other.mainClass.getModule() == o.getModule()) return owner + " of " + other.legacyId + " " + other.version;
+            }
+        } catch (ClassNotFoundException | LinkageError e) {
+            return null;
+        }
+        return null;
+    }
+
     interface Phase {
         void run(LegacyModRecord mod) throws Exception;
     }
@@ -147,12 +193,23 @@ public final class LegacyLifecycle {
             long modStart = System.nanoTime();
             Thread thread = Thread.currentThread();
             ClassLoader previous = thread.getContextClassLoader();
+            if (mod.mainClass != null && mod.metadata != null && mod.metadata.has("sourceVersion") && "1.2.5".equals(mod.metadata.get("sourceVersion").getAsString())) {
+                org.kylepitcock.legacyconnector.v1_6_4.bridge.Mc125Host.registerSingleWorld(mod.mainClass.getClassLoader());
+            }
             boolean numericIds = mod.version.equals("1.6.4") || mod.version.equals("1.5.2") || mod.version.equals("1.4.7");
             String previousIds = numericIds ? legacyconnector.v1_6_4.net.minecraft.util.Ids.enter(mod.version, mod.mainClass == null ? null : mod.mainClass.getClassLoader()) : null;
             try {
                 if (mod.mainClass != null) thread.setContextClassLoader(mod.mainClass.getClassLoader());
                 phase.run(mod);
             } catch (Throwable t) {
+                String clash = foreignApiMismatch(mod, name, t);
+                if (clash != null) {
+                    // The mod's integration code called the API of ANOTHER legacy mod in a shape that mod's loaded version does not have (a 1.6.4 mod
+                    // registering Thaumcraft 3 aspects against the Thaumcraft 4 of a 1.7.10 pack): FML would have skipped the integration, not the mod.
+                    LOG.warn("{}: its {} stopped at an API of another mod that is loaded in a different version ({}); the mod stays loaded, the rest of that step is skipped",
+                            mod.legacyId, name, clash);
+                    continue;
+                }
                 LegacyModException wrapped = new LegacyModException(mod, name, t);
                 if (Boolean.getBoolean("legacyconnector.failFast")) throw wrapped;
                 if (touchedClientOnServer(t)) {
@@ -164,6 +221,8 @@ public final class LegacyLifecycle {
                 }
                 LOG.error("{}", wrapped.getMessage(), t);
                 FAILED.put(mod, wrapped);
+                org.kylepitcock.legacyconnector.api.internal.AddonHost.modFailed(mod, name);
+                if ("b1.7.3".equals(mod.version)) org.kylepitcock.legacyconnector.vb1_7_3.dimension.DimensionRegistrationsB173.removeOwner(mod);
             } finally {
                 if (numericIds) legacyconnector.v1_6_4.net.minecraft.util.Ids.leave(previousIds);
                 thread.setContextClassLoader(previous);

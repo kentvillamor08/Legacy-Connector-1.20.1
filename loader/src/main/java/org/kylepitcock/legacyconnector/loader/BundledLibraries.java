@@ -56,12 +56,17 @@ final class BundledLibraries {
     private record Group(String id, String description, List<String> filePrefixes, List<String> usage, boolean always, boolean compatibleWithOthers) {}
 
     private static final List<Group> GROUPS = List.of(
+            // Scala 2.10 is what Forge 1.6.4 / 1.5.2 mods (bdew's Gendustry and BD Lib) were compiled for; it is not binary compatible with 2.11 (trait
+            // implementation classes differ), so a jar of those versions that uses Scala gets this group instead of "scala" (see usage mapping below).
+            // Listed first: the "scala" prefixes would match its files. No class pattern: it is only ever assigned, never scanned for.
+            new Group("scala210", "Scala 2.10", List.of("scala-library-2.10", "scala-reflect-2.10"), List.of("scala210-is-assigned-not-scanned/"), false, false),
             new Group("scala", "Scala 2.11 (+ akka)", List.of("scala-", "akka-actor"), List.of("scala/", "akka/"), false, false),
             new Group("config", "typesafe config", List.of("config-"), List.of("com/typesafe/config/"), false, true),
             new Group("trove", "trove4j", List.of("trove4j-"), List.of("gnu/trove/"), false, true),
             // The 1.12.2 shim itself is written against vecmath.
             new Group("vecmath", "vecmath", List.of("vecmath-"), List.of("javax/vecmath/"), true, true),
             new Group("activation", "javax.activation", List.of("jakarta.activation-"), List.of("javax/activation/"), false, true),
+            new Group("lzma", "lzma (LZMA.LzmaInputStream, a Forge 1.7.10 library)", List.of("lzma-"), List.of("LZMA/"), false, true),
             new Group("argo", "argo JSON parser (a Minecraft 1.6.4 launcher library)", List.of("argo-"), List.of("argo/"), false, true));
 
     /** What was decided, for the log and the report. */
@@ -141,6 +146,9 @@ final class BundledLibraries {
                     cache.setProperty(key, String.join(",", used));
                     cacheChanged = true;
                 }
+                // 1.6.4 / 1.5.2 jars link against Scala 2.10
+                used = new TreeSet<>(used);
+                if (jar.version.numericIds() && used.remove("scala")) used.add("scala210");
                 usage.put(jar, used);
             }
             if (cacheChanged) saveUsageCache(cacheDir, cache, legacy);
@@ -170,6 +178,14 @@ final class BundledLibraries {
                 if (g.id.equals("config") && provided.contains("scala")) needed.add("config");
                 if (!needed.contains(g.id)) {
                     notes.add(g.description + ": not loaded (no legacy mod uses it)");
+                    continue;
+                }
+                if (g.id.equals("scala210") && needed.contains("scala")) {
+                    String reason = "needs Scala 2.10, but other legacy mods of this pack need Scala 2.11: two Scala versions cannot share the game";
+                    notes.add(g.description + ": NOT loaded, " + reason + "; the " + "1.6.4 / 1.5.2 mods that need it are skipped");
+                    LOG.warn("Legacy Connector: {} conflicts with Scala 2.11 needed by other legacy mods; skipped: {}", g.description,
+                            usage.entrySet().stream().filter(e -> e.getValue().contains(g.id)).map(e -> e.getKey().fileName()).toList());
+                    for (var e : usage.entrySet()) if (e.getValue().contains(g.id)) unsupported.put(e.getKey(), reason);
                     continue;
                 }
                 // packages of all files of the group, and who else provides them
@@ -202,11 +218,12 @@ final class BundledLibraries {
                 // Scala: usable only if the other copy is the same Scala version family.
                 String version = null;
                 for (String provider : clash.keySet()) version = providerScalaVersion(provider, scanDirs);
-                if (version != null && version.startsWith("2.11")) {
+                String wanted = g.id.equals("scala210") ? "2.10" : "2.11";
+                if (version != null && version.startsWith(wanted)) {
                     notes.add(g.description + ": not loaded, " + who + " provides Scala " + version + " which serves the legacy mods");
                     continue;
                 }
-                String reason = "needs Scala 2.11 (or akka), but this pack already contains " + (version == null ? "another Scala" : "Scala " + version)
+                String reason = "needs Scala " + wanted + " (or akka), but this pack already contains " + (version == null ? "another Scala" : "Scala " + version)
                         + " (" + who + "): two Scala versions cannot share the game, and Scala 2.11 code does not run on it";
                 notes.add(g.description + ": NOT loaded because of a conflict with " + who + " (" + clash.values().stream().mapToInt(Set::size).sum()
                         + " shared packages); the legacy mods that need it are skipped");
@@ -290,6 +307,14 @@ final class BundledLibraries {
         if (slash > 0) out.add(entry.substring(0, slash));
     }
 
+    /**
+     * A jar-in-jar library of a modern mod: NeoForge's {@code META-INF/jarjar/} but also the other folders under {@code META-INF/} that a jar's
+     * {@code jarjar/metadata.json} may name (C2ME nests Caffeine in {@code META-INF/jars/}).
+     */
+    static boolean isNestedLibraryJar(String entryName) {
+        return entryName.startsWith("META-INF/") && entryName.endsWith(".jar") && entryName.indexOf('/', "META-INF/".length()) > 0;
+    }
+
     /** package (slash form) to the name of a jar that contains classes of it; nested jar-in-jar libraries are looked into too. */
     static Map<String, String> scanProviders(List<Path> dirs, Set<Path> excluded) {
         Map<String, String> out = new HashMap<>();
@@ -305,7 +330,7 @@ final class BundledLibraries {
                         while (en.hasMoreElements()) {
                             ZipEntry e = en.nextElement();
                             String n = e.getName();
-                            if (n.startsWith("META-INF/jarjar/") && n.endsWith(".jar")) {
+                            if (isNestedLibraryJar(n)) {
                                 try (InputStream in = zip.getInputStream(e)) {
                                     for (String s : packages(in.readAllBytes())) out.putIfAbsent(s, name + " (nested " + n.substring(n.lastIndexOf('/') + 1) + ")");
                                 }

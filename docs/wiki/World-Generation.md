@@ -8,6 +8,10 @@ Legacy biomes (for example Biomes O' Plenty's) become real 1.21 biomes, generate
 ores, caves and small plants of the closest vanilla biome. Trees and grass come from the legacy biome itself: its
 decorator runs the legacy passes (the biome's own tree and plant generators) and its extra features, gated by Forge's
 terrain-gen events as on 1.7.10. Mods' `IWorldGenerator`s (ores, structures) run for every chunk.
+As on 1.7.10/1.12.2 they run in every dimension and filter by `world.provider` themselves; the `chunkGenerator` argument they get is an
+instance of the class the legacy game passed there (`ChunkProviderHell`/`ChunkGeneratorHell` in the Nether, `...End` in the End,
+`...Generate`/`...Overworld` or `...Flat` in the overworld; a do-nothing stand-in, `GeneratorProviders1710`/`1122`), because many mods
+split the dimensions with `instanceof` and let the overworld be the default branch.
 
 ### Where legacy biomes generate
 
@@ -25,21 +29,14 @@ of the multi-noise biome source (`core/worldgen/BiomePlacement`, data from `v1_7
   `GenLayerBiome` drew from on 1.7.10. Mod biomes in no list never generated in a 1.7.10 default overworld (they belong to
   the mod's own dimension or world type), so they are not placed here. The log lists both groups once
   ("Legacy biome climate placement ...").
-- **Placement without a required third-party mod.** TerraBlender is optional, not a prerequisite. When it is already installed,
-  the connector loads `compat/terrablender/LegacyRegion` as an optional region (TerraBlender is LGPL-3.0; see
-  `THIRD_PARTY_NOTICES.md`). Its weight is the total legacy weight / 3, clamped to 1-12 (TerraBlender's vanilla region has weight
-  10), and TerraBlender mixes it with its vanilla region and other mods' regions. The analog keeps weight 20 of each point and
-  legacy biomes alternate with it along the humidity axis (analog, legacy, analog, legacy...). `legacyBiomeFrequency` (config,
-  default 1.0) scales the shares.
-- **Connector-owned fallback.** When TerraBlender is absent, the connector overlays the active overworld
-  `MultiNoiseBiomeSource` parameter list through a narrowly scoped mixin. The current source's parameter points are the base, so
-  the implementation does not substitute a hard-coded vanilla-only climate layout. This is intended to preserve points added by
-  world-generation mods such as Tectonic and Terralith while sharing each analog's humidity intervals with legacy biomes.
-  The native path applies only to a standard multi-noise overworld source; a different custom biome-source type is left unchanged
-  and logged rather than guessed at. This source implementation has not yet passed the next consolidated build/runtime gate.
-- The two placement paths use the same legacy biome weights and humidity-splitting algorithm. Biomes in no
-  `BiomeManager` list (Thaumcraft's Eerie and Eldritch) never generated in the 1.7.10 default overworld and are not placed.
-  TerraBlender and Pehkui are optional integrations; neither is required to install or use Legacy Connector.
+- **TerraBlender is the only placement path.** The legacy biomes form a TerraBlender overworld region
+  (`compat/terrablender/LegacyRegion`). TerraBlender (LGPL-3.0, see `THIRD_PARTY_NOTICES.md`) is a required dependency, embedded as
+  jar-in-jar with an open-ended version range, so nothing extra needs installing and a separately installed (newer) TerraBlender
+  wins. The region holds the vanilla layout with each analog's points shared among the legacy biomes modelled on it. Its weight is
+  the total legacy weight / 3, clamped to 1-12 (TerraBlender's vanilla region has weight 10), and TerraBlender mixes it with the
+  vanilla region and other mods' regions (Terralith, Tectonic, Biomes O' Plenty...). Inside the region the analog keeps weight 20 of each point and the legacy biomes alternate with it along the humidity axis (analog, legacy, analog, legacy...); there is no rule keeping legacy biomes apart or on different analogs, they sit where their climate puts them. `legacyBiomeFrequency` (config, default 1.0) scales both the region weight and the shares. Biomes in no `BiomeManager` list (Thaumcraft's Eerie and Eldritch) never generated in the 1.7.10 overworld and are not placed. There is no fallback that edits the
+  `minecraft:overworld` parameter list: worldgen mods such as Tectonic and Terralith reshape that climate space, and points added
+  there landed in thin river-shaped bands (issue #175).
 
 Biome registry ids are unchanged (`thaumcraft:magical_forest`, ...), so existing worlds keep their already generated biomes.
 New chunks of worlds made with older versions use the new placement, so biome borders can show where old and new chunks meet.
@@ -50,7 +47,7 @@ New chunks of worlds made with older versions use the new placement, so biome bo
 A world type a mod registers (BoP's "BIOMESOP") appears on the Create World screen's world type button; on a
 dedicated server use `level-type=<modid>:<type>` (e.g. `biomesoplenty:biomesop`). Its world preset brings its own biome
 source, `legacyconnector:legacy_layers` (`LegacyLayeredBiomeSource`, a multi-noise source of the vanilla parameter list, so
-optional TerraBlender regions and terrain-tied biomes still apply when TerraBlender is installed). On top of that source, the world type's own 1.7.10 biome layer chain
+TerraBlender regions and terrain-tied biomes still apply). On top of that source, the world type's own 1.7.10 biome layer chain
 (`GenLayer`, `WorldType.getChunkManager`, re-implemented in the shim and run unmodified) chooses the land biomes. Modern
 terrain, oceans, rivers, beaches, peaks and caves are kept, and where the legacy layout has a vanilla biome the multi-noise
 biome stays. Worlds created with a legacy world type before this source existed load as plain multi-noise worlds and get the
@@ -86,12 +83,30 @@ modern feature:
 
 ### The deep layer
 
-1.7.10 worlds ended at y=0 (bedrock); modern ones reach down to -64. Each legacy `IWorldGenerator` therefore runs a
+**Modes (`deepLayer.mode`, [Configuration](Configuration.md)).** Default `shifted`, for 1.7.10 and 1.12.2: each legacy generator with
+ores runs the normal pass (as the mod expects, legacy y = modern y) and ONE extra full-height pass with legacy y=0 at the world
+bottom (-64), the same run with the same random seed moved down by the difference of the world bottoms. The extra pass keeps only
+the ore writes (natural overworld stone, deepslate counted as stone, replaced by another block); the normal pass refuses exactly
+those writes and keeps everything else (surface plants, trees, structures, lakes), so every ore comes from the shifted pass, whole
+veins are never cut at y=0 (nothing is chosen per cell), a generator keyed to bedrock-relative heights fills the real bottom, and the
+ore count per chunk is the mod's own. The cost: ore heights are the mod's numbers + (-64), so an ore meant for y 0-63 lands in
+-64..-1 and ore meant above 64 sits 64 lower; surface-relative ores follow the same shift (use `deepLayer.splitMods` for a mod
+where that is wrong, or whose generators build stone-replacing structures: the normal pass refuses their stone-replacing blocks and the
+shifted pass places them 64 lower). 1.7.10 mod dimensions keep `split`. `split` is the previous scheme, kept as the fallback and
+described below (for 1.12.2 it means no ores below y=0, as before this mode existed). The shifted pass is a placed feature per
+generator, `<modid>:legacy_worldgen_deep/<name>` (type `legacyconnector:legacy_generator_deep` for 1.12.2; `legacyconnector:legacy_worldgen_deep` for
+1.7.10), step `underground_ores`, placed `above_bottom 0`.
+
+The probe `tools/dev/ore-probe.sh` (with `tools/dev/server-scripts/ore-connectivity.js`, `tools/dev/render_ore_slice.py`) counts ores and
+measures vein connectivity over 11x11 chunks of one seed, for before/after comparisons.
+
+**The split scheme.** 1.7.10 worlds ended at y=0 (bedrock); modern ones reach down to -64. Each legacy `IWorldGenerator` therefore runs a
 second time per chunk with the world shifted so that legacy y=0 is the dimension's bottom: ores, bedrock ores and
 underground structures land in the deep layer too (the generator sees deepslate as stone, everything from modern y=0 up as
-solid rock, air above legacy y=256; only writes below y=0 are kept). Legacy ores stay exactly as common as in the original mod: the deep pass keeps only ore writes (natural overworld stone
+solid rock, air above legacy y=256; only ore writes are kept above y=0, and only up to y=15, so a vein of the deep pass that reaches 0
+continues into the band above it instead of ending at the old floor line: veins can cross y=0, CustomOreGen #82). Legacy ores stay exactly as common as in the original mod: the deep pass keeps only ore writes (natural overworld stone
 replaced by another block), and an ore that lands in legacy y 0-63, the band both passes cover, is kept by exactly one of the two
-passes, chosen per position. A chunk gets the 1.7.10 number of ores, the bottom 64 blocks of them spread over -64..63; underground
+passes, chosen per 8x8x8 cell (not per block: a per-block choice thinned every vein to a checkerboard). A chunk gets the 1.7.10 number of ores, the bottom 64 blocks of them spread over -64..63; underground
 structures are built once, by the normal pass. This deep pass is a native placed feature per
 generator, `<modid>:legacy_worldgen_deep/<generator class, lowercased>` (feature type `legacyconnector:legacy_worldgen_deep`,
 config `{"generator": "<that id>"}`), added to every biome by a biome modifier with the same id (step `underground_ores`).
@@ -108,7 +123,9 @@ Outside world generation, code that hard-codes the old range is rewritten by the
 `y < 0` / `y >= 256` checks on the y parameter of a method taking `(World, x, y, z)` (`BuildHeightRewriter`, RotaryCraft's
 placement bounds), and a tile entity's clamp of a height it picked around itself to the bedrock floor, `if (y < K) y = K`
 with K 0..8 on a local computed from `yCoord` (`WorldFloorClampRewriter`, Thaumcraft's Arcane Lamp), which then counts K from
-the world's bottom. Generation views and 0..256 dimensions answer the 1.7.10 range, so nothing changes there.
+the world's bottom, and a `Math.abs` that is the last operation of the y argument of `Entity.setPosition` (or of a store into `posY`) is dropped
+(`EntityHeightAbsRewriter`: Traincraft's slope code did `setPosition(x, Math.abs(y), z)`, which threw a train below y=0 into the sky, #105).
+The legacy `ChunkCache` (renderers, pathfinding) reads the world's real range too. Generation views and 0..256 dimensions answer the 1.7.10 range, so nothing changes there.
 
 ## Structures, fluids and input
 
@@ -224,6 +241,29 @@ no house's place), and handlers that only add vanilla's own 1.7.10 houses (Witch
 village has its own. Witchery's `TownWallMode`/`TownKeepMode` and cluster settings apply as in 1.7.10. Limits: the wall's block
 entity keeps the paths in memory only (as in 1.7.10), so a chunk saved before it ticked gets no wall, and the wall reads chunks
 that are not loaded as air.
+**1.6.4, 1.5.2 and 1.4.7 village buildings** (the `v1_6_4` forward layer) ride the 1.7.10 path unchanged: those versions call the same
+`VillagerRegistry.registerVillageCreationHandler`, the loader renames `ComponentVillage`/`ComponentVillageStartPiece`/`StructureVillagePieceWeight` (flat
+`net.minecraft.src` names in 1.4.7) to the 1.7.10 `StructureVillagePieces` classes, and the components' int-id building calls (`placeBlockAtCurrentPosition`,
+`fillWithBlocks`...) go through the forward rows of `StructureComponent`. Server-checked (suites `villages164`, `villages152`, `villages147`; the
+self test scans up to 14 villages and logs, per legacy piece, the blocks of mods inside its own box, whether it stands against a street and whether it
+overlaps another piece): 1.6.4 Forestry's apiarist house, Tinkers' Construct's tool workshop, Witchery's apothecary and witch hut, Mystcraft's archivist
+house; 1.5.2 and 1.4.7 Forestry and Mystcraft; every piece beside a street, none overlapping another. Mod components that keep their own
+`ComponentVillage.startPiece` / average-ground field (Forestry 1.4.7 and 1.5.2) get the village's start piece through a field getter and the ground the
+jigsaw already found (`getAverageGroundLevel` returns it), so they stand on their plot instead of being measured from the terrain again. Left out
+as in the original: handlers whose limit is 0 for a size-0 village (MineFactory Reloaded's zoologist house: limit is the village size; Tinkers'
+smeltery), so those two are never seen in the default villages. 1.20.1 mods add houses as data-pack template pools; `tools/dev/server-scripts/village-pools.js`
+(suite `villages1201`) lists every village pool by namespace and the elements whose structure template is missing: CTOV's 130 pools resolve all their
+structure files that exist in the jar (the remaining elements name files its jar does not contain, as in 1.20.1). Open: a multi-loader data jar whose
+`neoforge.mods.toml` pins Minecraft to 1.20.x (Terralith) is not picked up as a 1.20.1 mod (its biome JSON also needs data conversions first).
+**1.12.2 village buildings** use the same assembly (`core/worldgen/VillageAdditions`, shared; each version supplies a `LegacyVillageSource`):
+1.12.2's `VillagerRegistry.IVillageCreationHandler`s (`LegacyVillages1122`, element type `legacyconnector:legacy_village_building_1122`,
+`LegacyVillagePoolElement1122`) become extra pieces of the vanilla village. The component is planned as 1.12 did
+(`getVillagePieceWeight` for weight and limit, `buildComponent` with an `EnumFacing`, then `buildComponent` of the piece and the
+`pendingRoads`/`pendingHouses` it adds), the village type gives the style (`Start.structureType`: desert 1, savanna 2, taiga 3,
+plains and snowy 0, so `getBiomeSpecificBlockState` and `biomeDoor` answer as in 1.12) and the biome; placing runs
+`addComponentParts` through the generation region (`WorldBridge1122.wrap` of the `WorldGenLevel`), so `setBlockState`,
+`fillWithBlocks`, `replaceAirAndLiquidDownwards`, `generateChest` (loot tables) and `spawnVillagers` work on the chunk being
+generated. A handler or component that throws is logged (first 12) and skipped. Handlers that build 1.12's own houses are left out.
 `villages.legacyBuildings=false` leaves them out. Doors of legacy structures: 1.7.10 kept a door's facing and open state in the lower half's metadata and the hinge in the upper's,
 so a half written on its own would keep the defaults of the rest (an upper half facing east); whenever legacy code writes a door half
 and the other half is there, the world puts both modern halves together (facing and open from the lower, hinge and powered from the

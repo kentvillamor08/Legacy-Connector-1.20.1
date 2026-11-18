@@ -260,6 +260,7 @@ public final class EventBridge1122 {
             var entity = living(e.getEntity());
             if (entity != null) post(new legacyconnector.v1_12_2.net.minecraftforge.event.entity.living.LivingEvent.LivingJumpEvent(entity));
         });
+        CoremodSites1122.register(bus); // hooks of 1.12.2 coremods in Minecraft's own classes, replayed generically
         bus.addListener((net.neoforged.neoforge.event.tick.EntityTickEvent.Pre e) -> {
             if (!(e.getEntity() instanceof net.minecraft.world.entity.LivingEntity)
                     || !wants(legacyconnector.v1_12_2.net.minecraftforge.event.entity.living.LivingEvent.LivingUpdateEvent.class)) return;
@@ -353,6 +354,8 @@ public final class EventBridge1122 {
                 e.setCancellationResult(result(event.getCancellationResult()));
             }
         });
+        // shears on IShearable blocks (leaves, bushes): 1.12's ItemShears.onBlockStartBreak
+        bus.addListener(net.neoforged.bus.api.EventPriority.LOW, Shears1122::onBreak);
         bus.addListener((net.neoforged.neoforge.event.level.BlockEvent.BreakEvent e) -> {
             if (!wants(legacyconnector.v1_12_2.net.minecraftforge.event.world.BlockEvent.BreakEvent.class)) return;
             if (!(e.getLevel() instanceof net.minecraft.world.level.Level level)) return;

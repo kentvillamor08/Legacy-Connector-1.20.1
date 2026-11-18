@@ -82,7 +82,7 @@ public final class ItemBridge {
 
 
     public static RegistryNamespaced legacyRegistry() {
-        return new legacyconnector.v1_7_10.cpw.mods.fml.common.registry.FMLControlledNamespacedRegistry<Item>(ItemBridge::byName, o -> nameOf((Item) o), ItemBridge::byId, o -> idOf((Item) o),
+        return new legacyconnector.v1_7_10.cpw.mods.fml.common.registry.FMLControlledNamespacedRegistry<Item>(ItemBridge::byName, o -> o instanceof Item i0 ? nameOf(i0) : null, ItemBridge::byId, o -> o instanceof Item i1 ? idOf(i1) : -1,
                 () -> all().iterator(), ItemBridge::addDirect);
     }
 
@@ -370,12 +370,24 @@ public final class ItemBridge {
     }
 
     private static void ensureVanilla() {
+        if (vanillaReady) return;
         try {
             Class.forName("legacyconnector.v1_7_10.net.minecraft.init.Items", true, ItemBridge.class.getClassLoader());
         } catch (ClassNotFoundException e) {
             throw new IllegalStateException(e);
         }
+        // Class.forName cost half of the render thread's time with a minimap mod reading every block of every section (Crafting Dead, #188).
+        // Ready once the generated class's last constant is assigned (a call during its own static initializer returns early, before that).
+        try {
+            var c = Class.forName("legacyconnector.v1_7_10.net.minecraft.init.Items", false, ItemBridge.class.getClassLoader());
+            var fields = c.getDeclaredFields();
+            if (fields.length > 0 && fields[fields.length - 1].get(null) != null) vanillaReady = true;
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            // stays on the slow path
+        }
     }
+
+    private static volatile boolean vanillaReady;
 
     // ------------------------------------------------------------------ mod registration
 
@@ -405,16 +417,18 @@ public final class ItemBridge {
             LegacyItemAdapter adapter = new LegacyItemAdapter(item, meta, properties(item));
             item.mcc$variants.put(meta, LegacyRegistrar.register(BuiltInRegistries.ITEM, variantId(base, meta), adapter));
         }
+        Runnable growItem = () -> {
+            for (int meta : discoverMetas(item)) {
+                if (item.mcc$variants.containsKey(meta)) continue;
+                LegacyItemAdapter adapter = new LegacyItemAdapter(item, meta, properties(item));
+                item.mcc$variants.put(meta, LegacyRegistrar.register(BuiltInRegistries.ITEM, variantId(base, meta), adapter));
+            }
+        };
         if (discoveryFailed) {
             discoveryFailed = false;
-            retryLater(() -> {
-                for (int meta : discoverMetas(item)) {
-                    if (item.mcc$variants.containsKey(meta)) continue;
-                    LegacyItemAdapter adapter = new LegacyItemAdapter(item, meta, properties(item));
-                    item.mcc$variants.put(meta, LegacyRegistrar.register(BuiltInRegistries.ITEM, variantId(base, meta), adapter));
-                }
-            });
+            retryLater(growItem);
         }
+        if (listsLate(item)) lateGrow(growItem);
     }
 
     /**
@@ -463,6 +477,28 @@ public final class ItemBridge {
     private static final List<Runnable> RETRY = new ArrayList<>();
     /** The mod that registered each {@link #RETRY} entry (modern id), so its subtypes are listed after its own init. */
     private static final List<String> RETRY_OWNER = new ArrayList<>();
+
+    /**
+     * An item whose own class lists its subtypes through the Forge item hook {@code addCreativeItems} from state that other code fills later (RedPower's ItemMicro asks its
+     * placers, which the Wiring, Machine and Control mods register in their own init, after the micro block item exists): its subtypes are listed once more when every mod has
+     * loaded. Only ever adds variants.
+     */
+    private static boolean listsLate(Item item) {
+        try {
+            if (!item.getHasSubtypes()) return false;
+        } catch (RuntimeException | LinkageError e) {
+            return false;
+        }
+        for (Class<?> c = item.getClass(); c != null && c != Object.class && !c.getName().startsWith("legacyconnector."); c = c.getSuperclass()) {
+            for (java.lang.reflect.Method m : c.getDeclaredMethods()) if (m.getName().equals("addCreativeItems")) return true;
+        }
+        return false;
+    }
+
+    private static void lateGrow(Runnable r) {
+        RETRY.add(r);
+        RETRY_OWNER.add("\u0000late");
+    }
 
     private static void retryLater(Runnable r) {
         var c = org.kylepitcock.legacyconnector.v1_7_10.LegacyModContainer1710.active();
@@ -537,16 +573,18 @@ public final class ItemBridge {
             LegacyBlockItemAdapter modern = new LegacyBlockItemAdapter(adapter, item, meta, properties(item));
             item.mcc$variants.put(meta, LegacyRegistrar.register(BuiltInRegistries.ITEM, variantId(id, meta), modern));
         }
+        Runnable growBlockItem = () -> {
+            for (int meta : discoverMetas(item)) {
+                if (item.mcc$variants.containsKey(meta)) continue;
+                LegacyBlockItemAdapter modern = new LegacyBlockItemAdapter(adapter, item, meta, properties(item));
+                item.mcc$variants.put(meta, LegacyRegistrar.register(BuiltInRegistries.ITEM, variantId(id, meta), modern));
+            }
+        };
         if (discoveryFailed) {
             discoveryFailed = false;
-            retryLater(() -> {
-                for (int meta : discoverMetas(item)) {
-                    if (item.mcc$variants.containsKey(meta)) continue;
-                    LegacyBlockItemAdapter modern = new LegacyBlockItemAdapter(adapter, item, meta, properties(item));
-                    item.mcc$variants.put(meta, LegacyRegistrar.register(BuiltInRegistries.ITEM, variantId(id, meta), modern));
-                }
-            });
+            retryLater(growBlockItem);
         }
+        if (listsLate(item)) lateGrow(growBlockItem);
     }
 
     private static ResourceLocation variantId(ResourceLocation base, int meta) {
@@ -609,6 +647,8 @@ public final class ItemBridge {
                             net.minecraft.world.entity.EquipmentSlotGroup.MAINHAND)
                     .build());
         }
+        var songKey = Records1710.songKey(item);
+        if (songKey != null) p.jukeboxPlayable(songKey);
         if (item.hasContainerItem() && item.getContainerItem() != null && item.getContainerItem().mcc$variants.containsKey(0)) {
             p.craftRemainder(item.getContainerItem().mcc$variants.get(0));
         }
@@ -822,11 +862,29 @@ public final class ItemBridge {
         } else if (modern instanceof net.minecraft.world.item.ArmorItem) {
             // modern armor (netherite, other mods' suits) is an ItemArmor to legacy code: `instanceof ItemArmor` checks (HBM's armor table) pass
             wrapper = new legacyconnector.v1_7_10.net.minecraft.item.ItemArmor(new VanillaInfo(name, -1, modern));
+        } else if (modernTool(modern, name) instanceof Item tool) {
+            wrapper = tool;
         } else {
             wrapper = new Item(new VanillaInfo(name, -1, modern));
         }
         index(name, -1, wrapper);
         return wrapper;
+    }
+
+    /**
+     * A modern tool 1.7.10 did not have (netherite tools, other mods' tools) as the legacy tool class of its kind, as the vanilla
+     * tools are: legacy code tells tools apart with {@code instanceof ItemPickaxe} and the like (Thaumcraft's arcane bore only takes
+     * an ItemPickaxe, so a netherite pickaxe was refused). Null for anything else.
+     */
+    private static Item modernTool(net.minecraft.world.item.Item modern, String name) {
+        VanillaInfo info = new VanillaInfo(name, -1, modern);
+        if (modern instanceof net.minecraft.world.item.PickaxeItem) return new legacyconnector.v1_7_10.net.minecraft.item.ItemPickaxe(info);
+        if (modern instanceof net.minecraft.world.item.AxeItem) return new legacyconnector.v1_7_10.net.minecraft.item.ItemAxe(info);
+        if (modern instanceof net.minecraft.world.item.ShovelItem) return new legacyconnector.v1_7_10.net.minecraft.item.ItemSpade(info);
+        if (modern instanceof net.minecraft.world.item.HoeItem) return new legacyconnector.v1_7_10.net.minecraft.item.ItemHoe(info);
+        if (modern instanceof net.minecraft.world.item.SwordItem) return new legacyconnector.v1_7_10.net.minecraft.item.ItemSword(info);
+        if (modern instanceof net.minecraft.world.item.ShearsItem) return new legacyconnector.v1_7_10.net.minecraft.item.ItemShears(info);
+        return null;
     }
 
     /** modern vanilla item -> {legacy wrapper, meta}; built from every vanilla legacy name at metadata 0-15. */
@@ -908,6 +966,20 @@ public final class ItemBridge {
         net.minecraft.world.item.ItemStack moved = stack.transmuteCopy(variant, stack.getCount());
         moved.remove(CompatComponents.legacyMeta());
         return moved;
+    }
+
+    /**
+     * Makes {@code target} (a modern stack some other holder keeps, such as a slot's) the item and components of {@code source}, in
+     * place: 1.7.10's {@code ItemStack.setItem} changed the stack the slot holds, and mods swap an item that way (IC2's batteries between
+     * their empty and charged items, so a wrapped view that kept a replacement copy lost the charge). Count is left alone.
+     */
+    public static void adoptInPlace(net.minecraft.world.item.ItemStack target, net.minecraft.world.item.ItemStack source) {
+        if (target == source || target.isEmpty() || source.isEmpty()) return;
+        var access = (org.kylepitcock.legacyconnector.mixin.ItemStackItemAccess) (Object) target;
+        net.minecraft.world.item.Item newItem = source.getItem();
+        var patch = source.getComponentsPatch();
+        access.legacyconnector$setItem(newItem);
+        access.legacyconnector$setComponents(net.minecraft.core.component.PatchedDataComponentMap.fromPatch(newItem.components(), patch));
     }
 
     public static net.minecraft.world.item.ItemStack withLegacyDamage(Item item, net.minecraft.world.item.ItemStack stack, int damage) {

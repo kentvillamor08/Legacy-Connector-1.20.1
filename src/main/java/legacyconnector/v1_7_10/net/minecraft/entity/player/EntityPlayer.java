@@ -49,10 +49,16 @@ public abstract class EntityPlayer extends EntityLivingBase implements legacycon
     /** Phantom: the legacy container behind the open menu (null for modern menus). */
     @Deprecated
     public legacyconnector.v1_7_10.net.minecraft.inventory.Container openContainer;
+    /** The container a fake player was given by {@code openContainer = ...} (no menu hosts it). */
+    public legacyconnector.v1_7_10.net.minecraft.inventory.Container mcc$unhostedContainer;
     /** Phantom: the container of the player's own inventory (redirected to {@code mcc$get$inventoryContainer}). */
     @Deprecated
     public legacyconnector.v1_7_10.net.minecraft.inventory.Container inventoryContainer;
     private legacyconnector.v1_7_10.net.minecraft.inventory.Container mcc$inventoryContainer;
+    /** Phantom field {@code xpCooldown}: ticks before the player may pick up another orb. Backed by the modern {@code takeXpDelay}, which the game
+     *  counts down every tick (a side-storage field would never decrease, so Thaumcraft vis orbs worked once). */
+    @Deprecated
+    public int xpCooldown;
     @Deprecated
     public int experienceLevel;
     @Deprecated
@@ -101,6 +107,8 @@ public abstract class EntityPlayer extends EntityLivingBase implements legacycon
     public static legacyconnector.v1_7_10.net.minecraft.inventory.Container mcc$get$openContainer(EntityPlayer p) {
         // As 1.7.10: with nothing open (or a menu legacy code knows nothing about) it is the player's own container, never null.
         if (p.mcc$player().containerMenu instanceof org.kylepitcock.legacyconnector.v1_7_10.gui.LegacyMenu m) return m.legacy();
+        // A player that cannot host a menu (a fake player) keeps the container the mod assigned, as the 1.7.10 field did.
+        if (p.mcc$unhostedContainer != null) return p.mcc$unhostedContainer;
         // A container screen the client built itself from a mod's own packet (IC2's GUIs) is the open container until the server's menu id arrives.
         if (p.mcc$player().level().isClientSide && net.neoforged.fml.loading.FMLEnvironment.dist.isClient()) {
             var detached = org.kylepitcock.legacyconnector.v1_7_10.client.ClientGui.detachedContainer(p.mcc$player());
@@ -113,6 +121,8 @@ public abstract class EntityPlayer extends EntityLivingBase implements legacycon
         // Legacy code assigned this when opening containers by hand (FML's openGui went through the GUI bridge): the server hosts it in a menu.
         if (p instanceof EntityPlayerMP mp && mp.mcc$entity() instanceof net.minecraft.server.level.ServerPlayer sp) {
             org.kylepitcock.legacyconnector.v1_7_10.bridge.GuiBridge.openManual(sp, mp.currentWindowId, c);
+            mp.mcc$unhostedContainer = sp instanceof net.neoforged.neoforge.common.util.FakePlayer
+                    && c != null && !(c instanceof legacyconnector.v1_7_10.net.minecraft.inventory.ContainerPlayer) ? c : null;
         }
     }
 
@@ -218,6 +228,40 @@ public abstract class EntityPlayer extends EntityLivingBase implements legacycon
         return mcc$player().getScore();
     }
 
+    public void setScore(int score) {
+        mcc$player().setScore(score);
+    }
+
+    /** Whether the player respawns at their spawn point even without a bed or anchor there (a server player only). */
+    public boolean isSpawnForced(int dimension) {
+        return mcc$player() instanceof net.minecraft.server.level.ServerPlayer sp && sp.isRespawnForced();
+    }
+
+    /** The angle (degrees) the view is turned to while sleeping: the bed's side the head lies on (0 when not in bed). */
+    public float getBedOrientationInDegrees() {
+        var direction = mcc$player().getBedOrientation();
+        if (direction == null) return 0.0F;
+        return switch (direction) {
+            case SOUTH -> 90.0F;
+            case NORTH -> 270.0F;
+            case EAST -> 180.0F;
+            default -> 0.0F;
+        };
+    }
+
+    /** Opens the anvil window for the block at the position (a mod's own anvil block is accepted too). */
+    public void displayGUIAnvil(int x, int y, int z) {
+        if (!(mcc$player() instanceof net.minecraft.server.level.ServerPlayer sp)) return;
+        net.minecraft.core.BlockPos pos = new net.minecraft.core.BlockPos(x, y, z);
+        sp.openMenu(new net.minecraft.world.SimpleMenuProvider((id, inventory, p) -> new net.minecraft.world.inventory.AnvilMenu(id, inventory,
+                net.minecraft.world.inventory.ContainerLevelAccess.create(sp.level(), pos)) {
+            @Override
+            public boolean stillValid(net.minecraft.world.entity.player.Player player) {
+                return true;
+            }
+        }, net.minecraft.network.chat.Component.translatable("container.repair")));
+    }
+
     public boolean canPlayerEdit(int x, int y, int z, int side, ItemStack stack) {
         Direction d = side >= 0 && side < 6 ? Direction.from3DDataValue(side) : Direction.UP;
         return mcc$player().mayUseItemAt(new BlockPos(x, y, z), d, ItemStack.mcc$toModern(stack));
@@ -241,7 +285,11 @@ public abstract class EntityPlayer extends EntityLivingBase implements legacycon
 
     public void setItemInUse(ItemStack stack, int duration) {
         mcc$itemInUse = stack;
-        mcc$player().startUsingItem(net.minecraft.world.InteractionHand.MAIN_HAND);
+        var p = mcc$player();
+        // the hand that holds this stack (1.7.10 had only one); the main hand when it is in neither
+        var modern = stack == null ? null : stack.mcc$modern();
+        boolean off = modern != null && !modern.isEmpty() && p.getMainHandItem() != modern && p.getOffhandItem() == modern;
+        p.startUsingItem(off ? net.minecraft.world.InteractionHand.OFF_HAND : net.minecraft.world.InteractionHand.MAIN_HAND);
     }
 
     public ItemStack getItemInUse() {
@@ -343,6 +391,47 @@ public abstract class EntityPlayer extends EntityLivingBase implements legacycon
                 (windowId, inv, p) -> new net.minecraft.world.inventory.ChestMenu(type, windowId, inv, view, rows), title));
     }
 
+    /**
+     * Shows a horse's inventory (1.7.10 {@code displayGUIHorse}). The window is the modern generic chest menu, so the slots are padded
+     * to a multiple of nine; the padding takes nothing, slot 0 takes a saddle only and slot 1 horse armor only.
+     */
+    public void displayGUIHorse(legacyconnector.v1_7_10.net.minecraft.entity.passive.EntityHorse horse,
+            legacyconnector.v1_7_10.net.minecraft.inventory.IInventory inventory) {
+        if (horse == null || inventory == null) return;
+        displayGUIChest(new HorseWindow(inventory));
+    }
+
+    private static final class HorseWindow implements legacyconnector.v1_7_10.net.minecraft.inventory.IInventory {
+        private final legacyconnector.v1_7_10.net.minecraft.inventory.IInventory real;
+        private final int size;
+
+        HorseWindow(legacyconnector.v1_7_10.net.minecraft.inventory.IInventory real) {
+            this.real = real;
+            this.size = Math.max(9, (real.getSizeInventory() + 8) / 9 * 9);
+        }
+
+        public int getSizeInventory() { return size; }
+        public ItemStack getStackInSlot(int slot) { return slot < real.getSizeInventory() ? real.getStackInSlot(slot) : null; }
+        public ItemStack decrStackSize(int slot, int n) { return slot < real.getSizeInventory() ? real.decrStackSize(slot, n) : null; }
+        public ItemStack getStackInSlotOnClosing(int slot) { return slot < real.getSizeInventory() ? real.getStackInSlotOnClosing(slot) : null; }
+        public void setInventorySlotContents(int slot, ItemStack stack) { if (slot < real.getSizeInventory()) real.setInventorySlotContents(slot, stack); }
+        public String getInventoryName() { return real.getInventoryName(); }
+        public boolean hasCustomInventoryName() { return real.hasCustomInventoryName(); }
+        public int getInventoryStackLimit() { return real.getInventoryStackLimit(); }
+        public void markDirty() { real.markDirty(); }
+        public boolean isUseableByPlayer(EntityPlayer player) { return real.isUseableByPlayer(player); }
+        public void openInventory() { real.openInventory(); }
+        public void closeInventory() { real.closeInventory(); }
+
+        public boolean isItemValidForSlot(int slot, ItemStack stack) {
+            if (slot >= real.getSizeInventory() || stack == null) return false;
+            var item = stack.getItem();
+            if (slot == 0) return item == legacyconnector.v1_7_10.net.minecraft.init.Items.saddle;
+            if (slot == 1) return legacyconnector.v1_7_10.net.minecraft.entity.passive.EntityHorse.func_146085_a(item);
+            return real.isItemValidForSlot(slot, stack);
+        }
+    }
+
     /** Shows the hopper window of a hopper cart (a vanilla one opens its own menu). */
     public void displayGUIHopperMinecart(legacyconnector.v1_7_10.net.minecraft.entity.item.EntityMinecartHopper cart) {
         if (!(mcc$player() instanceof net.minecraft.server.level.ServerPlayer sp) || cart == null) return;
@@ -366,6 +455,19 @@ public abstract class EntityPlayer extends EntityLivingBase implements legacycon
         if (!(mcc$player() instanceof net.minecraft.server.level.ServerPlayer sp) || book == null) return;
         net.minecraft.world.item.ItemStack modern = ItemStack.mcc$toModern(book);
         if (modern.is(net.minecraft.world.item.Items.WRITTEN_BOOK)) sp.openItemGui(modern, net.minecraft.world.InteractionHand.MAIN_HAND);
+    }
+
+    /**
+     * {@code func_146100_a} (MCP {@code displayGUIEditSign}): opens the sign editor (front text) of a vanilla sign. A mod's own sign block is hosted by a
+     * block entity of its own type that the modern editor cannot edit, so nothing opens for those.
+     */
+    public void displayGUIEditSign(legacyconnector.v1_7_10.net.minecraft.tileentity.TileEntity sign) {
+        if (!(mcc$player() instanceof net.minecraft.server.level.ServerPlayer sp) || sign == null || sign.worldObj == null) return;
+        var level = sign.worldObj.mcc$liveLevel();
+        if (level == null) return;
+        if (level.getBlockEntity(new net.minecraft.core.BlockPos(sign.xCoord, sign.yCoord, sign.zCoord)) instanceof net.minecraft.world.level.block.entity.SignBlockEntity modern) {
+            sp.openTextEdit(modern, true);
+        }
     }
 
     /** Shows the beacon window of a vanilla beacon. */
@@ -666,5 +768,155 @@ public abstract class EntityPlayer extends EntityLivingBase implements legacycon
     public float getAIMoveSpeed() {
         return mcc$entity instanceof net.minecraft.world.entity.LivingEntity l
                 ? (float) l.getAttributeValue(net.minecraft.world.entity.ai.attributes.Attributes.MOVEMENT_SPEED) : 0.1F;
+    }
+
+    /** Which chat messages a player sees (the client's chat option). */
+    public enum EnumChatVisibility {
+        FULL(0, "options.chat.visibility.full"),
+        SYSTEM(1, "options.chat.visibility.system"),
+        HIDDEN(2, "options.chat.visibility.hidden");
+
+        private final int chatVisibility;
+        private final String resourceKey;
+
+        EnumChatVisibility(int id, String resourceKey) {
+            this.chatVisibility = id;
+            this.resourceKey = resourceKey;
+        }
+
+        public int getChatVisibility() {
+            return chatVisibility;
+        }
+
+        public static EnumChatVisibility getEnumChatVisibility(int id) {
+            for (EnumChatVisibility v : values()) if (v.chatVisibility == id) return v;
+            return FULL;
+        }
+
+        public String getResourceKey() {
+            return resourceKey;
+        }
+
+        public net.minecraft.world.entity.player.ChatVisiblity mcc$modern() {
+            return net.minecraft.world.entity.player.ChatVisiblity.byId(chatVisibility);
+        }
+
+        public static EnumChatVisibility mcc$of(net.minecraft.world.entity.player.ChatVisiblity modern) {
+            return modern == null ? FULL : getEnumChatVisibility(modern.getId());
+        }
+    }
+
+    // Members125 batch 1
+
+    private float mcc$local_portalTime;
+    private float mcc$local_lastPortalTime;
+
+    /** Phantom field {@code dimension} of 1.2.5's player (1.3 moved it to Entity). */
+    public static int mcc$get$mcc125$dimension(EntityPlayer p) {
+        return legacyconnector.v1_7_10.net.minecraft.entity.Entity.mcc$get$dimension(p);
+    }
+
+    public static void mcc$set$mcc125$dimension(EntityPlayer p, int v) {
+        legacyconnector.v1_7_10.net.minecraft.entity.Entity.mcc$set$dimension(p, v);
+    }
+
+    /** Phantom field {@code portalTime} (1.3: {@code timeInPortal}): how far the nether portal overlay has faded in, 0 to 1. */
+    public static float mcc$get$mcc125$portalTime(EntityPlayer p) {
+        return p.mcc$player() instanceof net.minecraft.client.player.LocalPlayer l ? l.spinningEffectIntensity : p.mcc$local_portalTime;
+    }
+
+    public static void mcc$set$mcc125$portalTime(EntityPlayer p, float v) {
+        if (p.mcc$player() instanceof net.minecraft.client.player.LocalPlayer l) l.spinningEffectIntensity = v;
+        else p.mcc$local_portalTime = v;
+    }
+
+    /** Phantom field {@code lastPortalTime} (1.3: {@code prevTimeInPortal}): the value of {@code portalTime} one tick ago. */
+    public static float mcc$get$mcc125$lastPortalTime(EntityPlayer p) {
+        return p.mcc$player() instanceof net.minecraft.client.player.LocalPlayer l ? l.oSpinningEffectIntensity : p.mcc$local_lastPortalTime;
+    }
+
+    public static void mcc$set$mcc125$lastPortalTime(EntityPlayer p, float v) {
+        if (p.mcc$player() instanceof net.minecraft.client.player.LocalPlayer l) l.oSpinningEffectIntensity = v;
+        else p.mcc$local_lastPortalTime = v;
+    }
+
+    public static int mcc$get$xpCooldown(EntityPlayer p) {
+        return p.mcc$player().takeXpDelay;
+    }
+
+    public static void mcc$set$xpCooldown(EntityPlayer p, int v) {
+        p.mcc$player().takeXpDelay = v;
+    }
+
+    /** Phantom field {@code portalCooldown} (1.3: {@code timeUntilPortal}): ticks before the player may use a portal again. */
+    public static int mcc$get$mcc125$portalCooldown(EntityPlayer p) {
+        return legacyconnector.v1_7_10.net.minecraft.entity.Entity.mcc$get$timeUntilPortal(p);
+    }
+
+    public static void mcc$set$mcc125$portalCooldown(EntityPlayer p, int v) {
+        legacyconnector.v1_7_10.net.minecraft.entity.Entity.mcc$set$timeUntilPortal(p, v);
+    }
+
+    /** 1.2.5 {@code EntityPlayer.dropItem()} (Feather name; 1.3 called it {@code dropOneItem}): throws one item of the held stack and returns the dropped item entity. */
+    public legacyconnector.v1_7_10.net.minecraft.entity.item.EntityItem mcc125$dropItem() {
+        return dropOneItem(false);
+    }
+
+    /** 1.2.5 {@code EntityPlayer.pickUp(entity, count)}: plays the animation of {@code entity} flying into the player (1.3: {@code onItemPickup}). */
+    public void mcc125$pickUp(legacyconnector.v1_7_10.net.minecraft.entity.Entity entity, int count) {
+        onItemPickup(entity, count);
+    }
+
+    /** 1.2.5 players were living entities with the mob look helper: turns the player's view towards {@code target}, at most the given degrees per call. */
+    public void faceEntity(legacyconnector.v1_7_10.net.minecraft.entity.Entity target, float maxYawChange, float maxPitchChange) {
+        double dx = target.mcc$x() - mcc$x();
+        double dz = target.mcc$z() - mcc$z();
+        double dy = target instanceof legacyconnector.v1_7_10.net.minecraft.entity.EntityLivingBase l
+                ? l.mcc$y() + l.getEyeHeight() - (mcc$y() + getEyeHeight())
+                : target.mcc$y() - (mcc$y() + getEyeHeight());
+        double dist = Math.sqrt(dx * dx + dz * dz);
+        float yaw = (float) (Math.atan2(dz, dx) * 180.0 / Math.PI) - 90.0F;
+        float pitch = (float) -(Math.atan2(dy, dist) * 180.0 / Math.PI);
+        mcc$set$rotationPitch(this, mcc$stepAngle(mcc$get$rotationPitch(this), pitch, maxPitchChange));
+        mcc$set$rotationYaw(this, mcc$stepAngle(mcc$get$rotationYaw(this), yaw, maxYawChange));
+    }
+
+    private static float mcc$stepAngle(float current, float target, float max) {
+        float d = net.minecraft.util.Mth.wrapDegrees(target - current);
+        if (d > max) d = max;
+        if (d < -max) d = -max;
+        return current + d;
+    }
+
+    // Members125 batch 2
+
+    /** 1.2.5 {@code addMovementStat(dx, dy, dz)}: counts the distance walked, swum, climbed or flown into the statistics and adds the movement's exhaustion. */
+    public void addMovementStat(double dx, double dy, double dz) {
+        var p = mcc$player();
+        if (p == null) return;
+        // the statistics and exhaustion of vanilla 1.2.5: cm of horizontal travel by kind, exhaustion per metre
+        int cm = Math.round((float) Math.sqrt(dx * dx + dz * dz) * 100.0F);
+        if (p.isInWater()) {
+            if (cm > 0) {
+                p.awardStat(net.minecraft.stats.Stats.SWIM_ONE_CM, cm);
+                p.causeFoodExhaustion(0.015F * cm * 0.01F);
+            }
+        } else if (p.onGround()) {
+            if (cm > 0) {
+                p.awardStat(p.isSprinting() ? net.minecraft.stats.Stats.SPRINT_ONE_CM : net.minecraft.stats.Stats.WALK_ONE_CM, cm);
+                p.causeFoodExhaustion((p.isSprinting() ? 0.1F : 0.01F) * cm * 0.01F);
+            }
+        } else if (dy > 0.0D && cm > 0) {
+            p.awardStat(net.minecraft.stats.Stats.CLIMB_ONE_CM, (int) Math.round(dy * 100.0D));
+        } else if (cm > 25) {
+            p.awardStat(net.minecraft.stats.Stats.FLY_ONE_CM, cm);
+        }
+    }
+
+    // Members125 batch 3
+
+    /** 1.2.5 {@code EntityPlayer.resetHeight()}: back to the standing height (mods that shrank the player to crawl restore it). */
+    public void resetHeight() {
+        if (mcc$player() != null) mcc$player().refreshDimensions();
     }
 }

@@ -164,6 +164,41 @@ public final class BetaJars {
     }
 
     /**
+     * The share of the jar's game references that resolve in Beta 1.7.3's names (better side), or -1 when the jar has no game references or the build has no Beta table.
+     * Used to keep a Beta jar from being taken as Minecraft 1.2.5 (the early obfuscations share many short names).
+     */
+    static double betaShare(ZipFile zip) {
+        Scan scan = new Scan();
+        Enumeration<? extends ZipEntry> entries = zip.entries();
+        while (entries.hasMoreElements()) {
+            ZipEntry e = entries.nextElement();
+            String name = e.getName();
+            if (e.isDirectory() || !name.endsWith(".class") || name.startsWith("META-INF/")) continue;
+            try (InputStream in = zip.getInputStream(e)) {
+                read(in.readAllBytes(), scan);
+            } catch (IOException | RuntimeException ex) {
+                // unreadable: does not count
+            }
+        }
+        BetaMappings mappings = BetaMappings.get();
+        if (mappings.isEmpty()) return -1;
+        int[] hits = new int[BetaMappings.Side.values().length];
+        int total = 0;
+        for (String ref : scan.gameRefs) {
+            String[] p = ref.split(" ", 4);
+            if (scan.classes.containsKey(p[1])) continue;
+            total++;
+            for (BetaMappings.Side side : BetaMappings.Side.values()) {
+                BetaMappings.Names names = mappings.side(side);
+                String hit = p[0].equals("F") ? names.resolveField(p[1], p[2], p[3]) : names.resolveMethod(p[1], p[2], p[3]);
+                if (hit != null) hits[side.ordinal()]++;
+            }
+        }
+        if (total == 0) return -1;
+        return Math.max(hits[0], hits[1]) / (double) total;
+    }
+
+    /**
      * Returns the jar as a b1.7.3 mod (version, mod declarations, side, index entries) or null. Called for jars the FML
      * inspection did not claim.
      */
@@ -185,6 +220,7 @@ public final class BetaJars {
             }
         }
         if (scan.classes.isEmpty()) return null;
+        scan.modClasses.removeIf(c -> !entryPoint(scan, c));
         Path parent = path.getParent();
         boolean inFolder = parent != null && parent.getFileName() != null && FOLDER.equals(parent.getFileName().toString());
         if (!inFolder && scan.modClasses.isEmpty() && scan.apiRefs == 0) return null;
@@ -221,6 +257,7 @@ public final class BetaJars {
         for (String modClass : scan.modClasses) {
             LegacyModDecl decl = new LegacyModDecl();
             decl.legacyId = modClass.substring(4);
+            decl.modernIdOverride = LegacyModDecl.betaModernId(decl.legacyId);
             decl.name = displayName(path, decl.legacyId);
             decl.version = "0.0.0-legacy";
             decl.mainClass = MOD_ROOT + pkg + "/" + modClass;
@@ -264,6 +301,22 @@ public final class BetaJars {
         for (int i = 2; used.contains(pkg); i++) pkg = sb + "_" + i;
         PACKAGES.put(path, pkg);
         return pkg;
+    }
+
+    /**
+     * A default-package {@code mod_*} class is a ModLoader entry point only when its superclass chain does not end in a game class or
+     * {@code java/*}: helper classes of a mod are often named {@code mod_Foo_GuiBed} and extend the obfuscated {@code GuiScreen}; constructing
+     * those as mods fails with NoSuchMethodException and counts as a failed mod.
+     */
+    static boolean entryPoint(Scan scan, String cls) {
+        String c = cls;
+        for (int i = 0; i < 32; i++) {
+            ClassMeta m = scan.classes.get(c);
+            if (m == null) return !(c.startsWith("java/") || looksLikeGameClass(c));
+            c = m.superName();
+            if (c == null) return false;
+        }
+        return true;
     }
 
     private static void read(byte[] bytes, Scan scan) {

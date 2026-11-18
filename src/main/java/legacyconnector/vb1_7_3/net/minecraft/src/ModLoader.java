@@ -19,6 +19,18 @@ import org.kylepitcock.legacyconnector.vb1_7_3.RecipesB173;
  * Methods that take client or world types (GUIs, renderers, key bindings) are synthesized for now.
  */
 public final class ModLoader {
+    public static void RegisterKey(BaseMod mod,legacyconnector.vb1_7_3.net.minecraft.client.option.KeyBinding key,boolean repeat){
+        org.kylepitcock.legacyconnector.vb1_7_3.KeyBindingsB173.register(mod,key,repeat);
+    }
+    public static boolean isGUIOpen(Class<?> type){return org.kylepitcock.legacyconnector.vb1_7_3.GuiQueriesB173.isOpen(type);}
+    public static void TakenFromCrafting(legacyconnector.vb1_7_3.net.minecraft.entity.player.PlayerEntity player,
+            legacyconnector.vb1_7_3.net.minecraft.item.ItemStack stack){
+        org.kylepitcock.legacyconnector.vb1_7_3.ItemEventsB173.taken(player,stack,false);
+    }
+    public static void TakenFromFurnace(legacyconnector.vb1_7_3.net.minecraft.entity.player.PlayerEntity player,
+            legacyconnector.vb1_7_3.net.minecraft.item.ItemStack stack){
+        org.kylepitcock.legacyconnector.vb1_7_3.ItemEventsB173.taken(player,stack,true);
+    }
     public static final String VERSION = "ModLoader Beta 1.7.3";
     private static final Logger LOGGER = Logger.getLogger("ModLoader");
 
@@ -73,6 +85,11 @@ public final class ModLoader {
     /** The one legacy client instance; its {@code world} is the level legacy code currently runs on. */
     public static legacyconnector.vb1_7_3.net.minecraft.client.Minecraft getMinecraftInstance() {
         return legacyconnector.vb1_7_3.net.minecraft.client.Minecraft.mcc$instance();
+    }
+
+    /** ModLoaderMP's server handle: usable from static initialisers (the layer has one logical server for every mod). */
+    public static legacyconnector.vb1_7_3.net.minecraft.server.MinecraftServer getMinecraftServerInstance() {
+        return legacyconnector.vb1_7_3.net.minecraft.server.MinecraftServer.mcc$instance();
     }
 
     public static boolean isModLoaded(String name) {
@@ -204,7 +221,7 @@ public final class ModLoader {
 
     public static synchronized int getUniqueBlockModelID(BaseMod mod, boolean full3DItem) {
         int id=nextBlockModelID++;
-        org.kylepitcock.legacyconnector.vb1_7_3.BlockRenderB173.register(id,mod);
+        org.kylepitcock.legacyconnector.vb1_7_3.BlockRenderB173.register(id,mod,full3DItem);
         return id;
     }
     public static void addAnimation(legacyconnector.vb1_7_3.net.minecraft.client.render.texture.DynamicTexture effect){org.kylepitcock.legacyconnector.vb1_7_3.AnimationsB173.add(effect);}

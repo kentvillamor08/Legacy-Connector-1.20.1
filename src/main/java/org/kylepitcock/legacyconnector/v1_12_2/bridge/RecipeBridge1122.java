@@ -71,12 +71,14 @@ public final class RecipeBridge1122 {
         var listed = legacyconnector.v1_12_2.net.minecraft.item.crafting.FurnaceRecipes.instance().getSmeltingList();
         Map<Object, net.minecraft.resources.ResourceLocation> ids = new java.util.IdentityHashMap<>();
         Set<String> used = new java.util.HashSet<>();
+        int emptyResults = 0;
         for (IRecipe r : RECIPES) {
             if (!Registries1122.RECIPES.containsValue(r)) continue; // removed (CraftTweaker, mods)
             try {
                 JsonObject json = r instanceof ShapedRecipes s ? shaped(s) : r instanceof ShapelessRecipes s ? shapeless(s) : null;
                 if (json == null) {
                     if (!(r instanceof ShapedRecipes) && !(r instanceof ShapelessRecipes)) LOG.debug("Recipe class {} is not bridged yet", r.getClass().getName());
+                    else dropped(r, "an ingredient cannot be expressed (missing item or empty ore name)");
                     continue;
                 }
                 var name = r.getRegistryName();
@@ -85,8 +87,19 @@ public final class RecipeBridge1122 {
                 byte[] bytes = GSON.toJson(json).getBytes(StandardCharsets.UTF_8);
                 out.put("data/" + ns + "/recipe/" + path + ".json", () -> bytes);
             } catch (RuntimeException e) {
-                LOG.warn("Could not translate legacy recipe {}: {}", r.getRegistryName(), e.toString());
+                // A recipe whose result item does not exist: the mod's blocks and items did not register (a required library is missing, the load
+                // report says which): one summary line instead of one per recipe.
+                if (String.valueOf(e.getMessage()).contains("empty result")) {
+                    emptyResults++;
+                    LOG.debug("Could not translate legacy recipe {}: {}", r.getRegistryName(), e.toString());
+                } else {
+                    LOG.warn("Could not translate legacy recipe {}: {}", r.getRegistryName(), e.toString());
+                }
+                dropped(r, e.toString());
             }
+        }
+        if (emptyResults > 0) {
+            LOG.warn("{} legacy recipes were dropped because their result is empty (items or blocks that are not registered; usually a mod whose required library is missing: see MISSING DEPENDENCY in the load report)", emptyResults);
         }
         for (Object[] s : SMELTING) {
             if (!listed.containsKey(s[0])) continue;
@@ -95,7 +108,10 @@ public final class RecipeBridge1122 {
                 o.addProperty("type", "minecraft:smelting");
                 o.addProperty("category", "misc");
                 JsonElement ing = ingredient(Ingredient.fromStacks((ItemStack) s[0]));
-                if (ing == null) continue;
+                if (ing == null) {
+                    org.kylepitcock.legacyconnector.core.problems.LegacyProblems.record(org.kylepitcock.legacyconnector.core.problems.LegacyProblems.Kind.DROPPED_RECIPE, "(smelting)", "smelting " + s[0], "the input cannot be expressed");
+                    continue;
+                }
                 o.add("ingredient", ing);
                 o.add("result", result((ItemStack) s[1]));
                 o.addProperty("experience", (Float) s[2]);
@@ -136,6 +152,16 @@ public final class RecipeBridge1122 {
         if (id == null) return false;
         var server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
         return server != null && server.getRecipeManager().byKey(id).isEmpty();
+    }
+
+    private static void dropped(IRecipe r, String why) {
+        try {
+            var name = r.getRegistryName();
+            org.kylepitcock.legacyconnector.core.problems.LegacyProblems.record(org.kylepitcock.legacyconnector.core.problems.LegacyProblems.Kind.DROPPED_RECIPE,
+                    name == null ? "(unnamed)" : Ids.modernModId(name.getNamespace()), String.valueOf(name), why);
+        } catch (RuntimeException e) {
+            // a recipe that cannot name itself is not worth more than the warning already logged
+        }
     }
 
     private static JsonObject shaped(ShapedRecipes s) {

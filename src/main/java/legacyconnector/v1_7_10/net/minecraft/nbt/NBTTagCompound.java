@@ -9,6 +9,7 @@ import net.minecraft.nbt.IntArrayTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 
+@com.google.gson.annotations.JsonAdapter(org.kylepitcock.legacyconnector.v1_7_10.bridge.LegacyGson1710.CompoundAdapter.class)
 public class NBTTagCompound extends NBTBase {
     private final CompoundTag mcc$tag;
     /** Child views handed out, so repeated getCompoundTag(key) calls return the same object like in 1.7.10. */
@@ -312,5 +313,20 @@ public class NBTTagCompound extends NBTBase {
     @Override
     public NBTBase copy() {
         return new NBTTagCompound(mcc$tag.copy());
+    }
+
+    // Members125 batch 3
+
+    /** 1.2.5 {@code NBTBase.write(output)}: the payload of the compound (its entries and the end marker, without the tag id and name). */
+    public void write(java.io.DataOutput output) throws java.io.IOException {
+        mcc$tag.write(output);
+    }
+
+    /** 1.2.5 {@code NBTBase.load(input)}: replaces the entries with the payload read from {@code input}. */
+    public void load(java.io.DataInput input) throws java.io.IOException {
+        CompoundTag read = CompoundTag.TYPE.load(input, net.minecraft.nbt.NbtAccounter.unlimitedHeap());
+        for (String key : new java.util.ArrayList<>(mcc$tag.getAllKeys())) mcc$tag.remove(key);
+        mcc$children.clear();
+        mcc$tag.merge(read);
     }
 }

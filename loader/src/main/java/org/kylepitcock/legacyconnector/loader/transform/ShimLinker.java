@@ -9,6 +9,7 @@ import org.kylepitcock.legacyconnector.loader.shim.ShimIndex;
 import org.kylepitcock.legacyconnector.loader.synth.CtorChooser;
 import org.kylepitcock.legacyconnector.loader.synth.SynthDemand;
 import org.kylepitcock.legacyconnector.loader.synth.SynthDemand.Kind;
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
@@ -16,6 +17,7 @@ import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.InsnList;
 import org.objectweb.asm.tree.InsnNode;
+import org.objectweb.asm.tree.InvokeDynamicInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.TypeInsnNode;
@@ -49,9 +51,18 @@ public final class ShimLinker {
 
     public static int apply(ClassNode node, Hierarchy hierarchy, LinkReport report, SynthDemand demand) {
         int redirected = 0;
+        report.lostOptionalInterface = owner -> {
+            for (String c = owner; c != null && !c.startsWith("java/"); ) {
+                if (report.optionalRemoved.contains(c + ".<interface>")) return true;
+                var info = hierarchy.find(c);
+                c = info == null ? null : info.superName;
+            }
+            return false;
+        };
         for (MethodNode method : node.methods) {
             InsnList insns = method.instructions;
             for (AbstractInsnNode insn = insns.getFirst(); insn != null; insn = insn.getNext()) {
+                if (demand != null) interfaceEvidence(insn, hierarchy, demand);
                 if (insn instanceof FieldInsnNode f && f.getOpcode() == Opcodes.PUTSTATIC && isVanillaSingletonHolder(f.owner)
                         && f.desc.startsWith("L")) {
                     // dup; getstatic <the same field>; invokestatic adopt(Object, Object); putstatic
@@ -111,6 +122,26 @@ public final class ShimLinker {
             if (demand != null && hierarchy.isSynth(iface)) demand.interfaces.add(iface);
         }
         return redirected;
+    }
+
+    /**
+     * Usage that only an interface allows, for a type that is synthesized: {@code invokeinterface} or an interface method ref, a lambda or
+     * method reference producing it (the {@code invokedynamic} descriptor returns the functional interface), or a handle to one of its
+     * interface methods. Implementing it is recorded from the class header; together they decide, across the whole mod set, whether the
+     * generated placeholder is an interface (everything else is a plain, extendable class).
+     */
+    static void interfaceEvidence(AbstractInsnNode insn, Hierarchy hierarchy, SynthDemand demand) {
+        if (insn instanceof MethodInsnNode m) {
+            if ((m.itf || m.getOpcode() == Opcodes.INVOKEINTERFACE) && !m.owner.startsWith("[") && hierarchy.isSynth(m.owner)) {
+                demand.interfaces.add(m.owner);
+            }
+        } else if (insn instanceof InvokeDynamicInsnNode d) {
+            Type ret = Type.getReturnType(d.desc);
+            if (ret.getSort() == Type.OBJECT && hierarchy.isSynth(ret.getInternalName())) demand.interfaces.add(ret.getInternalName());
+            for (Object arg : d.bsmArgs) {
+                if (arg instanceof Handle h && h.isInterface() && hierarchy.isSynth(h.getOwner())) demand.interfaces.add(h.getOwner());
+            }
+        }
     }
 
     // ------------------------------------------------------------------ synthesis
@@ -206,11 +237,21 @@ public final class ShimLinker {
         }
         if (l != Hierarchy.Lookup.MISSING_MEMBER && l != Hierarchy.Lookup.MISSING_CLASS) return null;
 
-        if (!m.name.equals("<init>") && m.getOpcode() != Opcodes.INVOKESPECIAL && h.version() != null && h.version().forward() != null) {
+        if (!m.name.equals("<init>") && h.version() != null && h.version().forward() != null) {
             // A forward version's facade (legacyconnector/v1_6_4/...) supplies the legacy methods the shim lacks, e.g. World.getBlockId(III) over the id table.
-            String[] facade = h.findFacadeMethod(m.owner, m.name, m.desc, m.getOpcode() == Opcodes.INVOKESTATIC);
+            // A mod's own "super.x()" (INVOKESPECIAL) goes the same way: the receiver on the stack is the mod object and the facade method is static with
+            // the receiver first, so INVOKESTATIC takes the stack as it is. The facade then implements the base behaviour: it must not call x() virtually.
+            // When the plain facade method dispatches to the mod's override (getIconFromDamage reflects on the item's class), a super call must not
+            // reach it: the facade then declares the base behaviour as "mcc$super$<name>", which a super call prefers over the plain form.
+            String[] facade = null;
+            String target = m.name;
+            if (m.getOpcode() == Opcodes.INVOKESPECIAL) {
+                facade = h.findFacadeMethod(m.owner, "mcc$super$" + m.name, m.desc, false);
+                if (facade != null) target = "mcc$super$" + m.name;
+            }
+            if (facade == null) facade = h.findFacadeMethod(m.owner, m.name, m.desc, m.getOpcode() == Opcodes.INVOKESTATIC);
             if (facade != null) {
-                MethodInsnNode call = new MethodInsnNode(Opcodes.INVOKESTATIC, facade[0], m.name, facade[1], false);
+                MethodInsnNode call = new MethodInsnNode(Opcodes.INVOKESTATIC, facade[0], target, facade[1], false);
                 method.instructions.set(m, call);
                 report.adapted(m.owner, m.name + m.desc + " -> " + facade[0], from);
                 return call;
@@ -293,7 +334,7 @@ public final class ShimLinker {
 
     /**
      * The shim lacks {@code owner.name(desc)} but declares the same method with the same return type and the same arguments except that some
-     * primitive ones are wider (float to double, int to long...), or a number return of another type: spill the arguments, widen the differing ones, call that and convert the result. Only done when
+     * primitive ones are wider (or reference ones are subtypes of the declared type) (float to double, int to long...), or a number return of another type: spill the arguments, widen the differing ones, call that and convert the result. Only done when
      * exactly one such method exists on the owner's superclass chain.
      */
     private static AbstractInsnNode widenedMethod(MethodNode method, MethodInsnNode m, Hierarchy h, LinkReport report, String from) {
@@ -314,7 +355,7 @@ public final class ShimLinker {
                 Type ret = Type.getReturnType(d);
                 if (!ret.equals(wantedRet) && returnConversion(ret, wantedRet) < 0) continue;
                 boolean ok = true;
-                for (int i = 0; i < args.length && ok; i++) ok = args[i].equals(target[i]) || CtorChooser.widens(args[i], target[i]);
+                for (int i = 0; i < args.length && ok; i++) ok = args[i].equals(target[i]) || CtorChooser.widens(args[i], target[i]) || referenceNarrower(args[i], target[i], h);
                 if (!ok) continue;
                 if (found != null && !found.equals(d)) return null;   // ambiguous
                 found = d;
@@ -346,6 +387,12 @@ public final class ShimLinker {
         int conv = returnConversion(Type.getReturnType(found), wantedRet);
         if (conv >= 0) method.instructions.insert(m, new InsnNode(conv));
         return m;
+    }
+
+    /** A call argument of reference type {@code arg} where the shim's method declares a supertype of it (1.5.2's EntityLiving where 1.7.10 takes EntityLivingBase): passes as is. */
+    private static boolean referenceNarrower(Type arg, Type target, Hierarchy h) {
+        return arg.getSort() == Type.OBJECT && target.getSort() == Type.OBJECT && !target.getInternalName().equals("java/lang/Object")
+                && h.isSubclassOf(arg.getInternalName(), target.getInternalName());
     }
 
     /** The instruction turning a returned number of type {@code from} into {@code to} (1.5.2's int damage became a float in 1.7.10), or -1. */
@@ -491,7 +538,7 @@ public final class ShimLinker {
     private static void checkLibrary(Hierarchy hierarchy, LinkReport report, String from, String owner, String member, Hierarchy.Lookup l) {
         if (l == null) return;
         if (l == Hierarchy.Lookup.MISSING_CLASS) {
-            report.externalClass(owner, from);
+            report.absentClass(hierarchy, owner, from);
         } else if (l == Hierarchy.Lookup.MISSING_MEMBER) {
             report.missingMember(owner, member, from, false);
         }

@@ -8,7 +8,7 @@ import legacyconnector.v1_12_2.net.minecraft.util.SoundEvent;
 public class EnumHelper {
     public static ItemArmor.ArmorMaterial addArmorMaterial(String name, String textureName, int durability, int[] reductionAmounts, int enchantability,
             SoundEvent soundOnEquip, float toughness) {
-        return new ItemArmor.ArmorMaterial(name, durability, reductionAmounts, enchantability, soundOnEquip, toughness);
+        return new ItemArmor.ArmorMaterial(name, textureName, durability, reductionAmounts, enchantability, soundOnEquip, toughness);
     }
 
     public static Item.ToolMaterial addToolMaterial(String name, int harvestLevel, int maxUses, float efficiency, float damage, int enchantability) {
@@ -50,6 +50,23 @@ public class EnumHelper {
     public static legacyconnector.v1_12_2.net.minecraft.block.BlockPressurePlate.Sensitivity addSensitivity(String name) {
         return org.kylepitcock.legacyconnector.core.LegacyEnums.add(legacyconnector.v1_12_2.net.minecraft.block.BlockPressurePlate.Sensitivity.class, name,
                 new Class<?>[0], new Object[0]);
+    }
+
+    /** Adds a horse armour tier: {@code texture} is the resource path of its layer texture, the hash is the constant's lower-case name. */
+    public static legacyconnector.v1_12_2.net.minecraft.entity.passive.HorseArmorType addHorseArmor(String name, String texture, int armorStrength) {
+        String key = name.toLowerCase(java.util.Locale.ROOT);
+        return addEnum(legacyconnector.v1_12_2.net.minecraft.entity.passive.HorseArmorType.class, name, armorStrength, key, key, texture);
+    }
+
+    /** Adds a spawn placement type whose rule is the given test (mobs placed this way spawn where it holds). */
+    public static legacyconnector.v1_12_2.net.minecraft.entity.EntityLiving.SpawnPlacementType addSpawnPlacementType(String name,
+            java.util.function.BiPredicate<legacyconnector.v1_12_2.net.minecraft.world.IBlockAccess, legacyconnector.v1_12_2.net.minecraft.util.math.BlockPos> predicate) {
+        return addEnum(legacyconnector.v1_12_2.net.minecraft.entity.EntityLiving.SpawnPlacementType.class, name, predicate);
+    }
+
+    /** Adds a painting art (title, size and texture offset in pixels); the painting view finds it by its title. */
+    public static legacyconnector.v1_12_2.net.minecraft.entity.item.EntityPainting.EnumArt addArt(String name, String tile, int sizeX, int sizeY, int offsetX, int offsetY) {
+        return addEnum(legacyconnector.v1_12_2.net.minecraft.entity.item.EntityPainting.EnumArt.class, name, tile, sizeX, sizeY, offsetX, offsetY);
     }
 
     /** Adds a constant to a real enum (a synthesized or the mod's own); parameter types inferred from the values. */

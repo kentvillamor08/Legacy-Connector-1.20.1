@@ -26,6 +26,31 @@ public class EntitySlime extends EntityLiving implements IMob {
         return dataWatcher.getWatchableObjectByte(16);
     }
 
+    /** The sound of a jump: the big or the small squish. */
+    protected String getJumpSound() {
+        return "mob.slime." + (getSlimeSize() > 1 ? "big" : "small");
+    }
+
+    /** Whether the slime squishes when it jumps (every size above 0, so none of the tiniest ones in 1.7.10 terms). */
+    protected boolean makesSoundOnJump() {
+        return getSlimeSize() > 0;
+    }
+
+    /** The squash of the body after a landing, shown by the renderer and eased back to zero by {@link #alterSquishAmount}. */
+    public float squishAmount;
+    public float squishFactor;
+    public float prevSquishFactor;
+
+    /** Eases the squash of the body (each tick it keeps 80% of it). */
+    protected void alterSquishAmount() {
+        this.squishAmount *= 0.8F;
+    }
+
+    /** Whether landing makes the squish sound: the bigger slimes only. */
+    protected boolean makesSoundOnLand() {
+        return getSlimeSize() > 2;
+    }
+
     /** Ticks between two jumps (10 to 29); subclasses shorten or lengthen it. */
     protected int getJumpDelay() {
         return (int) (Math.random() * 20.0D) + 10;

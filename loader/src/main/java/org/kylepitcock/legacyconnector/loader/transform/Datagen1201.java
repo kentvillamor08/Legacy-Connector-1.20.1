@@ -51,7 +51,7 @@ final class Datagen1201 {
     private static final Set<String> DATAGEN_CLASSES = Set.of(
             "net/minecraft/data/DataProvider", "net/minecraft/data/DataGenerator", "net/minecraft/data/CachedOutput", "net/minecraft/data/HashCache",
             "net/minecraft/data/PackOutput", "net/minecraft/data/PackOutput$Target", "net/minecraft/data/BlockFamilies", "net/minecraft/data/BlockFamily",
-            "net/minecraft/data/BlockFamily$Variant", "net/minecraft/advancements/Advancement$Builder", "net/minecraft/advancements/AdvancementHolder$Builder", "net/minecraft/advancements/CriterionTriggerInstance", "net/minecraft/data/worldgen/BootstapContext",
+            "net/minecraft/data/BlockFamily$Variant", "net/minecraft/advancements/Advancement$Builder", "net/minecraft/advancements/AdvancementHolder$Builder", "net/minecraft/data/worldgen/BootstapContext",
             "net/minecraft/data/worldgen/BootstrapContext", "net/minecraft/world/level/storage/loot/LootDataId");
 
     /** Other mods' data generation classes by name (library providers, a package called datagen, record builders). */
@@ -80,18 +80,20 @@ final class Datagen1201 {
             changed = false;
             for (ClassNode n : nodes) {
                 if (datagen.contains(n.name) || (n.access & Opcodes.ACC_ENUM) != 0) continue;
-                if (isDatagenClass(n, datagen)) {
+                if (isDatagenClass(n, datagen, byName)) {
                     datagen.add(n.name);
                     changed = true;
                 }
             }
         }
+        VIEW.set(new JarView(byName.keySet(), datagen));
+        try {
         for (ClassNode n : nodes) {
             if (datagen.contains(n.name)) {
                 shell(n, byName.keySet());
                 stats.classes++;
             }
-            for (MethodNode m : n.methods) if (emptyIfDatagen(m)) stats.methods++;
+            for (MethodNode m : n.methods) if (emptyIfDatagen(m, byName.keySet(), datagen)) stats.methods++;
             if (!datagen.contains(n.name)) {
                 // abstract methods that only datagen implementations override
                 int before = n.methods.size();
@@ -99,20 +101,43 @@ final class Datagen1201 {
                 stats.methods += before - n.methods.size();
             }
         }
+        } finally {
+            VIEW.remove();
+        }
         return stats;
     }
 
-    private static boolean isDatagenClass(ClassNode n, Set<String> known) {
+    private static boolean isDatagenClass(ClassNode n, Set<String> known, Map<String, ClassNode> byName) {
+        // by name alone only a class that has a super class to be a provider of (a plain builder or record is used at run time too: AE2's EntropyRecipeBuilder)
         if ((n.access & Opcodes.ACC_INTERFACE) == 0 && DATAGEN_NAME.matcher(n.name).matches()
-                && !(n.superName != null && n.superName.startsWith("net/minecraft/world/level/levelgen/"))) return true;
-        if (datagenSuper(n.superName, known)) return true;
-        if (n.interfaces != null) for (String i : n.interfaces) if (datagenSuper(i, known)) return true;
+                && !"java/lang/Object".equals(n.superName) && !"java/lang/Record".equals(n.superName)
+                && !extendsLevelgen(n, byName)) return true;
+        if (datagenSuper(n.superName, known, byName)) return true;
+        // a class that extends a runtime game class (a block entity, an entity...) is not a data generator because it implements an interface whose NAME looks like one
+        // (Immersive Engineering's IEBlockInterfaces.BlockstateProvider, a block state interface of its block entities)
+        boolean runtimeSuper = n.superName != null && (n.superName.startsWith("net/minecraft/") || n.superName.startsWith("net/minecraftforge/"))
+                && !n.superName.startsWith("net/minecraft/data/") && !n.superName.contains("/data/") && !n.superName.contains("/datagen/");
+        if (!runtimeSuper && n.interfaces != null) for (String i : n.interfaces) if (datagenSuper(i, known, byName)) return true;
         int dollar = n.name.lastIndexOf('$');
         if (dollar > 0 && known.contains(n.name.substring(0, dollar))) return true;
         return false;
     }
 
-    private static boolean datagenSuper(String name, Set<String> known) {
+    /** A class whose super chain (through the jar's own classes) reaches a world generation class: a state provider of the mod's trees is not model data generation. */
+    private static boolean extendsLevelgen(ClassNode n, Map<String, ClassNode> byName) {
+        String sup = n.superName;
+        for (int depth = 0; sup != null && depth < 16; depth++) {
+            if (sup.startsWith("net/minecraft/world/level/levelgen/")) return true;
+            ClassNode next = byName.get(sup);
+            if (next == null) return false;
+            sup = next.superName;
+        }
+        return false;
+    }
+
+    private static boolean datagenSuper(String name, Set<String> known, Map<String, ClassNode> byName) {
+        // a super class of the jar is decided by its own (earlier) verdict; only classes of other jars and of the game are judged by name
+        if (name != null && byName.containsKey(name)) return known.contains(name);
         return name != null && (known.contains(name) || datagenName(name));
     }
 
@@ -130,7 +155,8 @@ final class Datagen1201 {
         n.invisibleTypeAnnotations = null;
         n.recordComponents = null;
         n.permittedSubclasses = null;
-        n.nestMembers = null;
+        // nested classes stay nest members of this host: a shell nest member keeps its static helpers, and its private ones are reached from the host (Mantle's MantleTags.Blocks.init)
+        if (n.nestMembers != null) n.nestMembers = new ArrayList<>(n.nestMembers.stream().filter(jar::contains).toList());
         // the super class becomes Object unless it is another class of the jar (which is a shell too, or kept as it was)
         if (n.superName != null && !jar.contains(n.superName) && !n.superName.equals("java/lang/Record")) n.superName = "java/lang/Object";
         List<MethodNode> kept = new ArrayList<>();
@@ -166,14 +192,14 @@ final class Datagen1201 {
     }
 
     /** A method of a normal class that is only reachable from data generation returns the default value. */
-    private static boolean emptyIfDatagen(MethodNode m) {
+    private static boolean emptyIfDatagen(MethodNode m, Set<String> jar, Set<String> datagenClasses) {
         if (m.instructions == null || m.instructions.size() == 0 || (m.access & (Opcodes.ACC_ABSTRACT | Opcodes.ACC_NATIVE)) != 0) return false;
         if (m.name.equals("<init>") || m.name.equals("<clinit>")) return false;
         boolean datagen = descriptorUsesDatagen(m.desc);
         for (Type t : Type.getArgumentTypes(m.desc)) {
             if (t.getSort() == Type.OBJECT && t.getInternalName().equals("net/neoforged/neoforge/data/event/GatherDataEvent")) datagen = true;
         }
-        if (!datagen) datagen = usesDatagenOnly(m);
+        if (!datagen) datagen = usesDatagenOnly(m, jar, datagenClasses);
         if (!datagen) return false;
         m.signature = null;
         m.instructions.clear();
@@ -214,18 +240,37 @@ final class Datagen1201 {
         return datagenType(Type.getReturnType(desc));
     }
 
+    /** The jar being processed and the classes judged datagen in it: a jar class in a descriptor counts by that verdict, not by its name (AE2's EntropyRecipeBuilder returns itself). */
+    private record JarView(Set<String> jar, Set<String> datagen) {}
+
+    private static final ThreadLocal<JarView> VIEW = new ThreadLocal<>();
+
     private static boolean datagenType(Type t) {
         if (t.getSort() == Type.ARRAY) t = t.getElementType();
-        return t.getSort() == Type.OBJECT && datagenName(t.getInternalName());
+        if (t.getSort() != Type.OBJECT) return false;
+        JarView v = VIEW.get();
+        if (v != null && v.jar.contains(t.getInternalName())) return v.datagen.contains(t.getInternalName());
+        return datagenName(t.getInternalName());
     }
 
-    private static boolean usesDatagenOnly(MethodNode m) {
+    private static final java.util.regex.Pattern DATAGEN_ROLE = java.util.regex.Pattern.compile("(?i).*(Provider|Builder|Generator|Datagen|Recipe|Loot|Advancement|Language|Model|State|Output).*");
+
+    private static boolean usesDatagenOnly(MethodNode m, Set<String> jar, Set<String> datagenClasses) {
         for (AbstractInsnNode in : m.instructions) {
             String owner = null;
             if (in instanceof MethodInsnNode mi) owner = mi.owner;
             else if (in instanceof FieldInsnNode fi) owner = fi.owner;
             else if (in instanceof TypeInsnNode ti) owner = ti.desc;
             else if (in instanceof MultiANewArrayInsnNode) continue;
+            // a static member of the jar's own class in a package called datagen is a plain utility the shell keeps (a mod's tag-key factory used at run time)
+            // a static constant of a provider class of the jar (Ars Nouveau BlockTagProvider.FLOURISHING_LOGS): the shell keeps its static fields
+            if (in instanceof FieldInsnNode sf && sf.getOpcode() == Opcodes.GETSTATIC && jar.contains(sf.owner) && !datagenType(Type.getType(sf.desc))) continue;
+            if (owner != null && jar.contains(owner) && !DATAGEN_ROLE.matcher(owner.substring(owner.lastIndexOf('/') + 1)).matches() && (in.getOpcode() == Opcodes.INVOKESTATIC || in.getOpcode() == Opcodes.GETSTATIC)) continue;
+            // a class of the jar is judged by the verdict on the class (not by its name): AE2's EntropyRecipeBuilder is also what its recipe serializer reads JSON with
+            if (owner != null && jar.contains(owner)) {
+                if (datagenClasses.contains(owner)) return true;
+                continue;
+            }
             if (owner != null && datagenName(owner)) return true;
         }
         return false;

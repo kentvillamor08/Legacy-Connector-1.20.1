@@ -10,11 +10,14 @@ import org.joml.Matrix4f;
 /** Beta model rendering state, shared by the client adapter and graphics-free callback tests. */
 public final class RendererContextB173 {
     public record Style(boolean texture2d,boolean lighting,boolean depthTest,boolean depthWrite,boolean blend,int blendSrc,int blendDst,int depthFunc,Matrix4f textureMatrix){}
+    public record Normal(float x,float y,float z){}
+    private record CurrentAttributes(int mask,int argb,Normal normal){}
     public record Vertex(double x,double y,double z,double u,double v,int argb,float nx,float ny,float nz){}
     public interface Extras {
         default void item(legacyconnector.vb1_7_3.net.minecraft.entity.LivingEntity entity,legacyconnector.vb1_7_3.net.minecraft.item.ItemStack stack,Matrix4f transform,Style style){}
         default void text(String text,float x,float y,int argb,boolean shadow,Matrix4f transform,Style style){}
         default void quad(List<Vertex> vertices,Matrix4f transform,ResourceLocation texture,Style style){}
+        default void line(Vertex start,Vertex end,Matrix4f transform,Style style){}
         default int width(String text){return text==null?0:text.replaceAll("§.","").length()*6;}
         default legacyconnector.vb1_7_3.net.minecraft.entity.LivingEntity camera(){return null;}
         default float yaw(){return 0;}
@@ -31,6 +34,8 @@ public final class RendererContextB173 {
         final java.util.Map<Integer,String> textureIds=new java.util.HashMap<>();
         ResourceLocation texture=ResourceLocation.withDefaultNamespace("missingno");
         int argb=-1;
+        Normal normal=new Normal(0,0,1);
+        final ArrayDeque<CurrentAttributes> currentAttributes=new ArrayDeque<>();
         int matrixMode=5888,blendSrc=770,blendDst=771,depthFunc=515;
         boolean texture2d=true,lighting=true,depthTest=true,depthWrite=true,blend;
         State(Function<String,ResourceLocation> textures,BiConsumer<ModelGeometryB173.Draw,ResourceLocation> sink,Extras extras){this.textures=textures;this.sink=sink;this.extras=extras;poses.push(new Matrix4f());texturePoses.push(new Matrix4f());}
@@ -46,7 +51,23 @@ public final class RendererContextB173 {
     public static Scope open(Function<String,ResourceLocation> textures,BiConsumer<ModelGeometryB173.Draw,ResourceLocation> sink,Extras extras){var previous=CURRENT.get();CURRENT.set(new State(textures,sink,extras));return new Scope(previous);}
     public static boolean active(){return CURRENT.get()!=null;}
     public static Matrix4f matrix(){return new Matrix4f(CURRENT.get().poses.peek());}
+    /** The camera's view rotation (installed by the client): Beta's GL modelview included it, the native pose does not. */
+    public static volatile java.util.function.Supplier<Matrix4f> VIEW_ROTATION;
+    private static Matrix4f view(){var view=VIEW_ROTATION;Matrix4f m=view==null?null:view.get();return m==null?new Matrix4f():m;}
+    /** Beta's glGetFloat(GL_MODELVIEW_MATRIX): the view rotation times the current matrix, column-major. */
+    public static void modelView(java.nio.FloatBuffer out){float[] values=new float[16];view().mul(CURRENT.get().poses.peek(),new Matrix4f()).get(values);int at=out.position();for(int i=0;i<16;i++)out.put(at+i,values[i]);}
+    /** Beta's glLoadMatrix of a modelview (a billboard that cleared its rotation): the view rotation is taken back out of it. */
+    public static void loadModelView(java.nio.FloatBuffer in){float[] values=new float[16];int at=in.position();for(int i=0;i<16;i++)values[i]=in.get(at+i);
+        var loaded=new Matrix4f().set(values);var s=CURRENT.get();if(s.matrixMode==5890){s.texturePoses.peek().set(loaded);return;}s.poses.peek().set(view().invert(new Matrix4f()).mul(loaded));}
     public static int argb(){return CURRENT.get().argb;}
+    public static Normal normal(){return CURRENT.get().normal;}
+    public static void normal(float x,float y,float z){CURRENT.get().normal=new Normal(x,y,z);}
+    /** GL_CURRENT_BIT saves current attributes, independently of either matrix stack. */
+    public static void pushCurrentAttributes(int mask){var s=CURRENT.get();s.currentAttributes.push(new CurrentAttributes(mask,s.argb,s.normal));}
+    public static void popCurrentAttributes(){
+        var s=CURRENT.get();if(s.currentAttributes.isEmpty())throw new IllegalStateException("Unbalanced Beta renderer attribute pop");
+        var previous=s.currentAttributes.pop();if((previous.mask()&1)!=0){s.argb=previous.argb();s.normal=previous.normal();}
+    }
     public static ResourceLocation texture(){return CURRENT.get().texture;}
     public static Style style(){var s=CURRENT.get();return new Style(s.texture2d,s.lighting,s.depthTest,s.depthWrite,s.blend,s.blendSrc,s.blendDst,s.depthFunc,new Matrix4f(s.texturePoses.peek()));}
     public static void push(){var stack=CURRENT.get().stack();stack.push(new Matrix4f(stack.peek()));}
@@ -57,7 +78,7 @@ public final class RendererContextB173 {
     public static void scale(float x,float y,float z){CURRENT.get().stack().peek().scale(x,y,z);}
     public static void rotate(float degrees,float x,float y,float z){float length=(float)Math.sqrt(x*x+y*y+z*z);if(length>0)CURRENT.get().stack().peek().rotate((float)Math.toRadians(degrees),x/length,y/length,z/length);}
     public static void transform(Matrix4f matrix){CURRENT.get().stack().peek().mul(matrix);}
-    public static void enable(int cap,boolean enabled){var s=CURRENT.get();switch(cap){case 3553->s.texture2d=enabled;case 2896->s.lighting=enabled;case 2929->s.depthTest=enabled;case 3042->s.blend=enabled;case 32826,2977,3008,2884->{}default->throw new UnsupportedOperationException("Beta render capability "+cap);}}
+    public static void enable(int cap,boolean enabled){var s=CURRENT.get();switch(cap){case 3553->s.texture2d=enabled;case 2896->s.lighting=enabled;case 2929->s.depthTest=enabled;case 3042->s.blend=enabled;case 32826,2977,3008,2884,32823->{}default->throw new UnsupportedOperationException("Beta render capability "+cap);}}
     public static void blendFunc(int src,int dst){var s=CURRENT.get();s.blendSrc=src;s.blendDst=dst;}
     public static void depthMask(boolean write){CURRENT.get().depthWrite=write;}
     public static void depthFunc(int func){CURRENT.get().depthFunc=func;}
@@ -70,5 +91,6 @@ public final class RendererContextB173 {
     public static void text(String text,float x,float y,int argb,boolean shadow){var s=CURRENT.get();s.extras.text(text,x,y,argb,shadow,matrix(),style());}
     public static int width(String text){return CURRENT.get().extras.width(text);}
     public static void quad(List<Vertex> vertices){if(vertices.size()!=4)throw new IllegalArgumentException("Beta quad requires four vertices");var s=CURRENT.get();s.extras.quad(List.copyOf(vertices),matrix(),s.texture,style());}
+    public static void line(Vertex start,Vertex end){var s=CURRENT.get();s.extras.line(start,end,matrix(),style());}
     public static void draw(ModelGeometryB173.Draw draw){var s=CURRENT.get();s.sink.accept(new ModelGeometryB173.Draw(draw.cuboids(),new Matrix4f(s.poses.peek()).mul(draw.transform()),draw.scale()),s.texture);}
 }

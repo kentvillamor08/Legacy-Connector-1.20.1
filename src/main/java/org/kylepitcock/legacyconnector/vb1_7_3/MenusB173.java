@@ -47,8 +47,10 @@ public final class MenusB173 {
     public static void withActor(ServerPlayer player,Runnable callback){
         Actor previous=ACTOR.get();if(previous!=null&&previous.player==player){callback.run();return;}
         Actor actor=new Actor(player);ACTOR.set(actor);boolean completed=false;
-        try{callback.run();completed=true;}
-        finally{
+        try{
+            var view=PlayerViewB173.peek(player);if(view==null)view=PlayerViewB173.of(player);
+            try(var context=legacyconnector.vb1_7_3.net.minecraft.client.Minecraft.mcc$context(legacyconnector.vb1_7_3.net.minecraft.world.World.mcc$wrap(player.level()),view)){callback.run();completed=true;}
+        }finally{
             if(previous==null)ACTOR.remove();else ACTOR.set(previous);
             if(completed&&actor.pending)dispatchScreen(player,actor.requested);
         }
@@ -58,6 +60,8 @@ public final class MenusB173 {
     static boolean hasPendingScreen(ServerPlayer player){Actor actor=ACTOR.get();return actor!=null&&actor.player==player&&actor.pending;}
     private static void requestScreen(ServerPlayer player,Screen screen){Actor actor=ACTOR.get();if(actor!=null&&actor.player==player){actor.requested=screen;actor.pending=true;}else dispatchScreen(player,screen);}
     private static void dispatchScreen(ServerPlayer player,Screen screen){
+        var route=NativeScreenRoutesB173.route(screen);
+        if(route!=NativeScreenRoutesB173.Route.ORIGINAL){GuiSessionsB173.openNative(player,route);return;}
         if(screen instanceof HandledScreen handled&&handled.container!=null){GuiSessionsB173.open(player,null);openMenu(player,handled.container,screen);}
         else {GuiSessionsB173.open(player,screen);if(screen==null&&player.containerMenu!=player.inventoryMenu)player.closeContainer();}
     }
@@ -85,6 +89,7 @@ public final class MenusB173 {
     private MenusB173() {}
 
     public static void setMenuType(MenuType<LegacyB173Menu> t) {
+        HudOverlayB173.install();
         type = t;
         GuiSessionsB173.install();
     }
@@ -116,6 +121,7 @@ public final class MenusB173 {
     /** {@code ModLoader.OpenGUI(player, gui)}. */
     public static void open(PlayerEntity player, Screen gui) {
         if (gui == null) return;
+        if (PlayerInventoryNetworkB173.offer(player,gui)) return;
         Player p = modern(player);
         trace("OpenGUI({}) by {} on the {} side", gui.getClass().getName(), p == null ? "an unknown player" : p.getGameProfile().getName(),
                 p == null ? "unknown" : p.level().isClientSide ? "client" : "server");
@@ -138,7 +144,11 @@ public final class MenusB173 {
         int handoff = gui != null && localHost(sp) ? NEXT.incrementAndGet() : 0;
         if (handoff != 0) HANDOFF.put(handoff, gui);
         try {
-            var opened = sp.openMenu(new SimpleMenuProvider((id, inv, pl) -> new LegacyB173Menu(id, sp, container, handoff), Component.empty()),
+            var opened = sp.openMenu(new SimpleMenuProvider((id, inv, pl) -> {
+                        var menu = new LegacyB173Menu(id, sp, container, handoff);
+                        if (handoff == 0) menu.serverGui(gui);
+                        return menu;
+                    }, Component.empty()),
                     buf -> LegacyB173Menu.write(buf, container, gui, handoff));
             trace("menu {} for {} ({} slots), GUI handed over: {}", opened.isPresent() ? opened.getAsInt() : "not opened",
                     container.getClass().getName(), container.slots.size(), handoff != 0);
@@ -210,6 +220,7 @@ public final class MenusB173 {
 
     /** {@code Minecraft.displayGuiScreen}. */
     public static void setScreen(Screen screen) {
+        if(PlayerInventoryNetworkB173.offer(screen))return;
         Actor actor=ACTOR.get();
         if(actor!=null){actor.requested=screen;actor.pending=true;return;}
         Client c = client;

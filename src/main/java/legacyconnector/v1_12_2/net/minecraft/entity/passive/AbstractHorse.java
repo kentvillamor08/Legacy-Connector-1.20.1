@@ -19,7 +19,8 @@ import net.minecraft.sounds.SoundEvents;
  * temper, rearing, eating and mouth animations, jump strength); a mod's subclass keeps the 1.12 state in its data and NBT. (Riding and
  * the horse inventory of mods' own horses are not modelled; the modern horses ride as usual.)
  */
-public abstract class AbstractHorse extends EntityAnimal implements legacyconnector.v1_12_2.net.minecraft.inventory.IInventoryChangedListener {
+public abstract class AbstractHorse extends EntityAnimal implements legacyconnector.v1_12_2.net.minecraft.inventory.IInventoryChangedListener,
+        legacyconnector.v1_12_2.net.minecraft.entity.IJumpingMount {
     private static final DataParameter<Byte> STATUS = EntityDataManager.createKey(AbstractHorse.class, DataSerializers.BYTE);
     private static final DataParameter<com.google.common.base.Optional<java.util.UUID>> OWNER_UNIQUE_ID = EntityDataManager.createKey(AbstractHorse.class,
             DataSerializers.OPTIONAL_UNIQUE_ID);
@@ -40,7 +41,8 @@ public abstract class AbstractHorse extends EntityAnimal implements legacyconnec
     public AbstractHorse(World world) {
         super(world);
         setSize(1.3964844F, 1.6F);
-        mcc$set$stepHeight(this, 1.0F);
+        // a view of a horse keeps its own step height attribute
+        if (!mcc$existingNativeView()) mcc$set$stepHeight(this, 1.0F);
         try {
             initHorseChest();
         } catch (RuntimeException | LinkageError e) {
@@ -436,8 +438,26 @@ public abstract class AbstractHorse extends EntityAnimal implements legacyconnec
         jumpPower = power >= 90 ? 1.0F : 0.4F + 0.4F * power / 90.0F;
     }
 
+    public boolean canJump() {
+        return isHorseSaddled();
+    }
+
+    public void handleStartJump(int power) {
+        setRearing(true);
+    }
+
+    public void handleStopJump() {
+    }
+
     public boolean canBeSaddled() {
         return true;
+    }
+
+    /** 1.12: the first passenger steers (the host asks this for every AbstractHorse, mod subclasses included). */
+    @Override
+    public legacyconnector.v1_12_2.net.minecraft.entity.Entity getControllingPassenger() {
+        var passengers = getPassengers();
+        return passengers.isEmpty() ? null : passengers.get(0);
     }
 
     public boolean wearsArmor() {
@@ -484,5 +504,13 @@ public abstract class AbstractHorse extends EntityAnimal implements legacyconnec
         String owner = tag.getString("OwnerUUID");
         if (!owner.isEmpty()) setOwnerUniqueId(java.util.UUID.fromString(owner));
         setHorseSaddled(tag.getBoolean("Saddle"));
+    }
+
+    /** The sound of a gallop step on a block of this sound type (now and then a breath on top). */
+    protected void playGallopSound(legacyconnector.v1_12_2.net.minecraft.block.SoundType soundTypeIn) {
+        playSound(legacyconnector.v1_12_2.net.minecraft.init.SoundEvents.ENTITY_HORSE_GALLOP, soundTypeIn.getVolume() * 0.15F, soundTypeIn.getPitch());
+        if (getRNG().nextInt(10) == 0) {
+            playSound(legacyconnector.v1_12_2.net.minecraft.init.SoundEvents.ENTITY_HORSE_BREATHE, soundTypeIn.getVolume() * 0.6F, soundTypeIn.getPitch());
+        }
     }
 }

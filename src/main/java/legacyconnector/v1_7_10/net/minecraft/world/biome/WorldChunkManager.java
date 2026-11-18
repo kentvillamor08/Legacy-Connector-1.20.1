@@ -11,6 +11,8 @@ import legacyconnector.v1_7_10.net.minecraft.world.gen.layer.IntCache;
 public class WorldChunkManager {
     public GenLayer genBiomes;
     public GenLayer biomeIndexLayer;
+    /** Vanilla's private {@code biomeCache} (mods read it reflectively and build {@code BiomeCache.Block}s from it: Tropicraft's world generator). */
+    private final BiomeCache biomeCache = new BiomeCache(this);
     /**
      * Forge: the biomes new chunk managers let the player spawn in (mods add theirs or replace the list). A vanilla biome that has no
      * instance yet (null) is left out instead of failing every chunk of the world.
@@ -94,6 +96,14 @@ public class WorldChunkManager {
         if (out == null || out.length < w * h) out = new float[w * h];
         int[] ids = biomeIndexLayer.getInts(x, z, w, h);
         for (int i = 0; i < w * h; i++) out[i] = Math.min(1.0F, BiomeGenBase.mcc$biomeOrOcean(ids[i]).getIntRainfall() / 65536.0F);
+        return out;
+    }
+
+    /** 1.2.5 {@code getTemperatures(out, x, z, w, h)}: the base temperature of the biome of each column of the rectangle (index {@code x + z * w}), 0.0 to 2.0. */
+    public float[] getTemperatures(float[] out, int x, int z, int w, int h) {
+        if (out == null || out.length < w * h) out = new float[w * h];
+        BiomeGenBase[] biomes = getBiomesForGeneration(null, x, z, w, h);
+        for (int i = 0; i < w * h; i++) out[i] = biomes[i] == null ? 0.5F : Math.max(0.0F, Math.min(2.0F, biomes[i].temperature));
         return out;
     }
 

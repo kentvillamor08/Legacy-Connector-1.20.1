@@ -9,6 +9,8 @@ import legacyconnector.v1_12_2.net.minecraftforge.registries.IForgeRegistryEntry
 public class Block extends IForgeRegistryEntry.Impl<Block> {
     public static final legacyconnector.v1_12_2.net.minecraft.util.registry.RegistryNamespacedDefaultedByKey<legacyconnector.v1_12_2.net.minecraft.util.ResourceLocation, Block> REGISTRY = org.kylepitcock.legacyconnector.v1_12_2.bridge.Registries1122.view(org.kylepitcock.legacyconnector.v1_12_2.bridge.Registries1122.BLOCKS, "air");
     protected final Material material;
+    /** MCP name of {@link #material}. */
+    protected final Material blockMaterial;
     protected float blockHardness;
     protected float blockResistance;
     protected int lightValue;
@@ -35,6 +37,7 @@ public class Block extends IForgeRegistryEntry.Impl<Block> {
 
     public Block(Material material) {
         this.material = material;
+        this.blockMaterial = material;
         this.blockMapColor = material == null ? null : material.getMaterialMapColor();
         this.translucent = material != null && !material.blocksLight();
         legacyconnector.v1_12_2.net.minecraft.block.state.BlockStateContainer container = null;
@@ -149,7 +152,10 @@ public class Block extends IForgeRegistryEntry.Impl<Block> {
 
     /** Forge: whether the state has a tile entity (BlockContainer says yes). */
     public boolean hasTileEntity(legacyconnector.v1_12_2.net.minecraft.block.state.IBlockState state) {
-        return hasTileEntity(); // Forge: an ITileEntityProvider (mcjtylib's GenericBlock is one without being a BlockContainer) has one
+        if (hasTileEntity()) return true; // Forge: an ITileEntityProvider (mcjtylib's GenericBlock is one without being a BlockContainer) has one
+        // a game block or a modern mod's block with a block entity (a barrel, a chest): legacy code asks before it looks for the tile entity
+        return mcc$modern instanceof net.minecraft.world.level.block.EntityBlock
+                && !(mcc$modern instanceof org.kylepitcock.legacyconnector.v1_12_2.adapter.Legacy1122Block);
     }
 
     public legacyconnector.v1_12_2.net.minecraft.tileentity.TileEntity createTileEntity(legacyconnector.v1_12_2.net.minecraft.world.World world,
@@ -511,6 +517,13 @@ public class Block extends IForgeRegistryEntry.Impl<Block> {
         return false;
     }
 
+    /** Forge 14.23.5.2800+: the same with the mob that asks (null for a generic query). */
+    public legacyconnector.v1_12_2.net.minecraft.pathfinding.PathNodeType getAiPathNodeType(legacyconnector.v1_12_2.net.minecraft.block.state.IBlockState state,
+            legacyconnector.v1_12_2.net.minecraft.world.IBlockAccess world, legacyconnector.v1_12_2.net.minecraft.util.math.BlockPos pos,
+            legacyconnector.v1_12_2.net.minecraft.entity.EntityLiving entity) {
+        return getAiPathNodeType(state, world, pos);
+    }
+
     /** Forge: the path node type of the block for mobs' path finding (null: decided from the block as vanilla does). */
     public legacyconnector.v1_12_2.net.minecraft.pathfinding.PathNodeType getAiPathNodeType(legacyconnector.v1_12_2.net.minecraft.block.state.IBlockState state,
             legacyconnector.v1_12_2.net.minecraft.world.IBlockAccess world, legacyconnector.v1_12_2.net.minecraft.util.math.BlockPos pos) {
@@ -535,7 +548,9 @@ public class Block extends IForgeRegistryEntry.Impl<Block> {
     public void onFallenUpon(legacyconnector.v1_12_2.net.minecraft.world.World world, legacyconnector.v1_12_2.net.minecraft.util.math.BlockPos pos, legacyconnector.v1_12_2.net.minecraft.entity.Entity entity, float fallDistance) {
     }
 
+    /** 1.12: an entity landing on the block stops falling (blocks that bounce override this and call it when they do not). */
     public void onLanded(legacyconnector.v1_12_2.net.minecraft.world.World world, legacyconnector.v1_12_2.net.minecraft.entity.Entity entity) {
+        legacyconnector.v1_12_2.net.minecraft.entity.Entity.mcc$set$motionY(entity, 0.0D);
     }
 
     public boolean eventReceived(legacyconnector.v1_12_2.net.minecraft.block.state.IBlockState state, legacyconnector.v1_12_2.net.minecraft.world.World world, legacyconnector.v1_12_2.net.minecraft.util.math.BlockPos pos, int id, int param) {
@@ -628,7 +643,7 @@ public class Block extends IForgeRegistryEntry.Impl<Block> {
         var entity = new net.minecraft.world.entity.item.ItemEntity(level, pos.getX() + dx, pos.getY() + dy, pos.getZ() + dz,
                 org.kylepitcock.legacyconnector.v1_12_2.bridge.Stacks1122.toModern(stack));
         entity.setDefaultPickUpDelay();
-        level.addFreshEntity(entity);
+        world.mcc$access().addFreshEntity(entity); // the region while a chunk generates
     }
 
     /** What a player who breaks the block gets: the silk touch stack or the drops (the modern block handles harvesting itself). */
@@ -688,13 +703,13 @@ public class Block extends IForgeRegistryEntry.Impl<Block> {
     }
 
     public boolean rotateBlock(legacyconnector.v1_12_2.net.minecraft.world.World world, legacyconnector.v1_12_2.net.minecraft.util.math.BlockPos pos, legacyconnector.v1_12_2.net.minecraft.util.EnumFacing axis) {
-        var level = world == null ? null : world.mcc$level();
+        var level = world == null ? null : world.mcc$access();
         if (level == null) return false;
         var mp = pos.mcc$modern();
         var state = level.getBlockState(mp);
         var rotated = state.rotate(level, mp, net.minecraft.world.level.block.Rotation.CLOCKWISE_90);
         if (rotated == state) return false;
-        level.setBlockAndUpdate(mp, rotated);
+        level.setBlock(mp, rotated, 3);
         return true;
     }
 

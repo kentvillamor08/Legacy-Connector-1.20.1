@@ -124,4 +124,84 @@ public class PathNavigate {
         PathNavigation n = nav();
         if (n != null) n.stop();
     }
+
+    /** The position the path starts from: the entity's x and z at its pathable height (1.7.10's {@code getEntityPosition}). */
+    protected legacyconnector.v1_7_10.net.minecraft.util.Vec3 getEntityPosition() {
+        return legacyconnector.v1_7_10.net.minecraft.util.Vec3.createVectorHelper(Entity.mcc$get$posX(theEntity), getPathableYPos(), Entity.mcc$get$posZ(theEntity));
+    }
+
+    /** The height paths start from: the feet's block, or the surface above when the entity swims in water it may swim in. */
+    private int getPathableYPos() {
+        World world = Entity.mcc$get$worldObj(theEntity);
+        int feet = (int) (Entity.mcc$get$boundingBox(theEntity).minY + 0.5D);
+        if (world == null || !theEntity.isInWater() || !nav().canFloat()) return feet;
+        int x = (int) Math.floor(Entity.mcc$get$posX(theEntity));
+        int z = (int) Math.floor(Entity.mcc$get$posZ(theEntity));
+        int y = (int) Entity.mcc$get$boundingBox(theEntity).minY;
+        var block = world.getBlock(x, y, z);
+        int guard = 0;
+        while (block == legacyconnector.v1_7_10.net.minecraft.init.Blocks.flowing_water || block == legacyconnector.v1_7_10.net.minecraft.init.Blocks.water) {
+            block = world.getBlock(x, ++y, z);
+            if (++guard > 16) return feet;
+        }
+        return y;
+    }
+
+    /** Whether the entity is in water or lava (1.7.10's {@code isInLiquid}). */
+    protected boolean isInLiquid() {
+        return theEntity.isInWater() || theEntity.handleLavaMovement();
+    }
+
+    /**
+     * Whether the box of the given size, centred on the block, is clear and stands on ground that is neither air, lava nor water the entity
+     * is not already in, looking only at the columns ahead of {@code start} along {@code (dx, dz)} (1.7.10's {@code isSafeToStandAt}).
+     */
+    protected boolean isSafeToStandAt(int x, int y, int z, int sizeX, int sizeY, int sizeZ, legacyconnector.v1_7_10.net.minecraft.util.Vec3 start, double dx, double dz) {
+        int minX = x - sizeX / 2;
+        int minZ = z - sizeZ / 2;
+        if (!isPositionClear(minX, y, minZ, sizeX, sizeY, sizeZ, start, dx, dz)) return false;
+        World world = Entity.mcc$get$worldObj(theEntity);
+        for (int i = minX; i < minX + sizeX; i++) {
+            for (int j = minZ; j < minZ + sizeZ; j++) {
+                double px = i + 0.5D - start.xCoord;
+                double pz = j + 0.5D - start.zCoord;
+                if (px * dx + pz * dz < 0.0D) continue;
+                var material = world.getBlock(i, y - 1, j).getMaterial();
+                if (material == legacyconnector.v1_7_10.net.minecraft.block.material.Material.air) return false;
+                if (material == legacyconnector.v1_7_10.net.minecraft.block.material.Material.water && !theEntity.isInWater()) return false;
+                if (material == legacyconnector.v1_7_10.net.minecraft.block.material.Material.lava) return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Whether the navigator can follow a path right now: the entity stands on the ground, or swims when it may,
+     * or rides something (1.7.10's {@code canNavigate}).
+     */
+    public boolean canNavigate() {
+        Mob m = mob();
+        if (m == null) return false;
+        return m.onGround() || m.isInWater() && nav() != null && nav().canFloat() || m.isPassenger();
+    }
+
+    /**
+     * Whether the box of the given size at the position is free of blocking blocks, looking only at the columns ahead of
+     * {@code start} along the direction {@code (dx, dz)} (1.7.10's {@code isPositionClear}).
+     */
+    public boolean isPositionClear(int x, int y, int z, int sizeX, int sizeY, int sizeZ, legacyconnector.v1_7_10.net.minecraft.util.Vec3 start, double dx, double dz) {
+        World world = Entity.mcc$get$worldObj(theEntity);
+        if (world == null) return false;
+        for (int i = x; i < x + sizeX; i++) {
+            for (int j = z; j < z + sizeZ; j++) {
+                double px = i + 0.5D - start.xCoord;
+                double pz = j + 0.5D - start.zCoord;
+                if (px * dx + pz * dz < 0.0D) continue;
+                for (int k = y; k < y + sizeY; k++) {
+                    if (!world.getBlock(i, k, j).getBlocksMovement(world, i, k, j)) return false;
+                }
+            }
+        }
+        return true;
+    }
 }

@@ -20,21 +20,42 @@ public class Minecraft {
     public static void mcc$scope(Minecraft minecraft,Runnable callback){Minecraft previous=SCOPED.get();SCOPED.set(minecraft);try{callback.run();}finally{if(previous==null)SCOPED.remove();else SCOPED.set(previous);}}
 
     public World world;
+    /** Beta single player ran the server in-process: a client world is remote only when it is not the integrated server's. */
+    public boolean isWorldRemote(){return world!=null&&world.isRemote;}
+    public legacyconnector.vb1_7_3.net.minecraft.client.util.Session session=legacyconnector.vb1_7_3.net.minecraft.client.util.Session.mcc$current();
     private legacyconnector.vb1_7_3.net.minecraft.entity.player.ClientPlayerEntity explicitPlayer;
     private record Context(World world,legacyconnector.vb1_7_3.net.minecraft.entity.Entity focus){}
     private static final ThreadLocal<Context> CONTEXT=new ThreadLocal<>();
     private static final ThreadLocal<legacyconnector.vb1_7_3.net.minecraft.entity.player.ClientPlayerEntity> PLAYER_OVERRIDE=new ThreadLocal<>();
     public legacyconnector.vb1_7_3.net.minecraft.client.gui.hud.InGameHud inGameHud=new legacyconnector.vb1_7_3.net.minecraft.client.gui.hud.InGameHud();
     public legacyconnector.vb1_7_3.net.minecraft.client.option.GameOptions options=new legacyconnector.vb1_7_3.net.minecraft.client.option.GameOptions();
+    public InteractionManager interactionManager = new InteractionManager(this);
+    public boolean focused;
     public legacyconnector.vb1_7_3.net.minecraft.stat.PlayerStats stats=new legacyconnector.vb1_7_3.net.minecraft.stat.PlayerStats();
     public static final class ContextScope implements AutoCloseable {
         private final Context previous;private final legacyconnector.vb1_7_3.net.minecraft.entity.player.ClientPlayerEntity override;
-        private ContextScope(World world,legacyconnector.vb1_7_3.net.minecraft.entity.Entity focus){previous=CONTEXT.get();override=PLAYER_OVERRIDE.get();CONTEXT.set(new Context(world,focus));if(world!=null)mcc$instance().world=world;PLAYER_OVERRIDE.remove();}
-        @Override public void close(){if(previous==null)CONTEXT.remove();else CONTEXT.set(previous);if(override==null)PLAYER_OVERRIDE.remove();else PLAYER_OVERRIDE.set(override);}
+        private final org.kylepitcock.legacyconnector.vb1_7_3.HookActorStateB173.Scope actor;
+        private ContextScope(World world,legacyconnector.vb1_7_3.net.minecraft.entity.Entity focus){
+            previous=CONTEXT.get();override=PLAYER_OVERRIDE.get();World previousWorld=mcc$instance().world;
+            CONTEXT.set(new Context(world,focus));if(world!=null)mcc$instance().world=world;PLAYER_OVERRIDE.remove();
+            try{actor=org.kylepitcock.legacyconnector.vb1_7_3.HookActorStateB173.forContext(world,focus);}
+            catch(RuntimeException|Error error){mcc$instance().world=previousWorld;if(previous==null)CONTEXT.remove();else CONTEXT.set(previous);if(override==null)PLAYER_OVERRIDE.remove();else PLAYER_OVERRIDE.set(override);throw error;}
+        }
+        @Override public void close(){try{actor.close();}finally{if(previous==null)CONTEXT.remove();else CONTEXT.set(previous);if(override==null)PLAYER_OVERRIDE.remove();else PLAYER_OVERRIDE.set(override);}}
     }
     public static ContextScope mcc$context(World world,legacyconnector.vb1_7_3.net.minecraft.entity.Entity focus){return new ContextScope(world,focus);}
+    /** Existing callback actor only: directory lookup must never refresh a player view midway through a callback. */
+    public static legacyconnector.vb1_7_3.net.minecraft.entity.player.ClientPlayerEntity mcc$currentPlayerContext(){
+        Context context=CONTEXT.get();
+        if(context!=null&&context.focus instanceof legacyconnector.vb1_7_3.net.minecraft.entity.player.ClientPlayerEntity player)return player;
+        var overridden=PLAYER_OVERRIDE.get();if(overridden!=null)return overridden;
+        Minecraft active=SCOPED.get();return active==null?null:active.explicitPlayer;
+    }
     /** Phantom field accessor: cached Minecraft references resolve the actor of this callback, rather than another world's player. */
     public static legacyconnector.vb1_7_3.net.minecraft.entity.player.ClientPlayerEntity mcc$get$player(Minecraft minecraft){
+        return org.kylepitcock.legacyconnector.vb1_7_3.PlayerClassOverridesB173.present(mcc$basePlayer(minecraft));
+    }
+    private static legacyconnector.vb1_7_3.net.minecraft.entity.player.ClientPlayerEntity mcc$basePlayer(Minecraft minecraft){
         Minecraft active=SCOPED.get()==null?minecraft:SCOPED.get();
         if(active.explicitPlayer!=null)return active.explicitPlayer;
         var overridden=PLAYER_OVERRIDE.get();if(overridden!=null)return overridden;
@@ -43,14 +64,26 @@ public class Minecraft {
         Context context=CONTEXT.get();World world=context==null?active.world:context.world;
         if(world!=null&&world.mcc$level()!=null&&!world.isRemote){
             if(context!=null&&context.focus instanceof legacyconnector.vb1_7_3.net.minecraft.entity.player.ClientPlayerEntity player)return player;
-            net.minecraft.world.entity.player.Player closest=null;double best=Double.POSITIVE_INFINITY;
-            for(var player:world.mcc$level().players()){
-                double distance=context==null||context.focus==null?0:player.distanceToSqr(context.focus.x,context.focus.y,context.focus.z);
-                if(distance<best){best=distance;closest=player;}
-            }
+            net.minecraft.world.entity.player.Player closest=mcc$contextPlayer(world.mcc$level().players(),
+                    ()->world.mcc$level() instanceof net.minecraft.server.level.ServerLevel level
+                            ?level.getServer().getPlayerList().getPlayers():java.util.List.of(),
+                    player->player.level()==world.mcc$level(),
+                    player->context==null||context.focus==null?0:player.distanceToSqr(context.focus.x,context.focus.y,context.focus.z));
             return closest==null?null:(legacyconnector.vb1_7_3.net.minecraft.entity.player.ClientPlayerEntity)org.kylepitcock.legacyconnector.vb1_7_3.EntityViewsB173.wrap(closest);
         }
         var local=MenusB173.localPlayer();return local==null?null:(legacyconnector.vb1_7_3.net.minecraft.entity.player.ClientPlayerEntity)org.kylepitcock.legacyconnector.vb1_7_3.EntityViewsB173.wrap(local);
+    }
+    /** Beta keeps Minecraft.player during the death screen, after level membership ends. */
+    static <P> P mcc$contextPlayer(Iterable<? extends P> levelPlayers,
+            java.util.function.Supplier<? extends Iterable<? extends P>> registeredPlayers,
+            java.util.function.Predicate<? super P> sameLevel,java.util.function.ToDoubleFunction<? super P> distance){
+        P closest=null;double best=Double.POSITIVE_INFINITY;
+        for(P player:levelPlayers)if(sameLevel.test(player)){double value=distance.applyAsDouble(player);if(value<best){best=value;closest=player;}}
+        if(closest!=null)return closest;
+        // The server's connected-player registry retains the real death-screen actor.
+        // Do not cache it beyond logout or borrow an actor from another dimension.
+        for(P player:registeredPlayers.get())if(sameLevel.test(player)){double value=distance.applyAsDouble(player);if(value<best){best=value;closest=player;}}
+        return closest;
     }
     public static void mcc$set$player(Minecraft minecraft,legacyconnector.vb1_7_3.net.minecraft.entity.player.ClientPlayerEntity player){
         Minecraft active=SCOPED.get()==null?minecraft:SCOPED.get();
@@ -68,6 +101,15 @@ public class Minecraft {
 
     protected Minecraft() {}
 
+    /**
+     * Beta's {@code Minecraft.changeWorld(World, String, EntityPlayer)}: a mod that makes the player an instance of its own subclass of the
+     * client player (a different gravity, a suit) hands it over here. The subclass's overrides then run for the player of this callback; a
+     * plain client player puts the native behaviour back.
+     */
+    public void setWorld(World world,String message,legacyconnector.vb1_7_3.net.minecraft.entity.player.PlayerEntity player){
+        org.kylepitcock.legacyconnector.vb1_7_3.PlayerClassOverridesB173.hand(player);
+    }
+
     public static Minecraft mcc$instance() {
         Minecraft scoped=SCOPED.get();return scoped==null?INSTANCE:scoped;
     }
@@ -80,7 +122,26 @@ public class Minecraft {
         if(world!=null){mcc$instance().world=world;CONTEXT.set(new Context(world,focus));}
     }
 
+    /**
+     * Beta's smooth-lighting switch. A mod's world renderer is captured into the native chunk mesh, which applies the player's smooth
+     * lighting and ambient occlusion itself; baking the mod's own on top would darken twice, so mods draw flat-lit as they did with it off.
+     */
+    /** Beta's F3 profiler switch: renderers that draw debug output with it on draw none. */
+    public static boolean isDebugProfilerEnabled() {
+        return false;
+    }
+
+    public static boolean isAmbientOcclusionEnabled() {
+        return false;
+    }
+
+    /** Beta's {@code getSendQueue}: the client's connection to the server, which carries a mod's registered packets. */
+    public legacyconnector.vb1_7_3.net.minecraft.client.network.ClientNetworkHandler getNetworkHandler() {
+        return legacyconnector.vb1_7_3.net.minecraft.client.network.ClientNetworkHandler.mcc$instance();
+    }
+
     /** MCP {@code displayGuiScreen}: shows a legacy screen on the client (null closes it). */
+    /** Beta's {@code isMultiplayerWorld}: the loaded world is a client view of a remote server. */
     public void setScreen(Screen screen) {
         MenusB173.setScreen(screen);
     }

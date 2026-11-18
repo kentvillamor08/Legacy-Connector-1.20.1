@@ -24,6 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Render
         run: |
@@ -31,15 +33,12 @@ jobs:
           python3 tools/release/render_description.py modrinth out/modrinth.md
           python3 tools/release/render_description.py curseforge out/curseforge.md
 
-      - name: Commit rendered pages
+      # master is protected, so the job cannot commit the rendered pages there: they go to the site-data branch (description/) and
+      # are the artifact uploaded at the end of the run. The copies under .github/description on master are refreshed by whoever
+      # edits description.md (py -3 tools/release/render_description.py <platform> .github/description/<platform>.md).
+      - name: Publish the rendered pages to the site-data branch
         if: github.ref == 'refs/heads/master'
-        run: |
-          cp out/curseforge.md out/modrinth.md .github/description/
-          git add .github/description/curseforge.md .github/description/modrinth.md
-          if ! git diff --cached --quiet; then
-            git -c user.name=github-actions -c user.email=github-actions@users.noreply.github.com commit -m "Render description pages"
-            git push
-          fi
+        run: bash tools/compat/site_data.sh push "Rendered description pages of ${{ github.sha }}"
 
       - name: Update Modrinth
         env:

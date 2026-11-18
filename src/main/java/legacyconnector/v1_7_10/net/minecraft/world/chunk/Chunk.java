@@ -151,6 +151,38 @@ public class Chunk {
         this(world, mcc$blocksOf(ids), meta, x, z);
     }
 
+    /**
+     * 1.5.2 ids went up to 4095, so a generator may hand over its block ids as shorts. Their layout is the one of the chunk's storage segments,
+     * {@code y << 8 | z << 4 | x} (Tropicraft's generator), not the byte array's column-major one: the arrays are re-ordered into ours.
+     */
+    public Chunk(World world, short[] ids, byte[] meta, int x, int z) {
+        this(world, mcc$columnMajor(ids), meta == null ? null : mcc$columnMajor(meta), x, z);
+    }
+
+    private static Block[] mcc$columnMajor(short[] ids) {
+        int height = Math.max(1, ids.length / 256);
+        Block[] out = new Block[ids.length];
+        for (int y = 0; y < height; y++) {
+            for (int zz = 0; zz < 16; zz++) {
+                for (int xx = 0; xx < 16; xx++) {
+                    int id = ids[y << 8 | zz << 4 | xx] & 0xFFFF;
+                    Block block = id == 0 ? legacyconnector.v1_7_10.net.minecraft.init.Blocks.air : legacyconnector.v1_6_4.net.minecraft.util.Ids.block(id);
+                    out[(xx * 16 + zz) * height + y] = block == null ? legacyconnector.v1_7_10.net.minecraft.init.Blocks.air : block;
+                }
+            }
+        }
+        return out;
+    }
+
+    private static byte[] mcc$columnMajor(byte[] meta) {
+        int height = Math.max(1, meta.length / 256);
+        byte[] out = new byte[meta.length];
+        for (int y = 0; y < height; y++)
+            for (int zz = 0; zz < 16; zz++)
+                for (int xx = 0; xx < 16; xx++) out[(xx * 16 + zz) * height + y] = meta[y << 8 | zz << 4 | xx];
+        return out;
+    }
+
     private static Block[] mcc$blocksOf(byte[] ids) {
         Block[] out = new Block[ids.length];
         for (int i = 0; i < ids.length; i++) {
@@ -252,13 +284,43 @@ public class Chunk {
     public net.minecraft.world.level.block.state.BlockState mcc$clientState(int x, int y, int z) {
         if (mcc$blocks != null || y < 1 || y > 255) return null;
         var live = mcc$liveChunk();
-        if (live == null || !(live.getLevel() instanceof net.minecraft.client.multiplayer.ClientLevel) || live.getMinBuildHeight() > y || live.getMaxBuildHeight() <= y) return null;
+        // isClientSide, not the client level class: a dedicated server refuses (and logs) every load of that class
+        if (live == null || !live.getLevel().isClientSide() || live.getMinBuildHeight() > y || live.getMaxBuildHeight() <= y) return null;
         return live.getBlockState(new net.minecraft.core.BlockPos(wx(x), y, wz(z)));
     }
 
+    /**
+     * The server twin of {@link #mcc$clientState}: a block of a loaded server chunk read straight from the chunk's own section, or null
+     * where the generic path must answer (detached chunks, chunks still being generated, deep passes, the bedrock row, heights outside
+     * the legacy range). {@code World.getBlock} does a chunk-cache lookup, a thread check and the generation rules per call; a mod that
+     * walks whole chunks (Mystcraft's chunk profiler reads all 65536 blocks of every chunk of an age on its own thread, and a save waits
+     * for it) paid that per block.
+     */
+    private net.minecraft.world.level.block.state.BlockState mcc$serverState(int x, int y, int z) {
+        // y == 0 is answered here too (getBlock applies the bedrock-row rule): a chunk handed to another thread after its generation
+        // (Mystcraft's profiler queue) must not fall back to the generation region, which is gone by then and throws
+        if (mcc$blocks != null || modern == null || y < 0 || y > 255) return null;
+        // a full chunk of a server level, or the chunk still being generated (a proto chunk: there are none on a client)
+        var live = mcc$liveChunk();
+        if (live != null ? live.getLevel().isClientSide() : !(modern instanceof net.minecraft.world.level.chunk.ProtoChunk)) return null;
+        if (modern.getMinBuildHeight() > y || modern.getMaxBuildHeight() <= y) return null;
+        if (legacyconnector.v1_7_10.net.minecraft.world.World.mcc$inDeepPass()) return null;
+        return modern.getBlockState(new net.minecraft.core.BlockPos(wx(x), y, wz(z)));
+    }
+
+    /** {@link #mcc$clientState} on a client, {@link #mcc$serverState} on a server. */
+    private net.minecraft.world.level.block.state.BlockState mcc$directState(int x, int y, int z) {
+        var s = mcc$clientState(x, y, z);
+        return s != null ? s : mcc$serverState(x, y, z);
+    }
+
     public Block getBlock(int x, int y, int z) {
-        var fast = mcc$clientState(x, y, z);
-        if (fast != null) return org.kylepitcock.legacyconnector.v1_7_10.bridge.BlockBridge.legacyBlock(fast);
+        var fast = mcc$directState(x, y, z);
+        if (fast != null) {
+            // 1.7.10's overworld always had bedrock at y=0 (World.getBlock: mcc$bedrockFloor)
+            if (y == 0 && fast.isAir() && modern.getMinBuildHeight() < 0) return legacyconnector.v1_7_10.net.minecraft.init.Blocks.bedrock;
+            return org.kylepitcock.legacyconnector.v1_7_10.bridge.BlockBridge.legacyBlock(fast);
+        }
         if (mcc$blocks != null) {
             if (y < 0 || y >= mcc$height) return legacyconnector.v1_7_10.net.minecraft.init.Blocks.air;
             Block b = mcc$blocks[index(x, y, z)];
@@ -268,7 +330,7 @@ public class Chunk {
     }
 
     public int getBlockMetadata(int x, int y, int z) {
-        var fast = mcc$clientState(x, y, z);
+        var fast = mcc$directState(x, y, z);
         if (fast != null) return org.kylepitcock.legacyconnector.v1_7_10.bridge.BlockBridge.legacyMeta(fast);
         if (mcc$blocks != null) return y < 0 || y >= mcc$height ? 0 : mcc$meta[index(x, y, z)] & 15;
         return worldObj.getBlockMetadata(wx(x), y, wz(z));
@@ -475,6 +537,35 @@ public class Chunk {
         return c == null || c.isTerrainPopulated;
     }
 
+    /**
+     * {@code func_150809_p} (MCP {@code checkLight}): works out the chunk's light. The host's own light engine lights every
+     * chunk it loads, so a populated chunk counts as lit as soon as this runs.
+     */
+    public void func_150809_p() {
+        if (isTerrainPopulated) isLightPopulated = true;
+    }
+
+    /**
+     * {@code func_150804_b} (MCP {@code onTick}): the per-tick light upkeep of a loaded chunk; completes the light of a populated
+     * chunk whose light was still pending. The argument asks to skip the deferred relight work, which the host's engine does anyway.
+     */
+    public void func_150804_b(boolean skipRecheck) {
+        if (isTerrainPopulated && !isLightPopulated) func_150809_p();
+    }
+
+    /** Adds to {@code out} the entities of the type inside the box that stand in this chunk and pass the selector (null accepts all). */
+    public void getEntitiesOfTypeWithinAAAB(Class type, legacyconnector.v1_7_10.net.minecraft.util.AxisAlignedBB box, List out,
+            legacyconnector.v1_7_10.net.minecraft.command.IEntitySelector selector) {
+        if (worldObj == null || out == null) return;
+        for (Object o : worldObj.selectEntitiesWithinAABB(type, box, selector)) {
+            legacyconnector.v1_7_10.net.minecraft.entity.Entity e = (legacyconnector.v1_7_10.net.minecraft.entity.Entity) o;
+            if (legacyconnector.v1_7_10.net.minecraft.util.MathHelper.floor_double(legacyconnector.v1_7_10.net.minecraft.entity.Entity.mcc$get$posX(e)) >> 4 == xPosition
+                    && legacyconnector.v1_7_10.net.minecraft.util.MathHelper.floor_double(legacyconnector.v1_7_10.net.minecraft.entity.Entity.mcc$get$posZ(e)) >> 4 == zPosition) {
+                out.add(e);
+            }
+        }
+    }
+
     /** Whether the chunk is fully generated: populated and lit. */
     public boolean func_150802_k() {
         return isTerrainPopulated && isLightPopulated;
@@ -540,6 +631,9 @@ public class Chunk {
     }
 
     public void setStorageArrays(legacyconnector.v1_7_10.net.minecraft.world.chunk.storage.ExtendedBlockStorage[] storage) {
+        // A generator's detached chunk takes the sections it built itself (Mystcraft: new ExtendedBlockStorage per section, then
+        // setStorageArrays); mcc$blocks() merges them into the arrays. A loaded chunk keeps its views onto the modern chunk.
+        if (mcc$blocks != null && storage != null) mcc$storage = storage;
     }
 
     public ChunkCoordIntPair getChunkCoordIntPair() {
@@ -623,5 +717,12 @@ public class Chunk {
 
     public void setBlockTileEntityInChunk(int x, int y, int z, legacyconnector.v1_7_10.net.minecraft.tileentity.TileEntity tile) {
         worldObj.setTileEntity(wx(x), y, wz(z), tile);
+    }
+
+    // Members125 batch 2
+
+    /** 1.2.5 {@code Chunk.updateSkylight()}: recomputes the sky light of the chunk; the modern light engine keeps it up to date itself. */
+    public void updateSkylight() {
+        generateSkylightMap();
     }
 }

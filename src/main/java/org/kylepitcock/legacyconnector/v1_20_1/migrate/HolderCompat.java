@@ -33,12 +33,25 @@ public final class HolderCompat {
         return BuiltInRegistries.MOB_EFFECT.wrapAsHolder(e);
     }
 
+    public static Holder<net.minecraft.world.item.alchemy.Potion> holder(net.minecraft.world.item.alchemy.Potion p) {
+        return net.minecraft.core.registries.BuiltInRegistries.POTION.wrapAsHolder(p);
+    }
+
     public static Holder<Attribute> holder(Attribute a) {
         return BuiltInRegistries.ATTRIBUTE.wrapAsHolder(a);
     }
 
     public static Holder<GameEvent> holder(GameEvent g) {
         return BuiltInRegistries.GAME_EVENT.wrapAsHolder(g);
+    }
+
+    /** The holder, or null while the data-driven registry is not there (a tags-updated handler of a mod reads enchantment levels while the data packs load: there is no level to read yet). */
+    private static Holder<Enchantment> holderOrNull(LegacyEnchantment e) {
+        try {
+            return e.holder();
+        } catch (IllegalStateException noRegistry) {
+            return null;
+        }
     }
 
     public static Holder<Enchantment> holder(LegacyEnchantment e) {
@@ -104,7 +117,8 @@ public final class HolderCompat {
     }
 
     public static int stackEnchantmentLevel(ItemStack stack, LegacyEnchantment e) {
-        return stack.getEnchantmentLevel(holder(e));
+        Holder<Enchantment> h = holderOrNull(e);
+        return h == null ? 0 : stack.getEnchantmentLevel(h);
     }
 
     /** Enchantments of a stack as the 1.20.1 map from enchantment to level. */
@@ -122,6 +136,11 @@ public final class HolderCompat {
     }
 
     public static void enchant(ItemStack stack, LegacyEnchantment e, int level) {
+        // {@code stack.enchant(null, 0)} was the 1.20.1 way to make an item glint (an empty Enchantments list); 1.21.1 has a component for it
+        if (e == null) {
+            stack.set(net.minecraft.core.component.DataComponents.ENCHANTMENT_GLINT_OVERRIDE, Boolean.TRUE);
+            return;
+        }
         stack.enchant(holder(e), level);
     }
 
@@ -192,16 +211,26 @@ public final class HolderCompat {
     // ------------------------------------------------------------------ enchantments
 
     public static int getItemEnchantmentLevel(LegacyEnchantment e, ItemStack stack) {
-        return EnchantmentHelper.getItemEnchantmentLevel(holder(e), stack);
+        Holder<Enchantment> h = holderOrNull(e);
+        return h == null ? 0 : EnchantmentHelper.getItemEnchantmentLevel(h, stack);
     }
 
     public static int getEnchantmentLevel(LegacyEnchantment e, LivingEntity entity) {
-        return EnchantmentHelper.getEnchantmentLevel(holder(e), entity);
+        Holder<Enchantment> h = holderOrNull(e);
+        return h == null ? 0 : EnchantmentHelper.getEnchantmentLevel(h, entity);
     }
 
     /** The unwrapped {@code Enchantments.X} (a resource key in 1.21.1, the object in 1.20.1). */
     public static LegacyEnchantment enchantment(ResourceKey<Enchantment> key) {
-        return LegacyEnchantments.legacy(MigrateContext.provider().lookupOrThrow(Registries.ENCHANTMENT).getOrThrow(key));
+        java.util.Optional<? extends net.minecraft.core.HolderLookup.RegistryLookup<Enchantment>> lookup;
+        try {
+            lookup = MigrateContext.provider().lookup(Registries.ENCHANTMENT);
+        } catch (RuntimeException noRegistries) {
+            lookup = java.util.Optional.empty();
+        }
+        // before the data-driven registry exists (the data pack contributor asks a mod's compatibility rules): a stand-in that only knows its id
+        if (lookup.isEmpty()) return LegacyEnchantment.ofId(key.location());
+        return LegacyEnchantments.legacy(lookup.get().getOrThrow(key));
     }
 
     /** {@code EnchantmentInstance.enchantment} (a holder in 1.21.1). */
@@ -211,7 +240,37 @@ public final class HolderCompat {
 
     /** {@code BuiltInRegistries.ENCHANTMENT} is a dynamic registry in 1.21.1. */
     public static net.minecraft.core.Registry<Enchantment> enchantmentRegistry() {
-        return MigrateContext.registries().registryOrThrow(Registries.ENCHANTMENT);
+        try {
+            return MigrateContext.registries().registryOrThrow(Registries.ENCHANTMENT);
+        } catch (IllegalStateException notThereYet) {
+            // 1.20.1 had the registry as a static from the start: libraries keep it in a static field while the mod is constructed (SuperMartijn642's Core Lib).
+            // The reference is a view that asks the real registry on every call; it works once a world's registries exist.
+            net.minecraft.core.Registry<Enchantment> lazy = lazyView;
+            if (lazy == null) lazyView = lazy = lazyEnchantmentRegistry();
+            return lazy;
+        }
+    }
+
+    private static volatile net.minecraft.core.Registry<Enchantment> lazyView;
+
+    @SuppressWarnings("unchecked")
+    private static net.minecraft.core.Registry<Enchantment> lazyEnchantmentRegistry() {
+        return (net.minecraft.core.Registry<Enchantment>) java.lang.reflect.Proxy.newProxyInstance(net.minecraft.core.Registry.class.getClassLoader(),
+                new Class<?>[] {net.minecraft.core.Registry.class}, (proxy, method, args) -> {
+                    if (method.getName().equals("key") && method.getParameterCount() == 0) return Registries.ENCHANTMENT;
+                    if (method.getDeclaringClass() == Object.class) {
+                        return switch (method.getName()) {
+                            case "hashCode" -> System.identityHashCode(proxy);
+                            case "equals" -> proxy == args[0];
+                            default -> "lazy enchantment registry";
+                        };
+                    }
+                    try {
+                        return method.invoke(MigrateContext.registries().registryOrThrow(Registries.ENCHANTMENT), args);
+                    } catch (java.lang.reflect.InvocationTargetException e) {
+                        throw e.getCause();
+                    }
+                });
     }
 
     // ------------------------------------------------------------------ game events

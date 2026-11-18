@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.kylepitcock.legacyconnector.loader.transform.mixin1201.InjectionRepair;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
@@ -44,10 +45,21 @@ final class Mixin1201 {
         final List<String> dropped = new ArrayList<>();
         /** internal names of mixin classes dropped from their configs */
         final Set<String> droppedClasses = new HashSet<>();
+        /** the target proof and handler re-signing of {@link InjectionRepair} */
+        final InjectionRepair.Counts repair = new InjectionRepair.Counts();
+        /** stood-in static accessors: "owner.name+desc" of the mixin interface method to the MiscCompat helper that replaces its call sites */
+        final Map<String, String> standIns = new java.util.HashMap<>();
+        /** stood-in instance accessors: "owner.name+desc" of the interface method to the Round6Compat helper taking the instance */
+        final Map<String, String> instanceStandIns = new java.util.HashMap<>();
+        /** member renames applied from the tables (the "renamed" class of the proof) */
+        int membersRenamed;
+        int shadowsRetargeted;
+        /** old descriptors from the jar's refmaps (mixin class to annotation string to descriptor), set by the transformer before the classes are processed */
+        Map<String, Map<String, String>> refmaps = Map.of();
 
         String summary() {
             return mixinClasses + " mixin class(es), " + stringsMoved + " annotation name(s) moved to 1.21.1, " + requireRemoved + " injector requirement(s) relaxed, " + localsRelaxed + " local capture(s) set to FAILSOFT (a vanilla method whose locals changed skips that injection with a Mixin warning naming the mod's mixin), " + dropped.size()
-                    + " mixin(s) dropped (target missing in 1.21.1)";
+                    + " mixin(s) dropped (target missing in 1.21.1); target proof: " + repair.summary() + ", " + membersRenamed + " member name(s) renamed, " + shadowsRetargeted + " inherited @Shadow field(s) retargeted to the declaring superclass";
         }
     }
 
@@ -63,13 +75,15 @@ final class Mixin1201 {
     }
 
     /** Fixes the annotations of one class (already renamed to Mojang class names); records it in {@code st} when it must be dropped from its config. */
-    static void apply(ClassNode node, Map<String, String> srg, Mc1201Hierarchy h, Mc1201Tables t, Stats st) {
+    static int apply(ClassNode node, Map<String, String> srg, Mc1201Hierarchy h, Mc1201Tables t, Stats st) {
         AnnotationNode mixin = find(node.invisibleAnnotations, MIXIN);
         if (mixin == null) mixin = find(node.visibleAnnotations, MIXIN);
-        if (mixin == null) return;
+        if (mixin == null) return 0;
         st.mixinClasses++;
         List<String> targets = targets(mixin);
         Ctx ctx = new Ctx(srg, t, targets, st);
+        // the refmap's 1.20.1 descriptors of the selectors, read before the strings are rewritten
+        java.util.Map<AnnotationNode, List<String>> hints = InjectionRepair.refmapHints(node, st.refmaps.get(node.name), d -> mapDescriptor(d, t));
         // class level: string targets
         fixAnnotation(mixin, ctx);
         targets = targets(mixin);
@@ -82,11 +96,35 @@ final class Mixin1201 {
             fixAll(f.visibleAnnotations, ctx);
         }
         for (MethodNode m : node.methods) defineSynchedDataHandler(m);
+        if (targets.size() == 1) {
+            boolean stoodIn = false;
+            for (MethodNode m : node.methods) stoodIn |= standInRemovedStaticMember(m, targets.get(0), node.name, st);
+            // nothing left for Mixin to do in an interface that only held such accessors: leave it a plain interface (static helpers), out of the config
+            if (stoodIn && node.methods.stream().allMatch(m -> (m.access & (org.objectweb.asm.Opcodes.ACC_ABSTRACT)) == 0 && (m.invisibleAnnotations == null || m.invisibleAnnotations.isEmpty()) && (m.visibleAnnotations == null || m.visibleAnnotations.isEmpty()))) {
+                st.droppedClasses.add(node.name);
+                // a plain interface from here on: Mixin refuses a class that still carries @Mixin but is in no config ("is invalid")
+                if (node.invisibleAnnotations != null) node.invisibleAnnotations.removeIf(a -> MIXIN.equals(a.desc));
+                if (node.visibleAnnotations != null) node.visibleAnnotations.removeIf(a -> MIXIN.equals(a.desc));
+                return 1;
+            }
+        }
+        if (targets.size() == 1 && (node.access & org.objectweb.asm.Opcodes.ACC_INTERFACE) != 0) {
+            boolean instanceStoodIn = false;
+            for (MethodNode m : node.methods) instanceStoodIn |= standInRemovedInstanceAccessor(m, targets.get(0), node.name, st);
+            // an accessor interface left without annotations has nothing to apply: a plain interface out of the config (the call sites go to the helper)
+            if (instanceStoodIn && node.methods.stream().allMatch(m -> (m.invisibleAnnotations == null || m.invisibleAnnotations.isEmpty()) && (m.visibleAnnotations == null || m.visibleAnnotations.isEmpty()))) {
+                st.droppedClasses.add(node.name);
+                if (node.invisibleAnnotations != null) node.invisibleAnnotations.removeIf(a -> MIXIN.equals(a.desc));
+                if (node.visibleAnnotations != null) node.visibleAnnotations.removeIf(a -> MIXIN.equals(a.desc));
+                return 1;
+            }
+        }
+        st.shadowsRetargeted += retargetInheritedShadowFields(node, targets, h);
         String shadow = missingShadow(node, targets, h);
         if (shadow != null) {
             st.dropped.add(node.name + " (@Shadow " + shadow + " does not exist in " + targets.get(0) + ")");
             st.droppedClasses.add(node.name);
-            return;
+            return 0;
         }
         // a mixin whose targets are all gone from 1.21.1 cannot apply
         if (!targets.isEmpty()) {
@@ -99,8 +137,118 @@ final class Mixin1201 {
             if (!anyPresent && missing != null) {
                 st.dropped.add(node.name + " (target " + missing + ")");
                 st.droppedClasses.add(node.name);
+                return 0;
             }
         }
+        // target proof: every injector against the 1.21.1 classes; added parameters re-signed, gone or unrepairable injections removed one by one
+        int before = st.repair.handlersChanged;
+        InjectionRepair.run(node, targets, new McHostIndex1201(h), hints, st.repair);
+        return st.repair.handlersChanged - before;
+    }
+
+    /**
+     * Static members of Minecraft 1.20.1 that 1.21.1 removed or reshaped, which a mod reaches through a static mixin accessor/invoker, and the {@code MiscCompat}
+     * helper that stands in for them (owner.name to method; a field's helper takes no arguments, a method's has the invoker's own descriptor).
+     */
+    private static final Map<String, String> REMOVED_STATIC_MEMBERS = Map.of(
+            "net/minecraft/advancements/CriteriaTriggers.CRITERIA", "criteriaTriggerMap",
+            "net/minecraft/advancements/CriteriaTriggers.register", "registerTrigger");
+
+    /** Instance fields of Minecraft 1.20.1 that 1.21.1 removed, read by a mixin accessor interface: "owner.field" to the {@code Round6Compat} helper (takes the instance). */
+    private static final Map<String, String> REMOVED_INSTANCE_FIELDS = Map.of(
+            "net/minecraft/server/level/WorldGenRegion.structureManager", "worldGenRegionStructureManager",
+            "net/minecraft/server/level/WorldGenRegion.cache", "worldGenRegionCache");
+
+    /**
+     * An abstract {@code @Accessor getX()} of a field in {@link #REMOVED_INSTANCE_FIELDS} cannot apply (Mixin fails with "No candidates", or the class is dropped and
+     * the call site gets an AbstractMethodError). The annotation goes and the mixin leaves its config (a plain interface); call sites ({@code ((Accessor) x).getX()}) go
+     * to the migrate helper directly ({@link #redirectStandIns}), the cast included.
+     */
+    static boolean standInRemovedInstanceAccessor(MethodNode m, String target, String mixinClass, Stats st) {
+        if ((m.access & org.objectweb.asm.Opcodes.ACC_ABSTRACT) == 0 || (m.access & org.objectweb.asm.Opcodes.ACC_STATIC) != 0 || !m.desc.startsWith("()")) return false;
+        List<AnnotationNode> owner = m.invisibleAnnotations;
+        AnnotationNode a = find(owner, "Lorg/spongepowered/asm/mixin/gen/Accessor;");
+        if (a == null) { owner = m.visibleAnnotations; a = find(owner, "Lorg/spongepowered/asm/mixin/gen/Accessor;"); }
+        if (a == null) return false;
+        String name = null;
+        if (a.values != null) for (int i = 0; i + 1 < a.values.size(); i += 2) if ("value".equals(a.values.get(i)) && a.values.get(i + 1) instanceof String s) name = s;
+        if (name == null) return false;
+        String helper = REMOVED_INSTANCE_FIELDS.get(target + "." + name);
+        if (helper == null) return false;
+        owner.remove(a);
+        st.instanceStandIns.put(mixinClass + "." + m.name + m.desc, helper);
+        return true;
+    }
+
+    /**
+     * A static {@code @Accessor} / {@code @Invoker} with a body (the interface-mixin idiom {@code static Map getX() { throw new AssertionError(); }}) of a Minecraft
+     * member that 1.21.1 no longer has cannot apply: Mixin skips the mixin and the call site then fails with {@code NoSuchMethodError getX$mixin$md$...}. For the
+     * members in {@link #REMOVED_STATIC_MEMBERS} the annotation is dropped and the body calls the migrate helper, so callers keep working.
+     */
+    static boolean standInRemovedStaticMember(MethodNode m, String target, String mixinClass, Stats st) {
+        int acc = m.access;
+        if ((acc & org.objectweb.asm.Opcodes.ACC_STATIC) == 0 || (acc & org.objectweb.asm.Opcodes.ACC_ABSTRACT) != 0) return false;
+        boolean invoker = false;
+        List<AnnotationNode> owner = m.invisibleAnnotations;
+        AnnotationNode a = find(owner, "Lorg/spongepowered/asm/mixin/gen/Accessor;");
+        if (a == null) a = find(owner, "Lorg/spongepowered/asm/mixin/gen/Invoker;");
+        if (a == null) { owner = m.visibleAnnotations; a = find(owner, "Lorg/spongepowered/asm/mixin/gen/Accessor;"); }
+        if (a == null) a = find(owner, "Lorg/spongepowered/asm/mixin/gen/Invoker;");
+        if (a == null) return false;
+        invoker = a.desc.endsWith("Invoker;");
+        if (!invoker && !m.desc.startsWith("()")) return false;
+        String name = null;
+        if (a.values != null) for (int i = 0; i + 1 < a.values.size(); i += 2) if ("value".equals(a.values.get(i)) && a.values.get(i + 1) instanceof String s) name = s;
+        if (name == null) return false;
+        String helper = REMOVED_STATIC_MEMBERS.get(target + "." + name);
+        if (helper == null) return false;
+        owner.remove(a);
+        st.standIns.put(mixinClass + "." + m.name + m.desc, helper + (invoker ? "" : ""));
+        m.instructions.clear();
+        m.tryCatchBlocks.clear();
+        if (m.localVariables != null) m.localVariables.clear();
+        int slot = 0;
+        for (Type t : Type.getArgumentTypes(m.desc)) {
+            m.instructions.add(new org.objectweb.asm.tree.VarInsnNode(t.getOpcode(org.objectweb.asm.Opcodes.ILOAD), slot));
+            slot += t.getSize();
+        }
+        m.instructions.add(new org.objectweb.asm.tree.MethodInsnNode(org.objectweb.asm.Opcodes.INVOKESTATIC, "org/kylepitcock/legacyconnector/v1_20_1/migrate/MiscCompat",
+                helper, invoker ? m.desc : "()Ljava/util/Map;", false));
+        m.instructions.add(new org.objectweb.asm.tree.InsnNode(Type.getReturnType(m.desc).getOpcode(org.objectweb.asm.Opcodes.IRETURN)));
+        m.maxStack = Math.max(slot, 2);
+        m.maxLocals = slot;
+        return true;
+    }
+
+    /**
+     * Call sites of the stood-in accessors go to the helper directly: the mixin class is out of its config, and a class in a mixin package that no config lists
+     * cannot be loaded (Mixin's IllegalClassLoadError), so nothing may reference it.
+     */
+    static int redirectStandIns(Iterable<ClassNode> nodes, Stats st) {
+        if (st.standIns.isEmpty() && st.instanceStandIns.isEmpty()) return 0;
+        int n = 0;
+        for (ClassNode c : nodes) for (MethodNode m : c.methods) {
+            for (org.objectweb.asm.tree.AbstractInsnNode in : m.instructions.toArray()) {
+                if (!(in instanceof org.objectweb.asm.tree.MethodInsnNode mi) || mi.getOpcode() != org.objectweb.asm.Opcodes.INVOKEINTERFACE) continue;
+                String helper = st.instanceStandIns.get(mi.owner + "." + mi.name + mi.desc);
+                if (helper == null) continue;
+                // ((Accessor) region).getX(): the cast cannot hold (the interface is no longer mixed in), the helper takes the plain object
+                if (in.getPrevious() instanceof org.objectweb.asm.tree.TypeInsnNode cast && cast.getOpcode() == org.objectweb.asm.Opcodes.CHECKCAST && cast.desc.equals(mi.owner)) m.instructions.remove(cast);
+                m.instructions.set(mi, new org.objectweb.asm.tree.MethodInsnNode(org.objectweb.asm.Opcodes.INVOKESTATIC, "org/kylepitcock/legacyconnector/v1_20_1/migrate/Round6Compat",
+                        helper, "(Ljava/lang/Object;)" + Type.getReturnType(mi.desc).getDescriptor(), false));
+                n++;
+            }
+        }
+        for (ClassNode c : nodes) for (MethodNode m : c.methods) for (org.objectweb.asm.tree.AbstractInsnNode in : m.instructions) {
+            if (!(in instanceof org.objectweb.asm.tree.MethodInsnNode mi) || mi.getOpcode() != org.objectweb.asm.Opcodes.INVOKESTATIC) continue;
+            String helper = st.standIns.get(mi.owner + "." + mi.name + mi.desc);
+            if (helper == null) continue;
+            mi.owner = "org/kylepitcock/legacyconnector/v1_20_1/migrate/MiscCompat";
+            mi.name = helper;
+            mi.itf = false;
+            n++;
+        }
+        return n;
     }
 
     private static final String SHADOW = "Lorg/spongepowered/asm/mixin/Shadow;";
@@ -148,6 +296,54 @@ final class Mixin1201 {
             if (shadowHasPrefix(f.invisibleAnnotations) || shadowHasPrefix(f.visibleAnnotations)) continue;
             Boolean found = hasMember(target, f.name + ":" + f.desc, false, h, new java.util.HashSet<>());
             if (found != null && !found) return f.name + ":" + f.desc;
+        }
+        return null;
+    }
+
+    /**
+     * A {@code @Shadow} field that 1.21.1 moved from the mixin's target into a superclass (ClientPacketListener.minecraft went to ClientCommonPacketListenerImpl):
+     * Mixin only finds shadow fields declared in the target class itself ("@Shadow field x was not located in the target class"). The shadow field is removed and
+     * the mixin's own field accesses name the declaring superclass instead; after the merge the code runs in the target, a subclass, so the access is the same.
+     * Returns the number of fields retargeted.
+     */
+    static int retargetInheritedShadowFields(ClassNode node, List<String> targets, Mc1201Hierarchy h) {
+        if (targets.size() != 1) return 0;
+        String target = targets.get(0);
+        if (!target.startsWith("net/minecraft/") || McMembers1201.get(target) == null) return 0;
+        McMembers1201.Members own = McMembers1201.get(target);
+        java.util.Map<String, String> owners = new java.util.HashMap<>(); // field name + ":" + desc -> declaring superclass
+        for (FieldNode f : node.fields) {
+            if (!hasShadow(f.invisibleAnnotations) && !hasShadow(f.visibleAnnotations)) continue;
+            if (shadowHasPrefix(f.invisibleAnnotations) || shadowHasPrefix(f.visibleAnnotations)) continue;
+            String key = f.name + ":" + f.desc;
+            if (own.fields().contains(key)) continue;
+            String declaring = null;
+            for (String s : h.supers(target)) {
+                declaring = declaringClass(s, key, h, new java.util.HashSet<>());
+                if (declaring != null) break;
+            }
+            if (declaring != null && declaring.startsWith("net/minecraft/")) owners.put(key, declaring);
+        }
+        if (owners.isEmpty()) return 0;
+        for (MethodNode m : node.methods) {
+            for (org.objectweb.asm.tree.AbstractInsnNode in : m.instructions.toArray()) {
+                if (!(in instanceof org.objectweb.asm.tree.FieldInsnNode fi) || !fi.owner.equals(node.name)) continue;
+                String declaring = owners.get(fi.name + ":" + fi.desc);
+                if (declaring != null) fi.owner = declaring;
+            }
+        }
+        node.fields.removeIf(f -> owners.containsKey(f.name + ":" + f.desc) && (hasShadow(f.invisibleAnnotations) || hasShadow(f.visibleAnnotations)));
+        return owners.size();
+    }
+
+    private static String declaringClass(String owner, String fieldKey, Mc1201Hierarchy h, java.util.Set<String> seen) {
+        if (owner.startsWith("java/") || !seen.add(owner)) return null;
+        McMembers1201.Members mm = McMembers1201.get(owner);
+        if (mm == null) return null;
+        if (mm.fields().contains(fieldKey)) return owner;
+        for (String s : h.supers(owner)) {
+            String r = declaringClass(s, fieldKey, h, seen);
+            if (r != null) return r;
         }
         return null;
     }
@@ -214,8 +410,10 @@ final class Mixin1201 {
             if (!"method".equals(inject.values.get(i)) || !(inject.values.get(i + 1) instanceof List<?> l)) continue;
             @SuppressWarnings("unchecked") List<Object> list = (List<Object>) l;
             for (int k = 0; k < list.size(); k++) {
-                if (list.get(k) instanceof String s && (s.equals("defineSynchedData()V") || s.equals("defineSynchedData"))) {
-                    list.set(k, "defineSynchedData(" + BUILDER + ")V");
+                if (list.get(k) instanceof String s && s.matches("(L[^;]+;)?defineSynchedData(\\(\\)V)?")) {
+                    // an owner-qualified selector keeps its owner
+                    int semi = s.indexOf(';');
+                    list.set(k, (semi >= 0 ? s.substring(0, semi + 1) : "") + "defineSynchedData(" + BUILDER + ")V");
                     changed = true;
                 }
             }
@@ -239,6 +437,8 @@ final class Mixin1201 {
     }
 
     private static boolean isMissing(String target, Mc1201Hierarchy h) {
+        // a Minecraft class 1.21.1 removed that the class table already points at the layer's own stand-in (FrostWalkerEnchantment -> LegacyFrostWalker): nothing to mix into
+        if (target.startsWith("org/kylepitcock/legacyconnector/v1_20_1/migrate/")) return true;
         if (target.startsWith("net/minecraftforge/")) return true; // mapClass would have moved it to NeoForge or a facade
         if (target.startsWith("net/minecraft/") || target.startsWith("com/mojang/blaze3d/") || target.startsWith("com/mojang/math/")
                 || target.startsWith("net/neoforged/neoforge/")) return !h.isMinecraft(target);
@@ -286,7 +486,7 @@ final class Mixin1201 {
             } else if (key.equals("value") && accessor && v instanceof String s) {
                 a.values.set(i + 1, mapMember(s, ctx));
             } else if (key.equals("target") && isAt && v instanceof String s) {
-                a.values.set(i + 1, mapMember(s, ctx));
+                a.values.set(i + 1, mapAtTarget(s, ctx));
             } else if (v instanceof AnnotationNode nested) {
                 fixAnnotation(nested, ctx);
             } else if (v instanceof List<?> l) {
@@ -325,6 +525,28 @@ final class Mixin1201 {
             return name.indexOf('/') >= 0 ? r : r.replace('/', '.');
         }
         return name;
+    }
+
+    private static final Pattern DOTTED_TARGET = Pattern.compile("^([A-Za-z0-9_$]+(?:/[A-Za-z0-9_$]+)+)\\.([A-Za-z0-9_$<>]+)((?:\\(|:).*)?$");
+
+    /**
+     * An @At target: {@code Lowner;name(desc)} like every member spec, or the unreferenced dev form {@code pkg/Owner.name(desc)}. In the second form a Forge
+     * owner moves like Forge classes do ({@code net/minecraftforge/registries/GameData} to NeoForge's package), then the member rules apply.
+     */
+    private static String mapAtTarget(String spec, Ctx ctx) {
+        Matcher d = DOTTED_TARGET.matcher(spec);
+        if (!d.matches()) return mapMember(spec, ctx);
+        String owner = d.group(1);
+        String moved = owner;
+        if (owner.startsWith("net/minecraftforge/")) {
+            if (owner.startsWith("net/minecraftforge/fml/")) moved = "net/neoforged/fml/" + owner.substring("net/minecraftforge/fml/".length());
+            else if (owner.startsWith("net/minecraftforge/eventbus/")) moved = "net/neoforged/bus/" + owner.substring("net/minecraftforge/eventbus/".length());
+            else moved = "net/neoforged/neoforge/" + owner.substring("net/minecraftforge/".length());
+        }
+        String r = mapMember("L" + moved + ";" + d.group(2) + (d.group(3) == null ? "" : d.group(3)), ctx);
+        int semi = r.indexOf(';');
+        if (!r.startsWith("L") || semi < 0) return spec;
+        return r.substring(1, semi) + "." + r.substring(semi + 1);
     }
 
     /** {@code name}, {@code name(desc)ret}, {@code Lowner;name(desc)ret} or {@code Lowner;field:Ldesc;} with Mojang names. */
@@ -366,7 +588,10 @@ final class Mixin1201 {
                 if (renamed != null) break;
             }
         }
-        if (renamed != null) name = renamed;
+        if (renamed != null) {
+            name = renamed;
+            ctx.st.membersRenamed++;
+        }
         String newOwner = owner;
         if (owner != null) {
             String c = ctx.t.classes.get(owner);

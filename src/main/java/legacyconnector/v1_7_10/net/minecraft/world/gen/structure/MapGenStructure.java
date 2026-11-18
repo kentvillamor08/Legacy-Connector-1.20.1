@@ -18,6 +18,11 @@ import legacyconnector.v1_7_10.net.minecraft.world.gen.MapGenBase;
 public abstract class MapGenStructure extends MapGenBase {
     protected Map structureMap = new HashMap();
 
+    /** The structure starts by chunk key, for the layer's helpers (the field is protected). */
+    public static Map mcc$structureMap(MapGenStructure gen) {
+        return gen.structureMap;
+    }
+
     {
         org.kylepitcock.legacyconnector.v1_7_10.bridge.LegacyStructures.track(this);
     }
@@ -66,7 +71,7 @@ public abstract class MapGenStructure extends MapGenBase {
         boolean flag = false;
         for (Object o : this.structureMap.values().toArray()) {
             StructureStart start = (StructureStart) o;
-            if (start.isSizeableStructure() && start.getBoundingBox().intersectsWith(k, l, k + 15, l + 15)) {
+            if (start != null && start.isSizeableStructure() && start.getBoundingBox().intersectsWith(k, l, k + 15, l + 15)) {
                 start.generateStructure(world, rand, new StructureBoundingBox(k, l, k + 15, l + 15));
                 flag = true;
             }

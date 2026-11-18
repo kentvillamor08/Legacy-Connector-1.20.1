@@ -29,6 +29,9 @@ public abstract class EntityLivingBase extends Entity {
     public float renderYawOffset;
     @Deprecated
     public int hurtTime;
+    /** Phantom field: ticks since a player (or a machine that says so) last hit it; 0 means no experience and rare drops. */
+    @Deprecated
+    public int recentlyHit;
     @Deprecated
     public int deathTime;
     @Deprecated
@@ -162,6 +165,14 @@ public abstract class EntityLivingBase extends Entity {
         if (e.mcc$entity != null) e.mcc$living().yBodyRot = v;
     }
 
+    public static int mcc$get$recentlyHit(EntityLivingBase e) {
+        return e.mcc$entity == null ? 0 : org.kylepitcock.legacyconnector.v1_12_2.entity.ModernAccess1122.lastHurtByPlayerTime(e.mcc$living());
+    }
+
+    public static void mcc$set$recentlyHit(EntityLivingBase e, int v) {
+        if (e.mcc$entity != null) org.kylepitcock.legacyconnector.v1_12_2.entity.ModernAccess1122.setLastHurtByPlayerTime(e.mcc$living(), v);
+    }
+
     public static int mcc$get$hurtTime(EntityLivingBase e) {
         return e.mcc$entity == null ? 0 : e.mcc$living().hurtTime;
     }
@@ -185,6 +196,18 @@ public abstract class EntityLivingBase extends Entity {
     public static void mcc$set$prevHealth(EntityLivingBase e, float v) {
     }
 
+    /** Phantom field: the damage of the last hit, the modern entity's {@code lastHurt} (the hit cooldown compares the next hit against it). */
+    @Deprecated
+    public float lastDamage;
+
+    public static float mcc$get$lastDamage(EntityLivingBase e) {
+        return e.mcc$entity == null ? 0 : org.kylepitcock.legacyconnector.v1_12_2.entity.ModernAccess1122.lastHurt(e.mcc$living());
+    }
+
+    public static void mcc$set$lastDamage(EntityLivingBase e, float v) {
+        if (e.mcc$entity != null) org.kylepitcock.legacyconnector.v1_12_2.entity.ModernAccess1122.setLastHurt(e.mcc$living(), v);
+    }
+
     /** How far the arm swing has got, 0..1 (renderers pose the arm with it). */
     public float getSwingProgress(float partialTicks) {
         return mcc$entity == null ? 0 : mcc$living().getAttackAnim(partialTicks);
@@ -192,6 +215,11 @@ public abstract class EntityLivingBase extends Entity {
 
     public float getHealth() {
         return mcc$base$getHealth();
+    }
+
+    /** The stored health, never through an override of the getter (1.5.2: {@code health} the field; mods' {@code getHealth()} returns it, so reading the field must not call the getter). */
+    public static float mcc$storedHealth(EntityLivingBase e) {
+        return e.mcc$base$getHealth();
     }
 
     /** The value of {@link #getHealth()}, for the phantom field accessor (mods override the getter to read the field). */
@@ -265,7 +293,9 @@ public abstract class EntityLivingBase extends Entity {
     }
 
     public int getTotalArmorValue() {
-        return mcc$entity == null ? 0 : mcc$living().getArmorValue();
+        if (mcc$entity == null) return 0;
+        if (mcc$host() instanceof org.kylepitcock.legacyconnector.v1_7_10.entity.LegacyLivingHost h) return h.mcc$superArmorValue();
+        return mcc$living().getArmorValue();
     }
 
     /** Ray from the eyes along the look direction, against blocks (null on a miss). */
@@ -361,6 +391,25 @@ public abstract class EntityLivingBase extends Entity {
 
     public void renderBrokenItemStack(ItemStack stack) {
         if (mcc$entity != null && stack != null) mcc$living().playSound(net.minecraft.sounds.SoundEvents.ITEM_BREAK, 0.8F, 0.8F);
+    }
+
+    /** Phantom field: the active effects by potion id; accesses are redirected to {@code mcc$get$activePotionsMap}. */
+    @Deprecated
+    public java.util.HashMap activePotionsMap;
+
+    /** A snapshot map (potion id to effect) of the live effects; entries put into it are applied by the setter. */
+    public static java.util.HashMap mcc$get$activePotionsMap(EntityLivingBase e) {
+        java.util.HashMap<Integer, legacyconnector.v1_7_10.net.minecraft.potion.PotionEffect> map = new java.util.HashMap<>();
+        for (legacyconnector.v1_7_10.net.minecraft.potion.PotionEffect pe : e.getActivePotionEffects()) map.put(pe.getPotionID(), pe);
+        return map;
+    }
+
+    public static void mcc$set$activePotionsMap(EntityLivingBase e, java.util.HashMap v) {
+        e.clearActivePotions();
+        if (v == null) return;
+        for (Object o : v.values()) {
+            if (o instanceof legacyconnector.v1_7_10.net.minecraft.potion.PotionEffect pe) e.addPotionEffect(pe);
+        }
     }
 
     public boolean isPotionActive(int potionId) {
@@ -605,7 +654,13 @@ public abstract class EntityLivingBase extends Entity {
     protected void dropRareDrop(int looting) {
     }
 
+    /** {@code func_146066_aG} (MCP {@code canDropLoot}): whether the entity drops its loot when it dies (mods turn it off per entity). */
+    protected boolean func_146066_aG() {
+        return true;
+    }
+
     public final void mcc$dropLoot(boolean recentlyHit, int looting) {
+        if (!func_146066_aG()) return;
         dropFewItems(recentlyHit, looting);
         dropEquipment(recentlyHit, looting);
         if (recentlyHit && getRNG().nextFloat() < 0.025F + looting * 0.01F) dropRareDrop(looting);
@@ -746,6 +801,17 @@ public abstract class EntityLivingBase extends Entity {
         return applyPotionDamageCalculations(source, amount);
     }
 
+    /** {@code func_70655_b}: damage left after the armour (the modern getDamageAfterArmorAbsorb). Hosts route the modern calculation here so mods' overrides run. */
+    protected float applyArmorCalculations(DamageSource source, float amount) {
+        if (source == null || source.isUnblockable()) return amount;
+        int armor = 25 - Math.min(25, Math.max(0, getTotalArmorValue()));
+        return amount * armor / 25.0F;
+    }
+
+    public final float mcc$applyArmorCalculations(DamageSource source, float amount) {
+        return applyArmorCalculations(source, amount);
+    }
+
     /** Air left after one tick under water ({@code air - 1}, or {@code air} when Respiration saves the breath). */
     protected int decreaseAirSupply(int air) {
         if (!(mcc$entity instanceof LivingEntity l)) return air - 1;
@@ -768,5 +834,75 @@ public abstract class EntityLivingBase extends Entity {
 
     public final void mcc$onDeathUpdate() {
         onDeathUpdate();
+    }
+
+    // Members125 batch 1
+
+    /** Phantom field {@code stuckArrows} of 1.2.5's living entity (the arrows sticking in it, drawn by the renderer). */
+    public static int mcc$get$mcc125$stuckArrows(EntityLivingBase e) {
+        return e.getArrowCountInEntity();
+    }
+
+    public static void mcc$set$mcc125$stuckArrows(EntityLivingBase e, int v) {
+        e.setArrowCountInEntity(v);
+    }
+
+    /** Phantom field {@code swingArm} of 1.2.5's player (the arm is mid-swing; 1.3 named it {@code isSwingInProgress}). */
+    public static boolean mcc$get$mcc125$swingArm(EntityLivingBase e) {
+        return e.mcc$entity instanceof net.minecraft.world.entity.LivingEntity l && l.swinging;
+    }
+
+    public static void mcc$set$mcc125$swingArm(EntityLivingBase e, boolean v) {
+        if (e.mcc$entity instanceof net.minecraft.world.entity.LivingEntity l) l.swinging = v;
+    }
+
+    /**
+     * 1.2.5 {@code EntityLiving.onFinishedPotionEffect(effect)}: called when an effect ran out. Mods override it and call {@code super};
+     * the base does nothing (the modern game reports the end of an effect through its own event).
+     */
+    /** 1.2.5 {@code EntityLiving.beforeRemove()} (Feather name): an empty hook the 1.2.5 game never called itself; mods override it and call {@code super}. */
+    public void mcc125$beforeRemove() {
+    }
+
+    public void onFinishedPotionEffect(legacyconnector.v1_7_10.net.minecraft.potion.PotionEffect effect) {
+    }
+
+    /** Plays the hurt animation (the red flash and tilt) without damaging: ten ticks of hurt time. */
+    public void performHurtAnimation() {
+        mcc$set$hurtTime(this, 10);
+        if (mcc$entity instanceof LivingEntity l) l.hurtDuration = 10;
+    }
+
+    /** The client's side of an effect ending: removes the effect with that id from this view. */
+    public void removePotionEffectClient(int potionId) {
+        removePotionEffect(potionId);
+    }
+
+    /** Pushes the entities this one overlaps (a 0.2 block margin sideways), as 1.7.10 did every living update. */
+    protected void collideWithNearbyEntities() {
+        legacyconnector.v1_7_10.net.minecraft.world.World world = mcc$world();
+        if (world == null) return;
+        java.util.List list = world.getEntitiesWithinAABBExcludingEntity(this, mcc$get$boundingBox(this).expand(0.2D, 0.0D, 0.2D));
+        if (list == null || list.isEmpty()) return;
+        for (Object o : list) {
+            Entity other = (Entity) o;
+            if (other.canBePushed()) collideWithEntity(other);
+        }
+    }
+
+    /**
+     * {@code func_110146_f} (MCP {@code func_110146_f(bodyYaw, movement)}, the body turn): eases the body yaw towards the given yaw,
+     * keeps it within 75 degrees of the head and returns the movement, negated when the head faces away from the body.
+     */
+    protected float func_110146_f(float yaw, float movement) {
+        float diff = legacyconnector.v1_7_10.net.minecraft.util.MathHelper.wrapAngleTo180_float(yaw - mcc$get$renderYawOffset(this));
+        mcc$set$renderYawOffset(this, mcc$get$renderYawOffset(this) + diff * 0.3F);
+        float headRel = legacyconnector.v1_7_10.net.minecraft.util.MathHelper.wrapAngleTo180_float(mcc$get$rotationYaw(this) - mcc$get$renderYawOffset(this));
+        boolean behind = headRel < -90.0F || headRel >= 90.0F;
+        if (headRel < -75.0F) headRel = -75.0F;
+        if (headRel >= 75.0F) headRel = 75.0F;
+        mcc$set$renderYawOffset(this, mcc$get$rotationYaw(this) - headRel);
+        if (headRel * headRel > 2500.0F) mcc$set$renderYawOffset(this, mcc$get$renderYawOffset(this) + headRel * 0.2F);
+        return behind ? -movement : movement;
     }
 }

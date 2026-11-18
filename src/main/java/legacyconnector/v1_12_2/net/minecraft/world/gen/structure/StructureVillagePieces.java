@@ -156,13 +156,17 @@ public class StructureVillagePieces {
                 if (!structurebb.isVecInside(new BlockPos(j, k, l))) break;
                 ++this.villagersSpawned;
                 var access = worldIn.mcc$access();
-                var level = worldIn.mcc$level();
+                var level = worldIn.mcc$levelObject();
                 if (access == null || level == null) continue;
                 var type = this.isZombieInfested ? net.minecraft.world.entity.EntityType.ZOMBIE_VILLAGER : net.minecraft.world.entity.EntityType.VILLAGER;
                 var entity = type.create(level);
                 if (entity == null) continue;
                 entity.moveTo(j + 0.5D, k, l + 0.5D, 0.0F, 0.0F);
                 if (entity instanceof net.minecraft.world.entity.Mob mob) mob.setPersistenceRequired();
+                var forge = this.chooseForgeProfession(i, null);
+                if (forge != null && forge.mcc$modern() != null && entity instanceof net.minecraft.world.entity.npc.Villager villager) {
+                    villager.setVillagerData(villager.getVillagerData().setProfession(forge.mcc$modern()));
+                }
                 if (access instanceof net.minecraft.world.level.ServerLevelAccessor server && entity instanceof net.minecraft.world.entity.Mob mob) {
                     mob.finalizeSpawn(server, server.getCurrentDifficultyAt(entity.blockPosition()), net.minecraft.world.entity.MobSpawnType.STRUCTURE, null);
                 }
@@ -172,6 +176,15 @@ public class StructureVillagePieces {
 
         protected int chooseProfession(int villagersSpawnedIn, int currentVillagerProfession) {
             return currentVillagerProfession;
+        }
+
+        /**
+         * Forge: the profession of the villager spawned in this piece ({@code prof} is none here: the villager takes the host's pick unless
+         * a house returns one of its own, vanilla or a mod's with a vanilla look).
+         */
+        protected legacyconnector.v1_12_2.net.minecraftforge.fml.common.registry.VillagerRegistry.VillagerProfession chooseForgeProfession(int count,
+                legacyconnector.v1_12_2.net.minecraftforge.fml.common.registry.VillagerRegistry.VillagerProfession prof) {
+            return prof;
         }
 
         /** The block a village of this style uses instead of a plains block (Forge's GetVillageBlockID event first). */
@@ -219,13 +232,12 @@ public class StructureVillagePieces {
         }
 
         /** The door of the village's style: acacia in savanna villages, spruce in taiga villages, oak elsewhere. */
-        protected legacyconnector.v1_12_2.net.minecraft.block.Block biomeDoor() {
-            var door = switch (this.structureType) {
-                case 2 -> net.minecraft.world.level.block.Blocks.ACACIA_DOOR;
-                case 3 -> net.minecraft.world.level.block.Blocks.SPRUCE_DOOR;
-                default -> net.minecraft.world.level.block.Blocks.OAK_DOOR;
+        protected legacyconnector.v1_12_2.net.minecraft.block.BlockDoor biomeDoor() {
+            return switch (this.structureType) {
+                case 2 -> legacyconnector.v1_12_2.net.minecraft.init.Blocks.ACACIA_DOOR;
+                case 3 -> legacyconnector.v1_12_2.net.minecraft.init.Blocks.SPRUCE_DOOR;
+                default -> legacyconnector.v1_12_2.net.minecraft.init.Blocks.OAK_DOOR;
             };
-            return org.kylepitcock.legacyconnector.v1_12_2.bridge.StatesBridge1122.legacyBlock(door.defaultBlockState());
         }
 
         /** Whether the block at a piece position is air. */
@@ -245,6 +257,11 @@ public class StructureVillagePieces {
 
         protected void setStructureType(int type) {
             this.structureType = type;
+        }
+
+        /** The ground height the component builds from (set when the village assembly already placed it on its street). */
+        public void mcc$setGroundLevel(int y) {
+            this.averageGroundLvl = y;
         }
     }
 
@@ -652,6 +669,12 @@ public class StructureVillagePieces {
         public legacyconnector.v1_12_2.net.minecraft.world.biome.Biome biome;
 
         public Start() {
+        }
+
+        /** The village's style and biome, set directly (a village the layer added a building to knows its biome from the jigsaw village's type). */
+        public void mcc$setStyle(int style, legacyconnector.v1_12_2.net.minecraft.world.biome.Biome biome) {
+            this.setStructureType(style);
+            this.biome = biome;
         }
 
         public Start(legacyconnector.v1_12_2.net.minecraft.world.biome.BiomeProvider provider, int type, Random rand, int x, int z, List<PieceWeight> pieces,

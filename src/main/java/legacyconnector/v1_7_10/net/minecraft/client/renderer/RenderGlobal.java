@@ -2,6 +2,17 @@ package legacyconnector.v1_7_10.net.minecraft.client.renderer;
 
 /** The world renderer; mods only ask it to redraw blocks after their tile entities changed. */
 public class RenderGlobal {
+    public RenderGlobal() {
+    }
+
+    /** 1.6.4 shape {@code new RenderGlobal(mc)}: the modern renderer is the game's own. */
+    public RenderGlobal(legacyconnector.v1_7_10.net.minecraft.client.Minecraft mc) {
+    }
+
+    /** 1.5.2 shape {@code new RenderGlobal(mc, textureManager)}. */
+    public RenderGlobal(legacyconnector.v1_7_10.net.minecraft.client.Minecraft mc, legacyconnector.v1_7_10.net.minecraft.client.renderer.texture.TextureManager textures) {
+    }
+
     /**
      * Block-breaking progress by breaker id: a live view of the modern renderer's (mods find the 1.7.10 field by reflection and
      * read the cracking blocks from it).
@@ -59,6 +70,36 @@ public class RenderGlobal {
     public void destroyBlockPartially(int breakerId, int x, int y, int z, int stage) {
         var renderer = net.minecraft.client.Minecraft.getInstance().levelRenderer;
         if (renderer != null) renderer.destroyBlockProgress(breakerId, new net.minecraft.core.BlockPos(x, y, z), stage);
+    }
+
+    /**
+     * 1.2.5 {@code RenderGlobal.updateClouds()}: one tick of cloud drift ({@code cloudTickCounter++}). The modern renderer drifts its clouds with its own tick counter, which is advanced
+     * here, so a mod that ticks the world faster (sleeping) moves the clouds with it.
+     */
+    public void updateClouds() {
+        Clouds.advance();
+    }
+
+    private static final class Clouds {
+        private static final java.lang.reflect.Field TICKS = find();
+
+        private static java.lang.reflect.Field find() {
+            try {
+                return net.neoforged.fml.util.ObfuscationReflectionHelper.findField(net.minecraft.client.renderer.LevelRenderer.class, "ticks");
+            } catch (RuntimeException e) {
+                return null;
+            }
+        }
+
+        static void advance() {
+            var renderer = net.minecraft.client.Minecraft.getInstance().levelRenderer;
+            if (renderer == null || TICKS == null) return;
+            try {
+                TICKS.setInt(renderer, TICKS.getInt(renderer) + 1);
+            } catch (IllegalAccessException ignored) {
+                // the cloud drift stays as it was
+            }
+        }
     }
 
     /** The modern renderer tracks block entities and entities itself. */

@@ -3,6 +3,7 @@ package legacyconnector.v1_12_2.net.minecraft.item;
 import legacyconnector.v1_12_2.net.minecraft.nbt.NBTTagCompound;
 
 /** 1.12.2 {@code ItemStack}: an item, a count, a damage/metadata value and a tag. Converted to the modern stack at the boundaries. */
+@com.google.gson.annotations.JsonAdapter(org.kylepitcock.legacyconnector.v1_12_2.bridge.LegacyGson1122.ItemStackAdapter.class)
 public final class ItemStack {
     public static final ItemStack EMPTY = new ItemStack((Item) null);
 
@@ -653,6 +654,17 @@ public final class ItemStack {
         NBTTagCompound tag = getTagCompound();
         if (blockIn == null || tag == null || !tag.hasKey("CanDestroy", 9)) return false;
         var list = tag.getTagList("CanDestroy", 8);
+        for (int i = 0; i < list.tagCount(); ++i) {
+            if (legacyconnector.v1_12_2.net.minecraft.block.Block.getBlockFromName(list.getStringTagAt(i)) == blockIn) return true;
+        }
+        return false;
+    }
+
+    /** Adventure mode: whether the stack's {@code CanPlaceOn} list names the block. */
+    public boolean canPlaceOn(legacyconnector.v1_12_2.net.minecraft.block.Block blockIn) {
+        NBTTagCompound tag = getTagCompound();
+        if (blockIn == null || tag == null || !tag.hasKey("CanPlaceOn", 9)) return false;
+        var list = tag.getTagList("CanPlaceOn", 8);
         for (int i = 0; i < list.tagCount(); ++i) {
             if (legacyconnector.v1_12_2.net.minecraft.block.Block.getBlockFromName(list.getStringTagAt(i)) == blockIn) return true;
         }

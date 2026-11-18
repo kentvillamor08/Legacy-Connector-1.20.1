@@ -27,6 +27,13 @@ public final class MobsB173 {
         modBus.addListener((net.neoforged.neoforge.event.entity.EntityAttributeCreationEvent e)->{
             for(var info:BY_TYPE.values())e.put(info.type(),net.minecraft.world.entity.animal.Cow.createAttributes().build());
         });
+        modBus.addListener((net.neoforged.neoforge.event.entity.RegisterSpawnPlacementsEvent event)->{
+            // Only registered hosted cows enter the Beta candidate walk; native cows keep their own placement predicate.
+            for(var info:BY_TYPE.values())event.register(info.type(),net.minecraft.world.entity.SpawnPlacementTypes.ON_GROUND,
+                    net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                    (type,level,reason,pos,random)->true,
+                    net.neoforged.neoforge.event.entity.RegisterSpawnPlacementsEvent.Operation.REPLACE);
+        });
         org.kylepitcock.legacyconnector.core.pack.GeneratedPack.addContributor((type,out)->{
             if(type!=net.minecraft.server.packs.PackType.SERVER_DATA)return;
             // Beta Cow.getDroppedItemId is leather; EntityLiving.dropItems chooses random.nextInt(3), with no beef.
@@ -37,6 +44,8 @@ public final class MobsB173 {
             }
         });
         MobSelfTestB173.register(game);
+        if(Boolean.getBoolean("legacyconnector.plasticCraftBlocksSelfTest"))game.addListener(
+                (net.neoforged.neoforge.event.server.ServerStartedEvent event)->PlasticCraftBlocksSelfTestB173.run(event.getServer().overworld()));
     }
     private static boolean api(Class<?> type){String name=type.getName();return name.startsWith("legacyconnector.")||name.startsWith("legacyconnector_synth.");}
     public static boolean cowFamily(Class<?> type){
@@ -96,11 +105,11 @@ public final class MobsB173 {
             if(BuiltInRegistries.ENTITY_TYPE.containsKey(id)){reject(legacy,"duplicate entity registry key "+id);continue;}
             EntityType<LegacyB173Cow> type=EntityType.Builder.<LegacyB173Cow>of((t,l)->{
                 try{return new LegacyB173Cow(t,l,null);}catch(RuntimeException|LinkageError e){LOG.error("Cannot construct Beta mob {}",legacy.getName(),e);return null;}
-            },MobCategory.CREATURE).sized(.9F,1.4F).clientTrackingRange(10).build(id.toString());
-            LegacyRegistrar.register(BuiltInRegistries.ENTITY_TYPE,id,type);
+            },SpawnRulesB173.categoryFor(legacy,MobCategory.CREATURE)).sized(.9F,1.4F).clientTrackingRange(10).build(id.toString());
+            LegacyRegistrar.register(BuiltInRegistries.ENTITY_TYPE,id,type);BridgeB173.entityName(id,registration.name());
             Info info=new Info(registration,type,override(legacy,"interact",legacyconnector.vb1_7_3.net.minecraft.entity.player.PlayerEntity.class),override(legacy,"getRandomSound"));
             BY_CLASS.put(legacy,info);BY_TYPE.put(type,info);
-            LOG.info("Hosted Beta mob {} as {} (native cow AI/model fallback; original custom models and natural spawns are not bridged)",legacy.getName(),id);
+            LOG.info("Hosted Beta mob {} as {} (native cow AI/model fallback; original interaction/save and legacy spawn callbacks)",legacy.getName(),id);
         }
     }
     private static void reject(Class<?> type,String reason){if(REPORTED.add(type.getName()+":"+reason))LOG.warn("Beta mob {} not hosted: {}",type.getName(),reason);}
@@ -112,7 +121,7 @@ public final class MobsB173 {
         if(info==null){reject(legacy.getClass(),"no supported registered mob type");return false;}
         if(legacy.mcc$modern!=null)return false;
         LegacyB173Cow host=null;boolean added=false;
-        try{host=new LegacyB173Cow(info.type(),level,legacy);added=level.addFreshEntity(host);return added;}
+        try{host=new LegacyB173Cow(info.type(),level,legacy);added=World.mcc$wrap(level).mcc$spawnNative(host);return added;}
         catch(RuntimeException|LinkageError e){LOG.error("Cannot spawn Beta mob {}",legacy.getClass().getName(),e);return false;}
         finally{if(!added){legacy.mcc$modern=null;if(host!=null)host.discard();}}
     }

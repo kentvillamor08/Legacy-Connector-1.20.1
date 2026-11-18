@@ -8,7 +8,7 @@
   var ORDER = ["perfect", "playable", "works", "partial", "loads", "fails", "crashes"];
   // legacy Minecraft versions with a tab: supported ones first, planned ones greyed out until they have data
   var SUPPORTED = ["1.7.10", "1.12.2"];
-  var PLANNED = ["1.6.4", "1.5.2", "1.4.7", "1.20.1", "1.19.2", "1.18.2", "1.16.5", "1.2.5", "b1.7.3"]; // roadmap order (docs/wiki/Version-Roadmap.md)
+  var PLANNED = ["1.6.4", "1.5.2", "1.4.7", "1.2.5", "b1.7.3", "1.20.1", "1.19.2", "1.18.2", "1.16.5"]; // roadmap order (docs/wiki/Version-Roadmap.md)
   // Plain-language result categories of the automated check (probe.py "kind"). "unresolved" is the older, unsplit cause of runs made before the split.
   var KINDS = [
     { key: "links", label: "Ready to test", color: "var(--links)", hint: "translates, and nothing it needs is missing" },
@@ -25,7 +25,7 @@
   var PAGE_MODS = 80, PAGE_PROBE = 100, HISTORY_SHOWN = 8;
 
   var state = { route: "mods", q: "", status: "all", sort: "name", tab: "", all: [], modsShown: PAGE_MODS,
-                runs: [], res: {}, rmc: "", rq: "", rfilter: "layer", rShown: 40, pmc: "", run: null, kind: "all", pq: "", psort: "name", pShown: PAGE_PROBE, histAll: false, loaded: false };
+                runs: [], res: {}, rmc: "", rq: "", rfilter: "layer", rShown: 40, pmc: "", psrc: {}, run: null, kind: "all", pq: "", psort: "name", pShown: PAGE_PROBE, histAll: false, loaded: false };
 
   // ---------- utils ----------
   function $(id) { return document.getElementById(id); }
@@ -158,11 +158,28 @@
 
   function versionsWithData() { var seen = {}; state.all.forEach(function (m) { seen[m.mc] = true; }); return seen; }
   function tabMods() { return state.all.filter(function (m) { return m.mc === state.tab; }); }
-  function runsOf(mc) {
-    return state.runs.filter(function (r) { return r.mc === mc; })
-      // newest first; on the same day and version the larger population (the main corpus) leads, a smaller labelled one (CI) follows
+  // Runs come from different jar populations ("source": the maintainer's corpus, MCArchive, Modrinth in CI, none = local). They are never mixed:
+  // the page shows one source per Minecraft version (the one whose latest run has the most mods unless the reader picks another),
+  // so a small run of one source does not look like a collapse of a large run of another.
+  function sourceOf(r) { return r.source || "local"; }
+  function runsOfSource(mc, src) {
+    return state.runs.filter(function (r) { return r.mc === mc && sourceOf(r) === src; })
+      // newest first; on the same day and version the larger population leads
       .sort(function (a, b) { return (b.date || "").localeCompare(a.date || "") || byVersion(b.version || "0", a.version || "0") || total(b.counts) - total(a.counts); });
   }
+  function sourcesOf(mc) {
+    var seen = {};
+    state.runs.forEach(function (r) { if (r.mc === mc) seen[sourceOf(r)] = 1; });
+    return Object.keys(seen).sort(function (a, b) {
+      var ra = runsOfSource(mc, a)[0], rb = runsOfSource(mc, b)[0];
+      return total(rb.counts) - total(ra.counts) || (rb.date || "").localeCompare(ra.date || "") || (a < b ? -1 : 1);
+    });
+  }
+  function sourceFor(mc) {
+    var srcs = sourcesOf(mc), want = state.psrc[mc];
+    return srcs.indexOf(want) >= 0 ? want : srcs[0];
+  }
+  function runsOf(mc) { return runsOfSource(mc, sourceFor(mc)); }
   function probeVersions() { return Array.from(new Set(state.runs.map(function (r) { return r.mc; }))).sort(byVersion); }
 
   // ---------- routing ----------
@@ -352,7 +369,7 @@
   function versionNote(host, mc) {
     if (!host) return;
     host.textContent = "";
-    host.hidden = mc !== "1.20.1" && mc !== "b1.7.3";
+    host.hidden = mc !== "1.20.1" && mc !== "b1.7.3" && mc !== "1.2.5";
     if (host.hidden) return;
     function p(parts) {
       var e = el("p");
@@ -361,6 +378,11 @@
     }
     function code(t) { return el("code", null, t); }
     function b(t) { return el("b", null, t); }
+    if (mc === "1.2.5") {
+      host.appendChild(p([b("Alpha, on by default. "), "Minecraft 1.2.5 (ModLoader and early Forge mods) is hosted through the 1.4.7 layer (the release and nightly jars carry the name table it needs; ", code("versions.minecraft125=false"), " in ", code("config/legacyconnector.properties"), " turns it off); put the jars in ", code("mods/1.2.5/"), ". About a dozen small mods (Obsidian Hilt, BucketCraft, Magic Wands, Backpack, Elemental Creepers and others) registered and drew their content in a real client; six small mods were played in survival, save and reload included."]));
+      host.appendChild(p([b("Read “Ready to test” with care here. "), "For 1.2.5 it means the jar translates and every reference resolves, but the references include many game members that exist only as empty placeholders (the layer synthesizes them so the jar links; in the 1.2.5 corpus about 1,400 distinct members, 385 of them used by the mods of the latest run). A mod can therefore link and still do nothing in the places that matter. The automated-check table shows how many placeholders each mod uses; a high number is a warning, and none of these results is a test that the mod works."]));
+      return;
+    }
     if (mc === "b1.7.3") {
       host.appendChild(p([b("Alpha (server-tested). "), "Beta 1.7.3 ModLoader and Forge 1.0 mods go in ", code("mods/b1.7.3/"), ". The layer was contributed by Zekken01. The results here come from that contributor's headless server tests (the mods translate, load, register their content and run their own callbacks); none was tested in a graphical client yet."]));
       host.appendChild(p([b("Archive audit. "), "An offline scan of a 1,040-file Beta 1.7.3 mod archive (1,222 mod payloads) found 544 payloads that need ModLoader, 74 ModLoaderMP and 42 Forge; 548 payloads replace no base game classes (the easiest to support), 572 replace some, 54 are libraries or resources and 20 bundle API patches. The full summary is in ", code("docs/data/b173-archive-audit-summary.json"), "."]));
@@ -530,9 +552,10 @@
   function renderRunSelect() {
     var sel = $("run");
     sel.textContent = "";
+    renderSourceSwitch();
     var runs = runsOf(state.pmc);
     runs.forEach(function (r, i) {
-      var o = el("option", null, (r.version ? "Connector " + r.version + ", " : "") + r.date + (r.source ? ", " + r.source + " only" : ", " + total(r.counts) + " mods") + (i === 0 ? " (latest)" : ""));
+      var o = el("option", null, (r.version ? "Connector " + r.version + ", " : "") + r.date + ", " + total(r.counts) + " mods" + (i === 0 ? " (latest)" : ""));
       o.value = String(i);
       sel.appendChild(o);
     });
@@ -540,12 +563,32 @@
     sel.onchange = function () { state.run = runs[+sel.value]; state.kind = "all"; state.pShown = PAGE_PROBE; renderChart(); renderPList(); renderRunInfo(); };
     renderRunInfo();
   }
+  var SOURCE_LABEL = { local: "local", modrinth: "Modrinth top downloads", mcarchive: "MCArchive corpus", corpus: "maintainer corpus" };
+  function sourceLabel(src) { return SOURCE_LABEL[src] || src; }
+  // one button per jar population of this Minecraft version; runs of different sources are never compared with each other
+  function renderSourceSwitch() {
+    var host = $("srcswitch");
+    if (!host) return;
+    host.textContent = "";
+    var srcs = sourcesOf(state.pmc), cur = sourceFor(state.pmc);
+    host.hidden = srcs.length < 2;
+    if (srcs.length < 2) return;
+    host.appendChild(document.createTextNode("Jar source "));
+    srcs.forEach(function (src) {
+      var r = runsOfSource(state.pmc, src)[0];
+      var b = el("button", "chip", sourceLabel(src) + " (" + total(r.counts) + " mods)");
+      b.type = "button";
+      b.setAttribute("aria-pressed", src === cur ? "true" : "false");
+      b.onclick = function () { state.psrc[state.pmc] = src; state.run = runsOf(state.pmc)[0]; state.kind = "all"; state.pShown = PAGE_PROBE; state.histAll = false; renderAutomated(); };
+      host.appendChild(b);
+    });
+  }
   function renderRunInfo() {
     var host = $("runinfo");
     host.textContent = "";
     var r = state.run;
     if (!r) return;
-    host.appendChild(document.createTextNode(total(r.counts) + " mods checked"));
+    host.appendChild(document.createTextNode(total(r.counts) + " mods checked \u00B7 " + sourceLabel(sourceOf(r)) + ", " + r.date + (r.version ? ", Connector " + r.version : "")));
     // what changed since the previous run of this version (probe.py "vs"): fixed and regressed mods, so a release that breaks a mod is visible
     if (r.vs) {
       var fixed = r.vs.fixedCount || 0, bad = r.vs.regressedCount || 0;
@@ -693,6 +736,12 @@
       tr.appendChild(el("td", "col-ver", m[1]));
       var td = el("td"); td.appendChild(el("span", "res " + m[2], RESLABEL[m[2]] || m[2])); tr.appendChild(td);
       var why = el("td", "why", m[3] || "");
+      var sc = run.stubCounts && run.stubCounts[m[0]];
+      if (sc && String(m[3] || "").indexOf("synthesized") < 0) {   // 1.2.5: how much of what the mod uses is an empty placeholder
+        var stubs = el("div", "small");
+        stubs.textContent = "Also uses " + sc + " empty placeholder feature" + (sc === 1 ? "" : "s");
+        why.appendChild(stubs);
+      }
       // rendering smoke test (m[4] lost in translation, m[5] missing in the mod's own jar too, m[6] examples)
       if (m[4]) {
         var lost = el("div", "small");
@@ -857,8 +906,14 @@
   }
 
   // ---------- boot ----------
+  // Scheduled jobs cannot push to the protected master branch: they write the data files to the branch "site-data", which is read
+  // first; the copy next to this page (master) is the fallback.
+  var DATA_BRANCH = "https://raw.githubusercontent.com/kylepitcock/Legacy-Connector/site-data/docs/";
   function load(path) {
-    return fetch(path, { cache: "no-cache" }).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; });
+    function local() {
+      return fetch(path, { cache: "no-cache" }).then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; });
+    }
+    return fetch(DATA_BRANCH + path, { cache: "no-cache" }).then(function (r) { return r.ok ? r.json() : local(); }).catch(local);
   }
 
   function init() {

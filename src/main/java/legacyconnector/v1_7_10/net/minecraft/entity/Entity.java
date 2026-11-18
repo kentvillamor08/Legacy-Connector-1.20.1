@@ -132,6 +132,14 @@ public abstract class Entity implements ICommandSender {
     @Deprecated
     public boolean noClip;
     private boolean mcc$local_noClip;
+    /**
+     * Phantom field: accesses are redirected to {@code mcc$get$ignoreFrustumCheck}. The modern equivalent is {@code noCulling}, which
+     * Sodium and Entity Culling read too (Entity Culling stops ticking a culled entity, so a mod's client-side effect entity that
+     * is drawn around the player froze after a few ticks).
+     */
+    @Deprecated
+    public boolean ignoreFrustumCheck;
+    private boolean mcc$local_ignoreFrustumCheck;
     /** Phantom field: accesses are redirected to {@code mcc$get$width}. */
     @Deprecated
     public float width;
@@ -348,6 +356,27 @@ public abstract class Entity implements ICommandSender {
         return mcc$extended != null && !mcc$extended.isEmpty();
     }
 
+    /**
+     * Whether a write to {@code posX/posY/posZ} also moves {@code boundingBox}. In 1.7.10 it never did (only setPosition and
+     * moveEntity moved the box), and a rail-following cart writes posY and then offsets the box and derives its position from
+     * it (Traincraft's diagonal track); the modern entity's box follows its position, so carts opt out ({@link #mcc$writePos}).
+     */
+    public boolean mcc$posWriteMovesBox() {
+        return true;
+    }
+
+    /** A position field write: the modern position, with the legacy box left where it was for entities that opt out. */
+    private static void mcc$writePos(Entity e, net.minecraft.world.entity.Entity m, double x, double y, double z) {
+        if (e.mcc$posWriteMovesBox()) {
+            m.setPos(x, y, z);
+            return;
+        }
+        mcc$get$boundingBox(e); // changes the mod made to the box so far go to the modern entity first
+        var box = m.getBoundingBox();
+        m.setPos(x, y, z);
+        m.setBoundingBox(box);
+    }
+
     public static double mcc$get$posX(Entity e) {
         var m = e.mcc$entity;
         return m != null ? m.getX() : e.mcc$local_posX;
@@ -356,7 +385,7 @@ public abstract class Entity implements ICommandSender {
     public static void mcc$set$posX(Entity e, double v) {
         var m = e.mcc$entity;
         if (m != null) {
-            m.setPos(v, m.getY(), m.getZ());
+            mcc$writePos(e, m, v, m.getY(), m.getZ());
         } else {
             e.mcc$local_posX = v;
         }
@@ -370,7 +399,7 @@ public abstract class Entity implements ICommandSender {
     public static void mcc$set$posY(Entity e, double v) {
         var m = e.mcc$entity;
         if (m != null) {
-            m.setPos(m.getX(), v - e.mcc$yShift(), m.getZ());
+            mcc$writePos(e, m, m.getX(), v - e.mcc$yShift(), m.getZ());
         } else {
             e.mcc$local_posY = v;
         }
@@ -384,7 +413,7 @@ public abstract class Entity implements ICommandSender {
     public static void mcc$set$posZ(Entity e, double v) {
         var m = e.mcc$entity;
         if (m != null) {
-            m.setPos(m.getX(), m.getY(), v);
+            mcc$writePos(e, m, m.getX(), m.getY(), v);
         } else {
             e.mcc$local_posZ = v;
         }
@@ -474,6 +503,16 @@ public abstract class Entity implements ICommandSender {
         }
     }
 
+    /**
+     * A legacy write to an entity's motion fields: other entities are re-synced to their trackers, as 1.7.10 code expects of what it
+     * moves. A player's own motion is not sent: 1.7.10 never synced it (only velocityChanged, set explicitly, did), the client runs the
+     * same block and item code itself, and the server's copy is not the player's real velocity (a cloud block slowing a fall
+     * wrote the server's near-zero motion to the client every tick, which cancelled every jump).
+     */
+    private static void mcc$velocityChanged(net.minecraft.world.entity.Entity m) {
+        if (!(m instanceof net.minecraft.server.level.ServerPlayer)) m.hurtMarked = true;
+    }
+
     public static double mcc$get$motionX(Entity e) {
         var m = e.mcc$entity;
         return m != null ? m.getDeltaMovement().x : e.mcc$local_motionX;
@@ -482,7 +521,7 @@ public abstract class Entity implements ICommandSender {
     public static void mcc$set$motionX(Entity e, double v) {
         var m = e.mcc$entity;
         if (m != null) {
-            m.setDeltaMovement(v, m.getDeltaMovement().y, m.getDeltaMovement().z); m.hurtMarked = true;
+            m.setDeltaMovement(v, m.getDeltaMovement().y, m.getDeltaMovement().z); mcc$velocityChanged(m);
         } else {
             e.mcc$local_motionX = v;
         }
@@ -496,7 +535,7 @@ public abstract class Entity implements ICommandSender {
     public static void mcc$set$motionY(Entity e, double v) {
         var m = e.mcc$entity;
         if (m != null) {
-            m.setDeltaMovement(m.getDeltaMovement().x, v, m.getDeltaMovement().z); m.hurtMarked = true;
+            m.setDeltaMovement(m.getDeltaMovement().x, v, m.getDeltaMovement().z); mcc$velocityChanged(m);
         } else {
             e.mcc$local_motionY = v;
         }
@@ -510,7 +549,7 @@ public abstract class Entity implements ICommandSender {
     public static void mcc$set$motionZ(Entity e, double v) {
         var m = e.mcc$entity;
         if (m != null) {
-            m.setDeltaMovement(m.getDeltaMovement().x, m.getDeltaMovement().y, v); m.hurtMarked = true;
+            m.setDeltaMovement(m.getDeltaMovement().x, m.getDeltaMovement().y, v); mcc$velocityChanged(m);
         } else {
             e.mcc$local_motionZ = v;
         }
@@ -723,6 +762,20 @@ public abstract class Entity implements ICommandSender {
         }
     }
 
+    public static boolean mcc$get$ignoreFrustumCheck(Entity e) {
+        var m = e.mcc$entity;
+        return m != null ? m.noCulling : e.mcc$local_ignoreFrustumCheck;
+    }
+
+    public static void mcc$set$ignoreFrustumCheck(Entity e, boolean v) {
+        var m = e.mcc$entity;
+        if (m != null) {
+            m.noCulling = v;
+        } else {
+            e.mcc$local_ignoreFrustumCheck = v;
+        }
+    }
+
     public static float mcc$get$width(Entity e) {
         var m = e.mcc$entity;
         return m != null ? m.getBbWidth() : e.mcc$local_width;
@@ -841,7 +894,27 @@ public abstract class Entity implements ICommandSender {
      */
     public net.minecraft.world.level.LevelAccessor mcc$worldOverride;
 
+    /**
+     * A world object a mod assigned to {@code worldObj} that is not the entity's own world: a proxy world (MineFactory's grinder moves the mob
+     * into its own WorldServer subclass so the drops and experience of its death arrive at the machine). Reads answer it, entity drops
+     * go through it ({@link #entityDropItem}) and the modern death drops and experience of the entity are handed to it
+     * ({@code EventBridge1710}).
+     */
+    public World mcc$worldProxy;
+
+    public static void mcc$set$worldObj(Entity e, World w) {
+        var m = e.mcc$entity;
+        if (w == null || m == null) {
+            e.mcc$worldProxy = null;
+            return;
+        }
+        // the entity's own world (any view of its level) is no proxy
+        World natural = World.mcc$wrap(m.level());
+        e.mcc$worldProxy = natural != null && natural.getClass() == w.getClass() ? null : w;
+    }
+
     public static World mcc$get$worldObj(Entity e) {
+        if (e.mcc$worldProxy != null) return e.mcc$worldProxy;
         var override = e.mcc$worldOverride;
         if (override != null) return World.mcc$wrap(override);
         var m = e.mcc$entity;
@@ -927,6 +1000,15 @@ public abstract class Entity implements ICommandSender {
 
     public int getEntityId() {
         return mcc$entity == null ? mcc$localId : mcc$entity.getId();
+    }
+
+    /** What the entity holds and wears (held item, boots, leggings, chestplate, helmet): none for entities that carry nothing (living ones override). */
+    public legacyconnector.v1_7_10.net.minecraft.item.ItemStack[] getLastActiveItems() {
+        return null;
+    }
+
+    /** Credits {@code score} points for killing {@code killed}; only players keep a score (living entities override). */
+    public void addToPlayerScore(Entity killed, int score) {
     }
 
     /** Phantom field: accesses are redirected to {@code mcc$get$entityId} (mods put it in packets; the plain field stayed 0). */
@@ -1374,8 +1456,22 @@ public abstract class Entity implements ICommandSender {
         return true;
     }
 
+    /** How many spawn points a teleport or spawn search tries (3 for most entities). */
+    public int getMaxSafePointTries() {
+        return 3;
+    }
+
     public boolean canBeCollidedWith() {
         return !mcc$hosted() && mcc$entity != null && mcc$entity.isPickable();
+    }
+
+    /** The head yaw of a living entity; other entities have no head to turn. */
+    public void setRotationYawHead(float yaw) {
+    }
+
+    /** The sound of this entity splashing into water. */
+    protected String getSplashSound() {
+        return "game.neutral.swim.splash";
     }
 
     public boolean canBePushed() {

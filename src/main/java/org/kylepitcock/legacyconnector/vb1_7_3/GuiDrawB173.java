@@ -36,9 +36,28 @@ public final class GuiDrawB173 {
         void translate(float x, float y, float z);
 
         void scale(float x, float y, float z);
+        default void rotate(float angle,float x,float y,float z) {}
+        default void lighting(boolean enabled) {}
+        default void entity(Object entity,double x,double y,double z,float yaw,float partial) {}
+        /** A stack's icon at a screen position, or (decorations) its count and damage bar. */
+        default void item(net.minecraft.world.item.ItemStack stack,int x,int y,boolean decorations) {}
 
         /** A button's click sound. */
         void click();
+
+        /** True while a legacy GUI is being drawn into a screen. */
+        default boolean drawing() {return false;}
+        /** One immediate-mode quad (Tessellator) in the current matrix and texture; colours are ARGB per vertex. */
+        default void quad(double[] x,double[] y,double[] u,double[] v,int[] argb) {}
+        /** glEnable/glDisable(GL_TEXTURE_2D). */
+        default void texture2d(boolean enabled) {}
+        /** glEnable/glDisable(GL_DEPTH_TEST): drawn with it off, a GUI's later quads and text cover the items it drew before (a tooltip). */
+        default void depthTest(boolean enabled) {}
+        /** glMatrixMode: 5888 modelview, 5889 projection. */
+        default void matrixMode(int mode) {}
+        default void loadIdentity() {}
+        /** glOrtho: the legacy coordinates that span the screen. */
+        default void ortho(double left,double right,double bottom,double top) {}
     }
 
     private static volatile Sink sink;
@@ -117,8 +136,27 @@ public final class GuiDrawB173 {
         if (s != null) s.scale(x, y, z);
     }
 
+    public static boolean drawing() {Sink s=sink();return s!=null&&s.drawing();}
+    public static void quad(double[] x,double[] y,double[] u,double[] v,int[] argb) {Sink s=sink();if(s!=null)s.quad(x,y,u,v,argb);}
+    public static void texture2d(boolean enabled) {Sink s=sink();if(s!=null)s.texture2d(enabled);}
+    public static void depthTest(boolean enabled) {Sink s=sink();if(s!=null)s.depthTest(enabled);}
+    public static void matrixMode(int mode) {Sink s=sink();if(s!=null)s.matrixMode(mode);}
+    public static void loadIdentity() {Sink s=sink();if(s!=null)s.loadIdentity();}
+    public static void ortho(double left,double right,double bottom,double top) {Sink s=sink();if(s!=null)s.ortho(left,right,bottom,top);}
+
+    /** Beta's {@code RenderItem.renderItemIntoGUI} / {@code renderItemOverlayIntoGUI}. */
+    public static void item(legacyconnector.vb1_7_3.net.minecraft.item.ItemStack stack,int x,int y,boolean decorations) {
+        Sink s=sink();if(s==null||stack==null)return;
+        // Beta drew a stack's icon whatever its size (a trader shows goods it is out of as stacks of zero) and its count only above one
+        if(stack.count<1){stack=stack.copy();stack.count=1;}
+        var modern=StacksB173.toModern(stack);if(!modern.isEmpty())s.item(modern,x,y,decorations);
+    }
+
     public static void click() {
         Sink s = sink();
         if (s != null) s.click();
     }
+    public static void rotate(float angle,float x,float y,float z) {Sink s=sink();if(s!=null)s.rotate(angle,x,y,z);}
+    public static void lighting(boolean enabled) {Sink s=sink();if(s!=null)s.lighting(enabled);}
+    public static void entity(Object entity,double x,double y,double z,float yaw,float partial) {Sink s=sink();if(s!=null)s.entity(entity,x,y,z,yaw,partial);}
 }

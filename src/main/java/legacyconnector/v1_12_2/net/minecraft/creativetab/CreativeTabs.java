@@ -59,7 +59,7 @@ public class CreativeTabs {
     }
 
     public String getTranslatedTabLabel() {
-        return "itemGroup." + tabLabel;
+        return "itemGroup." + getTabLabel();
     }
 
     /** Icon item: mods override one of these. */
@@ -68,6 +68,11 @@ public class CreativeTabs {
     }
 
     public ItemStack getIconItemStack() {
+        return createIcon();
+    }
+
+    /** Forge 14.23.5.2800+ replaced {@link #getTabIconItem()} by this one; either may be overridden. */
+    public ItemStack createIcon() {
         return getTabIconItem();
     }
 

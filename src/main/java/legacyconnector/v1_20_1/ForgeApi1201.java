@@ -135,6 +135,14 @@ public final class ForgeApi1201 {
 
     /** Forge accepted {@code bus.register(obj)} for an object without subscriber methods (a mod registering its main class "just in case"); NeoForge throws. */
     public static void busRegister(net.neoforged.bus.api.IEventBus bus, Object target) {
+        // a config event handler goes through the per-method wrapper (it tolerates the config read at the unload, see registerEachMethod)
+        for (java.lang.reflect.Method m : target.getClass().getMethods()) {
+            if (m.getParameterCount() == 1 && m.getAnnotation(net.neoforged.bus.api.SubscribeEvent.class) != null
+                    && m.getParameterTypes()[0] == net.neoforged.fml.event.config.ModConfigEvent.class) {
+                registerEachMethod(bus, target);
+                return;
+            }
+        }
         try {
             bus.register(target);
         } catch (IllegalArgumentException e) {
@@ -143,7 +151,17 @@ public final class ForgeApi1201 {
                 registerSplit(bus, target);
                 return;
             }
+            // Forge called a static @SubscribeEvent method of an object registered as an instance; NeoForge insists on register(Class) for it
+            if (message != null && message.contains("to NOT be static")) {
+                registerEachMethod(bus, target);
+                return;
+            }
             if (message != null && message.contains("Cannot register listeners for abstract class")) {
+                registerEachMethod(bus, target);
+                return;
+            }
+            // Forge also registered the @SubscribeEvent methods a superclass declares (Cyclops Core mods extend ModBase); NeoForge refuses the object
+            if (message != null && message.contains("however its supertype")) {
                 registerEachMethod(bus, target);
                 return;
             }
@@ -182,7 +200,9 @@ public final class ForgeApi1201 {
     private static void registerEachMethod(net.neoforged.bus.api.IEventBus bus, Object target) {
         boolean isClass = target instanceof Class<?>;
         Class<?> type = isClass ? (Class<?>) target : target.getClass();
-        for (java.lang.reflect.Method m : type.getMethods()) {
+        java.util.List<java.lang.reflect.Method> all = new java.util.ArrayList<>();
+        for (Class<?> c = type; c != null && c != Object.class; c = c.getSuperclass()) all.addAll(java.util.Arrays.asList(c.getDeclaredMethods()));
+        for (java.lang.reflect.Method m : all) {
             net.neoforged.bus.api.SubscribeEvent sub = m.getAnnotation(net.neoforged.bus.api.SubscribeEvent.class);
             if (sub == null || m.getParameterCount() != 1 || java.lang.reflect.Modifier.isStatic(m.getModifiers()) == isClass == false && isClass) continue;
             if (!net.neoforged.bus.api.Event.class.isAssignableFrom(m.getParameterTypes()[0])) continue;
@@ -196,6 +216,9 @@ public final class ForgeApi1201 {
                         try {
                             m.invoke(java.lang.reflect.Modifier.isStatic(m.getModifiers()) ? null : target, event);
                         } catch (java.lang.reflect.InvocationTargetException ex) {
+                            // Forge 1.20.1 kept the spec's values readable after the unload (CoFH Core refreshes its settings from the Unloading event at server stop);
+                            // NeoForge clears the loaded config first, so a ConfigValue read fails with "Cannot get config value before config is loaded"
+                            if (event instanceof net.neoforged.fml.event.config.ModConfigEvent.Unloading && ex.getCause() instanceof IllegalStateException) return;
                             throw ex.getCause() instanceof RuntimeException r ? r : new RuntimeException(ex.getCause());
                         } catch (IllegalAccessException ex) {
                             throw new IllegalStateException(ex);
@@ -206,6 +229,35 @@ public final class ForgeApi1201 {
                 }
             }
         }
+    }
+
+    /** The entries of the module or jar a class comes from (the game's own jar is a union file system, which has no default-file-system path). */
+    private static java.util.List<String> classNames(Class<?> base) throws Exception {
+        java.util.List<String> names = new java.util.ArrayList<>();
+        // the mod file of the module (the game's own jar is a union file system: no default-file-system path, no module listing)
+        try {
+            var file = net.neoforged.fml.ModList.get().getModFileById("neoforge");
+            if (file != null && base.getName().startsWith("net.neoforged.neoforge.")) {
+                java.nio.file.Path root = file.getFile().getSecureJar().getRootPath();
+                try (var walk = java.nio.file.Files.walk(root)) {
+                    walk.forEach(p -> {
+                        String n = root.relativize(p).toString().replace(java.io.File.separatorChar, '/');
+                        if (n.endsWith(".class")) names.add(n);
+                    });
+                }
+                return names;
+            }
+        } catch (RuntimeException | java.io.IOException ignored) {
+            // the jar path below
+        }
+        java.net.URL where = base.getProtectionDomain().getCodeSource() == null ? null : base.getProtectionDomain().getCodeSource().getLocation();
+        if (where != null) {
+            try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(java.nio.file.Path.of(where.toURI()).toFile())) {
+                var entries = zip.entries();
+                while (entries.hasMoreElements()) names.add(entries.nextElement().getName());
+            }
+        }
+        return names;
     }
 
     private static final java.util.Map<Class<?>, java.util.List<Class<? extends net.neoforged.bus.api.Event>>> CONCRETE = new java.util.concurrent.ConcurrentHashMap<>();
@@ -219,23 +271,14 @@ public final class ForgeApi1201 {
         return CONCRETE.computeIfAbsent(abstractType, base -> {
             java.util.List<Class<? extends net.neoforged.bus.api.Event>> out = new java.util.ArrayList<>();
             try {
-                java.net.URL where = base.getProtectionDomain().getCodeSource() == null ? null : base.getProtectionDomain().getCodeSource().getLocation();
-                String pkg = base.getName().substring(0, base.getName().lastIndexOf('.', base.getName().indexOf('$') > 0 ? base.getName().indexOf('$') : base.getName().length())).replace('.', '/');
-                if (where != null) {
-                    java.nio.file.Path path = java.nio.file.Path.of(where.toURI());
-                    try (java.util.zip.ZipFile zip = new java.util.zip.ZipFile(path.toFile())) {
-                        var entries = zip.entries();
-                        while (entries.hasMoreElements()) {
-                            String n = entries.nextElement().getName();
-                            if (!n.endsWith(".class") || !n.startsWith("net/neoforged/neoforge/event/")) continue;
-                            String cn = n.substring(0, n.length() - 6).replace('/', '.');
-                            try {
-                                Class<?> c = Class.forName(cn, false, base.getClassLoader());
-                                if (base.isAssignableFrom(c) && c != base && !java.lang.reflect.Modifier.isAbstract(c.getModifiers()) && !c.isInterface()) out.add((Class<? extends net.neoforged.bus.api.Event>) c);
-                            } catch (Throwable ignored) {
-                                // a client class on a server and the like: not an event this side can get
-                            }
-                        }
+                for (String n : classNames(base)) {
+                    if (!n.endsWith(".class") || !n.startsWith("net/neoforged/neoforge/event/") && !n.startsWith("net/neoforged/neoforge/client/event/")) continue;
+                    String cn = n.substring(0, n.length() - 6).replace('/', '.');
+                    try {
+                        Class<?> c = Class.forName(cn, false, base.getClassLoader());
+                        if (base.isAssignableFrom(c) && c != base && !java.lang.reflect.Modifier.isAbstract(c.getModifiers()) && !c.isInterface()) out.add((Class<? extends net.neoforged.bus.api.Event>) c);
+                    } catch (Throwable ignored) {
+                        // a client class on a server and the like: not an event this side can get
                     }
                 }
             } catch (Exception e) {
@@ -282,6 +325,7 @@ public final class ForgeApi1201 {
     public static DeferredHolder drRegister(DeferredRegister register, String name, Supplier supplier) {
         return register.register(name, () -> {
             Object value = supplier.get();
+            if (value == null) throw new NullPointerException("The supplier of " + register.getRegistryKey().location() + " entry '" + name + "' returned null");
             return value instanceof com.mojang.serialization.MapCodec.MapCodecCodec<?> m ? m.codec() : value;
         });
     }
@@ -379,6 +423,54 @@ public final class ForgeApi1201 {
         return DeferredRegister.create((net.minecraft.resources.ResourceKey) registry.getRegistryKey(), modid);
     }
 
+    /** {@code RegisterRecipeBookCategoriesEvent.registerRecipeCategoryFinder(type, f)}: 1.20.1 handed the recipe to {@code f}, NeoForge 1.21.1 the holder. */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static void recipeCategoryFinder(net.neoforged.neoforge.client.event.RegisterRecipeBookCategoriesEvent event, net.minecraft.world.item.crafting.RecipeType type,
+            java.util.function.Function finder) {
+        event.registerRecipeCategoryFinder(type, holder -> (net.minecraft.client.RecipeBookCategories) finder.apply(((net.minecraft.world.item.crafting.RecipeHolder) holder).value()));
+    }
+
+    private static final java.util.Map<String, Object> MOD_INSTANCES = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Called at the end of every constructor of a {@code @Mod} class: Forge's {@code ModContainer.getMod()} answered with this object. */
+    public static void rememberModInstance(Object instance) {
+        net.neoforged.fml.common.Mod mod = instance.getClass().getAnnotation(net.neoforged.fml.common.Mod.class);
+        if (mod != null) MOD_INSTANCES.put(mod.value(), instance);
+    }
+
+    /** {@code ModContainer.getMod()}. */
+    public static Object modContainerGetMod(net.neoforged.fml.ModContainer container) {
+        return MOD_INSTANCES.get(container.getModId());
+    }
+
+    /** {@code RegistryObject.lazyMap(f)}: a supplier that applies {@code f} to the entry on first use and keeps the result. */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static java.util.function.Supplier holderLazyMap(DeferredHolder holder, java.util.function.Function f) {
+        return new java.util.function.Supplier() {
+            private volatile Object value;
+            private volatile boolean done;
+
+            @Override
+            public Object get() {
+                if (!done) {
+                    synchronized (this) {
+                        if (!done) {
+                            value = f.apply(holder.get());
+                            done = true;
+                        }
+                    }
+                }
+                return value;
+            }
+        };
+    }
+
+    /** {@code DeferredRegister.createOptional(registryKey, modid)}: a register for a registry that may not exist; FML never fires its event when it does not. */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static DeferredRegister createDeferredOptional(net.minecraft.resources.ResourceKey key, String modid) {
+        return DeferredRegister.create(key, modid);
+    }
+
     /** {@code RegistryObject.create(name, registry)}. */
     @SuppressWarnings({"unchecked", "rawtypes"})
     public static DeferredHolder holderCreate(ResourceLocation name, IForgeRegistry registry) {
@@ -412,6 +504,13 @@ public final class ForgeApi1201 {
     @SuppressWarnings({"unchecked", "rawtypes"})
     public static Optional holderFilter(DeferredHolder holder, Predicate predicate) {
         return holder.isBound() && predicate.test(holder.get()) ? Optional.of(holder.get()) : Optional.empty();
+    }
+
+    /** {@code RegistryObject.filter(predicate)} of the variant returning a RegistryObject: the holder itself when it is bound and matches, else an unbound one. */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static DeferredHolder holderFilterSelf(DeferredHolder holder, Predicate predicate) {
+        if (holder.isBound() && predicate.test(holder.get())) return holder;
+        return DeferredHolder.create(net.minecraft.resources.ResourceKey.create(holder.getKey().registryKey(), net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("legacyconnector", "empty")));
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -476,12 +575,30 @@ public final class ForgeApi1201 {
         buf.writeVarInt(registry.mcc$registry().getId(value));
     }
 
+    /** The "safe" forms carry the registry's name before the id, so the receiver can find the registry itself ({@link #readRegistryIdAny}). */
     public static Object readRegistryId(net.minecraft.network.FriendlyByteBuf buf, IForgeRegistry registry) {
+        buf.readResourceLocation();
         return readRegistryIdUnsafe(buf, registry);
     }
 
     public static void writeRegistryId(net.minecraft.network.FriendlyByteBuf buf, IForgeRegistry registry, Object value) {
+        buf.writeResourceLocation(registry.getRegistryName());
         writeRegistryIdUnsafe(buf, registry, value);
+    }
+
+    /** {@code buf.readRegistryId()} without a registry: the name written first says which one. */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static Object readRegistryIdAny(Object buf) {
+        net.minecraft.network.FriendlyByteBuf b = (net.minecraft.network.FriendlyByteBuf) buf;
+        net.minecraft.resources.ResourceLocation name = b.readResourceLocation();
+        net.minecraft.core.Registry registry = (net.minecraft.core.Registry) net.minecraft.core.registries.BuiltInRegistries.REGISTRY.get(name);
+        if (registry == null) throw new io.netty.handler.codec.DecoderException("Unknown registry " + name);
+        return registry.byId(b.readVarInt());
+    }
+
+    /** {@code buf.readRegistryIdSafe(Class)}: as {@link #readRegistryIdAny}; the class only checked the registry's type. */
+    public static Object readRegistryIdSafeAny(Object buf, Class<?> type) {
+        return readRegistryIdAny(buf);
     }
 
     /** {@code ForgeSpawnEggItem.fromEntityType(type)}. */
@@ -578,11 +695,23 @@ public final class ForgeApi1201 {
     }
 
     public static net.minecraft.nbt.CompoundTag fluidWriteToNBT(net.neoforged.neoforge.fluids.FluidStack stack, net.minecraft.nbt.CompoundTag tag) {
+        if (stack.isEmpty()) return tag; // 1.21.1 refuses to encode an empty stack; 1.20.1 wrote an empty tag
         net.minecraft.nbt.Tag saved = stack.save(registries(), tag);
         return saved instanceof net.minecraft.nbt.CompoundTag c ? c : tag;
     }
 
     public static net.neoforged.neoforge.fluids.FluidStack fluidLoad(net.minecraft.nbt.CompoundTag tag) {
+        // 1.20.1 loadFluidStackFromNBT answered EMPTY, silently, for a tag without a fluid (a tank's own tag with only capacity/slot keys: CoFH Core's FluidStorageCoFH.read);
+        // 1.21.1 logs "Tried to load invalid fluid" on every such read, per tank per packet
+        if (tag == null || !tag.contains("id")) {
+            if (tag != null && tag.contains("FluidName", 8)) { // a 1.20.1 world's own format: FluidName + Amount
+                net.minecraft.resources.ResourceLocation id = net.minecraft.resources.ResourceLocation.tryParse(tag.getString("FluidName"));
+                var fluid = id == null ? null : net.minecraft.core.registries.BuiltInRegistries.FLUID.getOptional(id).orElse(null);
+                if (fluid == null || fluid == net.minecraft.world.level.material.Fluids.EMPTY) return net.neoforged.neoforge.fluids.FluidStack.EMPTY;
+                return new net.neoforged.neoforge.fluids.FluidStack(fluid, tag.getInt("Amount"));
+            }
+            return net.neoforged.neoforge.fluids.FluidStack.EMPTY;
+        }
         return net.neoforged.neoforge.fluids.FluidStack.parseOptional(registries(), tag);
     }
 
@@ -671,6 +800,31 @@ public final class ForgeApi1201 {
     }
 
     /**
+     * NightConfig's {@code FileNotFoundAction.CREATE_EMPTY} (the default of every file config builder) creates a missing file through
+     * {@code ConfigFormat.initEmptyFile(f)}, which opens a {@code BufferedWriter} and never closes it. On Windows the leaked handle stays until the
+     * garbage collector reaps it, and until then FML's own atomic write of the same file (REPLACE_ATOMIC move, run when the registered config needs
+     * correcting) is denied: a first start without the config file crashed CoFH Core ("Failed to atomically write the config", issue 271). Probes the
+     * file with a replace and collects garbage until it is free.
+     */
+    static void releaseLeakedConfigFile(java.nio.file.Path file) {
+        if (file == null) return;
+        java.nio.file.Path probe = file.resolveSibling(file.getFileName() + ".lc-probe");
+        for (int i = 0; i < 40; i++) {
+            try {
+                if (!java.nio.file.Files.exists(file)) return;
+                // an open handle (shared for delete) still lets the file be renamed, but not replaced: probe with a replace of the same content
+                java.nio.file.Files.write(probe, java.nio.file.Files.readAllBytes(file));
+                java.nio.file.Files.move(probe, file, java.nio.file.StandardCopyOption.ATOMIC_MOVE, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                return;
+            } catch (java.io.IOException | RuntimeException e) {
+                System.gc();
+                try { Thread.sleep(25); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); return; }
+            }
+        }
+        try { java.nio.file.Files.deleteIfExists(probe); } catch (java.io.IOException ignored) { }
+    }
+
+    /**
      * {@code spec.setConfig(config)}: a mod loading its own config file by hand; NeoForge hands the spec a loaded config instead. {@code LoadedConfig} is a
      * package-private record of FML (the interface is sealed), built reflectively with a detached ModConfig and no path, so saving through it is not supported.
      */
@@ -684,7 +838,12 @@ public final class ForgeApi1201 {
             org.kylepitcock.legacyconnector.compat.jdk.ReflectionCompat.setAccessible(modConfigCtor, true);
             Object modConfig = modConfigCtor.newInstance(net.neoforged.fml.config.ModConfig.Type.COMMON, spec, net.neoforged.fml.ModLoadingContext.get().getActiveContainer(),
                     "legacy-" + System.identityHashCode(spec) + ".toml", new java.util.concurrent.locks.ReentrantLock());
-            spec.acceptConfig((net.neoforged.fml.config.IConfigSpec.ILoadedConfig) ctor.newInstance(config, null, modConfig));
+            // a file config the mod built itself (autosave on) would write the corrected values to the same file FML writes for the registered
+            // ModConfig: the two writers collide (REPLACE_ATOMIC move denied on Windows, CoFH Core, issue 271). The spec reads a detached copy; FML's own
+            // load of the registered config replaces it.
+            com.electronwill.nightconfig.core.CommentedConfig used = config instanceof com.electronwill.nightconfig.core.file.FileConfig ? com.electronwill.nightconfig.core.CommentedConfig.copy(config) : config;
+            if (config instanceof com.electronwill.nightconfig.core.file.FileConfig fc) releaseLeakedConfigFile(fc.getNioPath());
+            spec.acceptConfig((net.neoforged.fml.config.IConfigSpec.ILoadedConfig) ctor.newInstance(used, null, modConfig));
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException("Could not hand a config to " + spec, e);
         }
@@ -721,4 +880,20 @@ public final class ForgeApi1201 {
     }
 
 
+
+    /** {@code FMLLoader.getLaunchHandler()}: FML 4 keeps the handler in a private field ({@code isData()}, {@code isProduction()} and {@code getDist()} are public on it). */
+    public static net.neoforged.fml.loading.targets.CommonLaunchHandler launchHandler() {
+        try {
+            java.lang.reflect.Field f = net.neoforged.fml.loading.FMLLoader.class.getDeclaredField("commonLaunchHandler");
+            f.setAccessible(true);
+            return (net.neoforged.fml.loading.targets.CommonLaunchHandler) f.get(null);
+        } catch (ReflectiveOperationException | RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** {@code LoadingModList.getErrors()}: the loading issues of severity error (FML 4 keeps issues, not exceptions). */
+    public static java.util.List<net.neoforged.fml.ModLoadingIssue> loadingErrors(net.neoforged.fml.loading.LoadingModList list) {
+        return list.getModLoadingIssues().stream().filter(i -> i.severity() == net.neoforged.fml.ModLoadingIssue.Severity.ERROR).toList();
+    }
 }

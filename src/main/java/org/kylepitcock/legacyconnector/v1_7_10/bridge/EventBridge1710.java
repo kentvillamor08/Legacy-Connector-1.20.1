@@ -64,6 +64,9 @@ import org.kylepitcock.legacyconnector.v1_7_10.Platform1710;
  * <p>Legacy event objects are only built if a legacy listener exists for that event type.</p>
  */
 public final class EventBridge1710 {
+    /** Victims whose legacy LivingHurtEvent is being handled right now (value: the damage that is being posted), see the incoming-damage listener. */
+    private static final ThreadLocal<java.util.IdentityHashMap<net.minecraft.world.entity.LivingEntity, Float>> HURT_ACTIVE = ThreadLocal.withInitial(java.util.IdentityHashMap::new);
+
     private EventBridge1710() {}
 
     /** Players whose data file NeoForge reported loading since they last logged in. */
@@ -83,6 +86,23 @@ public final class EventBridge1710 {
             return false;
         }
     }
+
+    /**
+     * 1.7.10's ItemBow.onPlayerStoppedUsing posted ArrowLooseEvent before it looked for arrows, so handlers fire with mod ammo only
+     * (Thaumcraft's elemental arrows); the modern ArrowLooseEvent fires only when the bow has vanilla ammo. Called from
+     * {@code BowItemLegacyLooseMixin} at the start of the vanilla release: true when a legacy handler cancelled it. The (possibly
+     * changed) charge is handed to the modern ArrowLooseEvent that follows when there is vanilla ammo.
+     */
+    public static boolean mcc$arrowLoose(net.minecraft.world.item.ItemStack bow, net.minecraft.world.entity.player.Player p, int charge) {
+        LOOSE_CHARGE.remove();
+        if (!wants(forge(), legacyconnector.v1_7_10.net.minecraftforge.event.entity.player.ArrowLooseEvent.class)) return false;
+        var legacy = new legacyconnector.v1_7_10.net.minecraftforge.event.entity.player.ArrowLooseEvent(player(p), ItemStack.mcc$wrap(bow), charge);
+        if (forge().post(legacy)) return true;
+        if (legacy.charge != charge) LOOSE_CHARGE.set(legacy.charge);
+        return false;
+    }
+
+    private static final ThreadLocal<Integer> LOOSE_CHARGE = new ThreadLocal<>();
 
     private static EventBus forge() {
         return MinecraftForge.EVENT_BUS;
@@ -376,11 +396,23 @@ public final class EventBridge1710 {
             if (forge().post(legacy)) e.setCanceled(true);
             else e.setNewSpeed(legacy.newSpeed);
         });
-        gameBus.addListener((net.neoforged.neoforge.event.entity.living.LivingEntityUseItemEvent.Start e) -> {
-            if (!(e.getEntity() instanceof net.minecraft.world.entity.player.Player p) || !(e.getItem().getItem() instanceof net.minecraft.world.item.BowItem)
-                    || !wants(forge(), legacyconnector.v1_7_10.net.minecraftforge.event.entity.player.ArrowNockEvent.class)) return;
-            var stack = ItemStack.mcc$wrap(e.getItem());
-            if (forge().post(new legacyconnector.v1_7_10.net.minecraftforge.event.entity.player.ArrowNockEvent(player(p), stack))) e.setCanceled(true);
+        // 1.7.10's ItemBow.onItemRightClick posted ArrowNockEvent before it looked for arrows; the modern counterpart is NeoForge's
+        // ArrowNockEvent from BowItem.use (also before the ammo check). Not the item-use Start event: a handler that draws the bow itself
+        // calls setItemInUse, which starts the use again and would re-post the legacy event forever (#225).
+        gameBus.addListener((net.neoforged.neoforge.event.entity.player.ArrowNockEvent e) -> {
+            if (!wants(forge(), legacyconnector.v1_7_10.net.minecraftforge.event.entity.player.ArrowNockEvent.class)) return;
+            var p = e.getEntity();
+            var legacy = new legacyconnector.v1_7_10.net.minecraftforge.event.entity.player.ArrowNockEvent(player(p), ItemStack.mcc$wrap(e.getBow()));
+            if (!forge().post(legacy)) return;
+            var out = legacy.result == null ? net.minecraft.world.item.ItemStack.EMPTY : legacy.result.mcc$modern();
+            if (out == null) out = net.minecraft.world.item.ItemStack.EMPTY;
+            e.setAction(p.isUsingItem() ? net.minecraft.world.InteractionResultHolder.consume(out) : net.minecraft.world.InteractionResultHolder.fail(out));
+        });
+        gameBus.addListener((net.neoforged.neoforge.event.entity.player.ArrowLooseEvent e) -> {
+            Integer charge = LOOSE_CHARGE.get();
+            if (charge == null) return;
+            LOOSE_CHARGE.remove();
+            e.setCharge(charge);
         });
         gameBus.addListener((net.neoforged.neoforge.event.level.BlockEvent.BlockToolModificationEvent e) -> {
             if (e.getItemAbility() != net.neoforged.neoforge.common.ItemAbilities.HOE_TILL || e.isSimulated() || e.getPlayer() == null
@@ -448,12 +480,24 @@ public final class EventBridge1710 {
             if (!wants(forge(), legacyconnector.v1_7_10.net.minecraftforge.event.world.ChunkEvent.Unload.class) || !(e.getLevel() instanceof net.minecraft.world.level.Level level)) return;
             forge().post(new legacyconnector.v1_7_10.net.minecraftforge.event.world.ChunkEvent.Unload(new legacyconnector.v1_7_10.net.minecraft.world.chunk.Chunk(World.mcc$wrap(level), e.getChunk())));
         });
-        gameBus.addListener((net.neoforged.neoforge.event.level.ChunkDataEvent.Load e) -> {
+        // a sapling of the modern game grows a tree: the legacy terrain bus may veto it (Forge's SaplingGrowTreeEvent, which also gated the vanilla saplings)
+        gameBus.addListener((net.neoforged.neoforge.event.level.BlockGrowFeatureEvent e) -> {
+            var bus = legacyconnector.v1_7_10.net.minecraftforge.common.MinecraftForge.TERRAIN_GEN_BUS;
+            if (!wants(bus, legacyconnector.v1_7_10.net.minecraftforge.event.terraingen.SaplingGrowTreeEvent.class)
+                    || !(e.getLevel() instanceof net.minecraft.world.level.Level level)) return;
+            var at = e.getPos();
+            var event = new legacyconnector.v1_7_10.net.minecraftforge.event.terraingen.SaplingGrowTreeEvent(World.mcc$wrap(level),
+                    new java.util.Random(e.getRandom().nextLong()), at.getX(), at.getY(), at.getZ());
+            bus.post(event);
+            if (event.getResult() == Event.Result.DENY) e.setCanceled(true);
+        });
+        // like Save: hook the modern event only once a 1.7.10 mod listens (other mods, ByePregen and C2ME among them, look for ChunkDataEvent listeners)
+        forge().mcc$whenListened(legacyconnector.v1_7_10.net.minecraftforge.event.world.ChunkDataEvent.Load.class, () -> gameBus.addListener((net.neoforged.neoforge.event.level.ChunkDataEvent.Load e) -> {
             if (!wants(forge(), legacyconnector.v1_7_10.net.minecraftforge.event.world.ChunkDataEvent.Load.class) || !(e.getLevel() instanceof net.minecraft.world.level.Level level)) return;
             forge().post(new legacyconnector.v1_7_10.net.minecraftforge.event.world.ChunkDataEvent.Load(
                     new legacyconnector.v1_7_10.net.minecraft.world.chunk.Chunk(World.mcc$wrap(level), e.getChunk()),
                     new legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound(e.getData())));
-        });
+        }));
         // a modern ChunkDataEvent.Save listener makes C2ME turn off optimizations: only hook it once a 1.7.10 mod listens
         forge().mcc$whenListened(legacyconnector.v1_7_10.net.minecraftforge.event.world.ChunkDataEvent.Save.class, () -> gameBus.addListener((net.neoforged.neoforge.event.level.ChunkDataEvent.Save e) -> {
             if (!wants(forge(), legacyconnector.v1_7_10.net.minecraftforge.event.world.ChunkDataEvent.Save.class) || !(e.getLevel() instanceof net.minecraft.world.level.Level level)
@@ -511,17 +555,51 @@ public final class EventBridge1710 {
                 return;
             }
             if (hurt) {
-                LivingHurtEvent legacy = new LivingHurtEvent(victim, source, e.getAmount());
-                if (forge().post(legacy)) e.setCanceled(true);
-                else e.setAmount(legacy.ammount);
+                // 1.7.10 posts LivingHurtEvent after it set the victim's hurt-resistance time and last damage, so a handler that damages the
+                // victim again (a curse hitting it for extra) is turned away unless it hits harder; modern posts the incoming event before
+                // that bookkeeping, so the handler would recurse until the stack overflowed.
+                var active = HURT_ACTIVE.get();
+                Float outer = active.get(e.getEntity());
+                if (outer != null && e.getAmount() <= outer) {
+                    e.setCanceled(true);
+                    return;
+                }
+                active.put(e.getEntity(), e.getAmount());
+                try {
+                    LivingHurtEvent legacy = new LivingHurtEvent(victim, source, e.getAmount());
+                    if (forge().post(legacy)) e.setCanceled(true);
+                    else e.setAmount(legacy.ammount);
+                } finally {
+                    if (outer == null) active.remove(e.getEntity());
+                    else active.put(e.getEntity(), outer);
+                }
             }
         });
         // Forge's ISpecialArmor: worn pieces that absorb damage by their own rules (ProjectE's matter armour: 80% less damage, none from
         // lava, drowning or mobs) take their share before the modern armour maths runs on what is left.
         gameBus.addListener((LivingIncomingDamageEvent e) -> specialArmor(e));
+        gameBus.addListener((net.neoforged.neoforge.event.entity.living.LivingDamageEvent.Post e) -> wearLegacyArmor(e));
         gameBus.addListener((net.neoforged.neoforge.event.entity.living.LivingDeathEvent e) -> {
             if (!wants(forge(), LivingDeathEvent.class)) return;
             if (forge().post(new LivingDeathEvent((EntityLivingBase) EntityBridge.wrap(e.getEntity()), legacySource(e.getSource())))) e.setCanceled(true);
+        });
+        // a mob a mod moved into a proxy world (worldObj = its own WorldServer subclass, MineFactory's grinder) drops its loot and experience
+        // there: the proxy's spawnEntityInWorld receives them, as the 1.7.10 death code spawned them through the entity's worldObj
+        gameBus.addListener(net.neoforged.bus.api.EventPriority.HIGHEST, (net.neoforged.neoforge.event.entity.living.LivingDropsEvent e) -> {
+            var view = EntityBridge.knownView(e.getEntity());
+            if (view == null || view.mcc$worldProxy == null) return;
+            var proxy = view.mcc$worldProxy;
+            for (var item : new ArrayList<>(e.getDrops())) {
+                if (EntityBridge.wrap(item) instanceof EntityItem legacyItem) proxy.spawnEntityInWorld(legacyItem);
+            }
+            e.setCanceled(true);
+        });
+        gameBus.addListener(net.neoforged.bus.api.EventPriority.HIGHEST, (net.neoforged.neoforge.event.entity.living.LivingExperienceDropEvent e) -> {
+            var view = EntityBridge.knownView(e.getEntity());
+            if (view == null || view.mcc$worldProxy == null || e.getDroppedExperience() <= 0) return;
+            var m = e.getEntity();
+            view.mcc$worldProxy.spawnEntityInWorld(new legacyconnector.v1_7_10.net.minecraft.entity.item.EntityXPOrb(view.mcc$worldProxy, m.getX(), m.getY(), m.getZ(), e.getDroppedExperience()));
+            e.setDroppedExperience(0);
         });
         gameBus.addListener((net.neoforged.neoforge.event.entity.living.LivingDropsEvent e) -> {
             if (!wants(forge(), LivingDropsEvent.class)) return;
@@ -660,6 +738,7 @@ public final class EventBridge1710 {
         gameBus.addListener((ServerStoppedEvent e) -> Platform1710.dispatchAll(m -> new FMLServerStoppedEvent()));
         // DragonAPI's own events, which its coremod posted from patched vanilla code (mod-specific, removable)
         org.kylepitcock.legacyconnector.v1_7_10.compat.dragonapi.DragonApiEvents.register(gameBus);
+        CoremodSites.register(gameBus); // hooks of legacy coremods in Minecraft's own classes, replayed generically
         org.kylepitcock.legacyconnector.v1_7_10.compat.fiskheroes.FiskHeroesHooks.register(gameBus);
     }
 
@@ -802,7 +881,7 @@ public final class EventBridge1710 {
         }
         org.kylepitcock.legacyconnector.v1_7_10.client.RenderContext.beginWorld(pose, buffers, light, net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY);
         double renderPosY = legacyconnector.v1_7_10.net.minecraft.client.renderer.entity.RenderManager.renderPosY;
-        legacyconnector.v1_7_10.net.minecraft.client.renderer.entity.RenderManager.renderPosY = renderPosY - 2 * viewerShiftY; // twice the START shift: Morph adds its ySize on top of (posY - renderPosY); one shift left the pig a ySize above the ground (checked in third person)
+        legacyconnector.v1_7_10.net.minecraft.client.renderer.entity.RenderManager.renderPosY = renderPosY - viewerShiftY; // one START shift: a handler sees the same (posY - renderPosY) as in 1.7.10, where camera, player and renderPosY moved together
         try {
             return forge().post(event);
         } finally {
@@ -812,23 +891,106 @@ public final class EventBridge1710 {
         }
     }
 
+    /**
+     * What a RenderPlayerEvent.Pre handler did to the legacy player model's parts ({@code showModel = false}: Legends' Kiryu hides the whole biped
+     * and draws its own mech) carries over to the modern model the game draws; the game sets every part visible again at the start of each render.
+     */
+    private static void syncHiddenParts(net.minecraft.client.model.PlayerModel<?> model,
+            legacyconnector.v1_7_10.net.minecraft.client.model.ModelBiped legacy) {
+        if (legacy == null) return;
+        if (!legacy.bipedHead.showModel) model.head.visible = false;
+        if (!legacy.bipedHeadwear.showModel) model.hat.visible = false;
+        if (!legacy.bipedBody.showModel) {
+            model.body.visible = false;
+            model.jacket.visible = false;
+        }
+        if (!legacy.bipedRightArm.showModel) {
+            model.rightArm.visible = false;
+            model.rightSleeve.visible = false;
+        }
+        if (!legacy.bipedLeftArm.showModel) {
+            model.leftArm.visible = false;
+            model.leftSleeve.visible = false;
+        }
+        if (!legacy.bipedRightLeg.showModel) {
+            model.rightLeg.visible = false;
+            model.rightPants.visible = false;
+        }
+        if (!legacy.bipedLeftLeg.showModel) {
+            model.leftLeg.visible = false;
+            model.leftPants.visible = false;
+        }
+    }
+
+    /** Whether a legacy handler wants RenderPlayerEvent.Specials (so the specials layer does any work). */
+    public static boolean wantsPlayerSpecials() {
+        return wants(forge(), legacyconnector.v1_7_10.net.minecraftforge.client.event.RenderPlayerEvent.Specials.Pre.class)
+                || wants(forge(), legacyconnector.v1_7_10.net.minecraftforge.client.event.RenderPlayerEvent.Specials.Post.class);
+    }
+
+    /**
+     * RenderPlayerEvent.Specials.Pre and Post for a player's model, posted with the pose the specials layer draws in: 1.7.10 fired them from
+     * {@code renderSpecials}, inside the model's matrix (translated to the player, turned to its body, flipped and lifted by 24/16), where the handlers
+     * draw (Legends' Kiryu rotates 180 degrees about X and draws its mech model at 0, -1.625, 0).
+     */
+    public static void postPlayerSpecials(net.minecraft.world.entity.player.Player player, float partial, com.mojang.blaze3d.vertex.PoseStack pose,
+            net.minecraft.client.renderer.MultiBufferSource buffers, int light) {
+        if (!wantsPlayerSpecials()) return;
+        if (!(EntityBridge.wrap(player) instanceof legacyconnector.v1_7_10.net.minecraft.entity.player.EntityPlayer legacy)) return;
+        double[] at = legacyRenderPos(pose, player, partial);
+        double x = at[0], y = at[1], z = at[2];
+        viewerShiftY = player == net.minecraft.client.Minecraft.getInstance().player ? frameShiftY : 0;
+        org.kylepitcock.legacyconnector.v1_7_10.client.RenderContext.beginWorld(pose, buffers, light, net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY);
+        double renderPosY = legacyconnector.v1_7_10.net.minecraft.client.renderer.entity.RenderManager.renderPosY;
+        legacyconnector.v1_7_10.net.minecraft.client.renderer.entity.RenderManager.renderPosY = renderPosY - viewerShiftY;
+        try {
+            var renderer = legacyRenderPlayer();
+            forge().post(new legacyconnector.v1_7_10.net.minecraftforge.client.event.RenderPlayerEvent.Specials.Pre(legacy, renderer, partial, x, y, z));
+            forge().post(new legacyconnector.v1_7_10.net.minecraftforge.client.event.RenderPlayerEvent.Specials.Post(legacy, renderer, partial, x, y, z));
+        } finally {
+            viewerShiftY = 0;
+            legacyconnector.v1_7_10.net.minecraft.client.renderer.entity.RenderManager.renderPosY = renderPosY;
+            org.kylepitcock.legacyconnector.v1_7_10.client.RenderContext.end();
+        }
+    }
+
     /** Client-only events. Registered from the client entrypoint so servers never load client classes. */
+    /** The connection ClientConnectedToServerEvent was last posted for (once per connection, before its first world or login, whichever comes first). */
+    private static volatile Object connectedPostedFor;
+
+    private static void postClientConnected(net.minecraft.network.Connection connection) {
+        if (connection == null || connectedPostedFor == connection) return;
+        connectedPostedFor = connection;
+        if (wants(fml(), legacyconnector.v1_7_10.cpw.mods.fml.common.network.FMLNetworkEvent.ClientConnectedToServerEvent.class)) {
+            fml().post(new legacyconnector.v1_7_10.cpw.mods.fml.common.network.FMLNetworkEvent.ClientConnectedToServerEvent(
+                    legacyconnector.v1_7_10.net.minecraft.network.NetworkManager.mcc$of(connection), "MODDED"));
+        }
+    }
+
     public static void registerClient(IEventBus gameBus) {
+        // 1.7.10 posted ClientConnectedToServerEvent when the connection opened, before the first world: a client level that loads
+        // first (joining a world inside a Mystcraft age) must see it too (Mystcraft creates its client-side storage there).
+        gameBus.addListener(net.neoforged.bus.api.EventPriority.HIGHEST, (LevelEvent.Load e) -> {
+            if (!e.getLevel().isClientSide()) return;
+            var listener = net.minecraft.client.Minecraft.getInstance().getConnection();
+            postClientConnected(listener == null ? null : listener.getConnection());
+        });
         gameBus.addListener((net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent.LoggingIn e) -> {
             var manager = legacyconnector.v1_7_10.net.minecraft.network.NetworkManager.mcc$of(e.getConnection());
-            if (wants(fml(), legacyconnector.v1_7_10.cpw.mods.fml.common.network.FMLNetworkEvent.ClientConnectedToServerEvent.class)) {
-                fml().post(new legacyconnector.v1_7_10.cpw.mods.fml.common.network.FMLNetworkEvent.ClientConnectedToServerEvent(manager, "MODDED"));
-            }
+            postClientConnected(e.getConnection());
             FmlChannelBridge.fireHandshake(legacyconnector.v1_7_10.cpw.mods.fml.relauncher.Side.CLIENT,
                     legacyconnector.v1_7_10.cpw.mods.fml.common.network.handshake.NetworkDispatcher.get(manager),
                     legacyconnector.v1_7_10.net.minecraft.client.network.NetHandlerPlayClient.INSTANCE);
         });
         gameBus.addListener((net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent.LoggingOut e) -> {
+            connectedPostedFor = null;
+            legacyconnector.v1_7_10.net.minecraft.client.network.NetHandlerPlayClient.mcc$connectionClosed();
             if (!wants(fml(), legacyconnector.v1_7_10.cpw.mods.fml.common.network.FMLNetworkEvent.ClientDisconnectionFromServerEvent.class)) return;
             fml().post(new legacyconnector.v1_7_10.cpw.mods.fml.common.network.FMLNetworkEvent.ClientDisconnectionFromServerEvent(
                     legacyconnector.v1_7_10.net.minecraft.network.NetworkManager.mcc$of(e.getConnection())));
         });
         org.kylepitcock.legacyconnector.v1_7_10.client.DimensionSounds1710.register(gameBus);
+        org.kylepitcock.legacyconnector.v1_7_10.client.CoremodClientSites.register(gameBus); // client places of legacy coremod hooks
         // after the dimension scaling, which only scales sounds that do not tick
         org.kylepitcock.legacyconnector.v1_7_10.client.LegacyAttenuation.register(gameBus);
         org.kylepitcock.legacyconnector.v1_7_10.client.LegacyHorizon.register(gameBus);
@@ -849,12 +1011,10 @@ public final class EventBridge1710 {
             if (e.getAction() == org.lwjgl.glfw.GLFW.GLFW_REPEAT || net.minecraft.client.Minecraft.getInstance().screen != null) return;
             legacyconnector.v1_7_10.org.lwjgl.input.Keyboard.mcc$setEvent(org.kylepitcock.legacyconnector.v1_7_10.client.KeyCodes.fromGlfw(e.getKey()),
                     e.getAction() == org.lwjgl.glfw.GLFW.GLFW_PRESS, '\0');
-            try {
-                if (wants(fml(), legacyconnector.v1_7_10.cpw.mods.fml.common.gameevent.InputEvent.KeyInputEvent.class)) {
-                    fml().post(new legacyconnector.v1_7_10.cpw.mods.fml.common.gameevent.InputEvent.KeyInputEvent());
-                }
-            } finally {
-                legacyconnector.v1_7_10.org.lwjgl.input.Keyboard.mcc$setEvent(0, false, '\0');
+            // LWJGL 2 kept the last event it had read until the next one: mods poll Keyboard.getEventKey()/getEventKeyState() from tick handlers
+            // (Legends' ability keys, together with KeyBinding.isPressed), so the event is NOT cleared after the KeyInputEvent
+            if (wants(fml(), legacyconnector.v1_7_10.cpw.mods.fml.common.gameevent.InputEvent.KeyInputEvent.class)) {
+                fml().post(new legacyconnector.v1_7_10.cpw.mods.fml.common.gameevent.InputEvent.KeyInputEvent());
             }
         });
         gameBus.addListener((net.neoforged.neoforge.client.event.InputEvent.MouseButton.Post e) -> {
@@ -889,8 +1049,7 @@ public final class EventBridge1710 {
             }
         });
         gameBus.addListener((net.neoforged.neoforge.client.event.RenderPlayerEvent.Pre e) -> {
-            if (!wants(forge(), legacyconnector.v1_7_10.net.minecraftforge.client.event.RenderPlayerEvent.Pre.class)
-                    && !wants(forge(), legacyconnector.v1_7_10.net.minecraftforge.client.event.RenderPlayerEvent.Specials.Pre.class)) return;
+            if (!wants(forge(), legacyconnector.v1_7_10.net.minecraftforge.client.event.RenderPlayerEvent.Pre.class)) return;
             if (!(EntityBridge.wrap(e.getEntity()) instanceof legacyconnector.v1_7_10.net.minecraft.entity.player.EntityPlayer player)) return;
             float partial = e.getPartialTick();
             double[] at = legacyRenderPos(e.getPoseStack(), e.getEntity(), partial);
@@ -902,23 +1061,20 @@ public final class EventBridge1710 {
                     e.setCanceled(true);
                     return;
                 }
-                postInWorld(new legacyconnector.v1_7_10.net.minecraftforge.client.event.RenderPlayerEvent.Specials.Pre(player, legacyRenderPlayer(), partial, x, y, z),
-                        e.getPoseStack(), e.getMultiBufferSource(), e.getPackedLight(), at);
+                // Specials.Pre/Post are posted from the specials layer (inside the model's matrix, as 1.7.10's renderSpecials did), see postPlayerSpecials
+                syncHiddenParts(e.getRenderer().getModel(), legacyRenderPlayer().modelBipedMain);
             } finally {
                 viewerShiftY = 0;
             }
         });
         gameBus.addListener((net.neoforged.neoforge.client.event.RenderPlayerEvent.Post e) -> {
-            if (!wants(forge(), legacyconnector.v1_7_10.net.minecraftforge.client.event.RenderPlayerEvent.Post.class)
-                    && !wants(forge(), legacyconnector.v1_7_10.net.minecraftforge.client.event.RenderPlayerEvent.Specials.Post.class)) return;
+            if (!wants(forge(), legacyconnector.v1_7_10.net.minecraftforge.client.event.RenderPlayerEvent.Post.class)) return;
             if (!(EntityBridge.wrap(e.getEntity()) instanceof legacyconnector.v1_7_10.net.minecraft.entity.player.EntityPlayer player)) return;
             float partial = e.getPartialTick();
             double[] at = legacyRenderPos(e.getPoseStack(), e.getEntity(), partial);
             double x = at[0], y = at[1], z = at[2];
             viewerShiftY = e.getEntity() == net.minecraft.client.Minecraft.getInstance().player ? frameShiftY : 0;
             try {
-                postInWorld(new legacyconnector.v1_7_10.net.minecraftforge.client.event.RenderPlayerEvent.Specials.Post(player, legacyRenderPlayer(), partial, x, y, z),
-                        e.getPoseStack(), e.getMultiBufferSource(), e.getPackedLight(), at);
                 postInWorld(new legacyconnector.v1_7_10.net.minecraftforge.client.event.RenderPlayerEvent.Post(player, legacyRenderPlayer(), partial, x, y, z),
                         e.getPoseStack(), e.getMultiBufferSource(), e.getPackedLight(), at);
             } finally {
@@ -1008,6 +1164,7 @@ public final class EventBridge1710 {
      * wispy cotton). The modern level runs the weather itself, so only providers that declare their own are called.
      */
     private static void providerWeather(net.minecraft.world.level.Level level) {
+        if (level instanceof net.minecraft.server.level.ServerLevel sl && isTemplateDimension(sl)) return;
         World world = World.mcc$wrap(level);
         var provider = world == null ? null : World.mcc$get$provider(world);
         if (provider == null || !OWN_WEATHER.get(provider.getClass())) return;
@@ -1117,6 +1274,28 @@ public final class EventBridge1710 {
             net.minecraft.world.entity.EquipmentSlot.LEGS, net.minecraft.world.entity.EquipmentSlot.FEET};
     private static int armorTickFailures;
     private static int specialArmorFailures;
+
+    /**
+     * 1.7.10 {@code EntityPlayer.damageArmor}: every worn {@code ItemArmor} loses max(1, damage / 4) durability for a hit that does not
+     * bypass armor. The modern game wears down only {@code ArmorItem}s, which a legacy armor item (an adapter) is not, so mods' armor
+     * (IC2's bronze, Thaumcraft's thaumium) never lost durability. {@code ISpecialArmor} pieces take theirs in {@link #specialArmor}
+     * (Forge's {@code damageArmor} of the piece).
+     */
+    private static void wearLegacyArmor(net.neoforged.neoforge.event.entity.living.LivingDamageEvent.Post e) {
+        if (!(e.getEntity() instanceof net.minecraft.world.entity.player.Player player) || player.level().isClientSide()) return;
+        var source = e.getSource();
+        if (source.is(net.minecraft.tags.DamageTypeTags.BYPASSES_ARMOR) || e.getOriginalDamage() <= 0.0F) return;
+        int amount = Math.max(1, (int) (e.getOriginalDamage() / 4.0F));
+        for (var slot : ARMOR_SLOTS) {
+            var stack = player.getItemBySlot(slot);
+            if (stack.isEmpty() || stack.getItem() instanceof net.minecraft.world.item.ArmorItem || !stack.isDamageableItem()
+                    || !(stack.getItem() instanceof org.kylepitcock.legacyconnector.v1_7_10.adapter.LegacyItemAdapter adapter)
+                    || !(adapter.legacyItem() instanceof legacyconnector.v1_7_10.net.minecraft.item.ItemArmor)
+                    || adapter.legacyItem() instanceof legacyconnector.v1_7_10.net.minecraftforge.common.ISpecialArmor) continue;
+            if (source.is(net.minecraft.tags.DamageTypeTags.IS_FIRE) && stack.has(net.minecraft.core.component.DataComponents.FIRE_RESISTANT)) continue;
+            stack.hurtAndBreak(amount, player, slot);
+        }
+    }
 
     /** Applies the {@code ISpecialArmor} pieces a living entity wears to incoming damage (1.7.10 slots: 0 boots .. 3 helmet). */
     private static void specialArmor(LivingIncomingDamageEvent e) {

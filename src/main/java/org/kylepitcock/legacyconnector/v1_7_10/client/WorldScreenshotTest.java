@@ -60,7 +60,9 @@ public final class WorldScreenshotTest {
         if (System.getProperty("legacyconnector.screenshotTest") == null) return;
         NeoForge.EVENT_BUS.addListener((ScreenEvent.Opening e) -> {
             // A fresh game directory opens the narrator/accessibility onboarding first and waits for a click: skip it.
-            if (e.getNewScreen() instanceof net.minecraft.client.gui.screens.AccessibilityOnboardingScreen) {
+            // So do the loading warnings (a legacy mod's missing dependency): the test goes on to the title screen.
+            if (e.getNewScreen() instanceof net.minecraft.client.gui.screens.AccessibilityOnboardingScreen
+                    || e.getNewScreen() instanceof net.neoforged.neoforge.client.gui.LoadingErrorScreen) {
                 Minecraft.getInstance().options.onboardAccessibility = false;
                 e.setNewScreen(new TitleScreen());
             }
@@ -88,6 +90,42 @@ public final class WorldScreenshotTest {
         mc.options.tutorialStep = net.minecraft.client.tutorial.TutorialSteps.NONE;
         mc.options.cloudStatus().set(net.minecraft.client.CloudStatus.OFF);
         mc.options.renderDistance().set(intProp("legacyconnector.shotRenderDistance", 16));
+        if (System.getProperty("legacyconnector.shotScenario", "").startsWith("title")) {
+            // stays on the title screen (whatever a mod's menu made of it), shoots it and quits
+            int[] quiet = {0};
+            if (System.getProperty("legacyconnector.shotScenario").equals("titlecontrol")) {
+                var control = new RemoteControl(new File(dir.getParentFile(), "control"));
+                add(m -> (quiet[0] = m.getOverlay() == null ? quiet[0] + 1 : 0) > 100, m -> {
+                    control.tick(m);
+                    return false;
+                });
+                return;
+            }
+            add(m -> (quiet[0] = m.getOverlay() == null ? quiet[0] + 1 : 0) > 100, run(m -> {
+                LOG.info("Title screen is {}", m.screen == null ? "null" : m.screen.getClass().getName());
+                java.nio.ByteBuffer cm = org.lwjgl.BufferUtils.createByteBuffer(16);
+                org.lwjgl.opengl.GL11.glGetBooleanv(org.lwjgl.opengl.GL11.GL_COLOR_WRITEMASK, cm);
+                int[] vp = new int[4];
+                org.lwjgl.opengl.GL11.glGetIntegerv(org.lwjgl.opengl.GL11.GL_VIEWPORT, vp);
+                LOG.info("GL state: colorMask={}{}{}{} viewport={} scissor={} drawFbo={} mainFbo={} window={}x{} fb={}x{} overlay={}", cm.get(0), cm.get(1), cm.get(2), cm.get(3),
+                        java.util.Arrays.toString(vp), org.lwjgl.opengl.GL11.glIsEnabled(org.lwjgl.opengl.GL11.GL_SCISSOR_TEST), org.lwjgl.opengl.GL11.glGetInteger(org.lwjgl.opengl.GL30.GL_DRAW_FRAMEBUFFER_BINDING),
+                        m.getMainRenderTarget().frameBufferId, m.getWindow().getWidth(), m.getWindow().getHeight(), m.getMainRenderTarget().width, m.getMainRenderTarget().height, m.getOverlay());
+            }), shot("title"), run(m -> {
+                LOG.info("Screenshot test finished");
+                m.stop();
+            }));
+            return;
+        }
+        String remote = System.getProperty("legacyconnector.shotServer", "");
+        if (!remote.isEmpty()) {
+            LOG.info("Connecting the screenshot client to '{}', shots go to {}", remote, dir);
+            var data = new net.minecraft.client.multiplayer.ServerData("Compatibility test", remote,
+                    net.minecraft.client.multiplayer.ServerData.Type.OTHER);
+            net.minecraft.client.gui.screens.ConnectScreen.startConnecting(new TitleScreen(), mc,
+                    net.minecraft.client.multiplayer.resolver.ServerAddress.parseString(remote), data, false, null);
+            queueScript();
+            return;
+        }
         String type = System.getProperty("legacyconnector.shotWorldType", "");
         long seed = Long.parseLong(System.getProperty("legacyconnector.shotSeed", "20241022"));
         String existing = System.getProperty("legacyconnector.shotLoadWorld", "");
@@ -230,6 +268,16 @@ public final class WorldScreenshotTest {
         int tour = intProp("legacyconnector.shotTour", 6);
         int perModBlocks = intProp("legacyconnector.shotBlocksPerMod", 24);
         int perModItems = intProp("legacyconnector.shotItemsPerMod", 36);
+        if ("controlkeep".equals(System.getProperty("legacyconnector.shotScenario"))) {
+            // reload checks: the world is opened as saved (no game mode, time or position change), then RemoteControl takes over
+            var control = new RemoteControl(new File(dir.getParentFile(), "control"));
+            add(waitForWorld(), wait(60));
+            add(mc -> {
+                control.tick(mc);
+                return false;
+            });
+            return;
+        }
         add(waitForWorld(), wait(40),
                 command("gamemode spectator"), command("time set noon"), command("weather clear"),
                 command("gamerule doDaylightCycle false"), command("gamerule doMobSpawning false"), command("gamerule doWeatherCycle false"),
@@ -846,7 +894,7 @@ public final class WorldScreenshotTest {
             mc.stop();
             return;
         }
-        if (++ticks > WATCHDOG_TICKS && !"control".equals(System.getProperty("legacyconnector.shotScenario"))) {
+        if (++ticks > WATCHDOG_TICKS && !System.getProperty("legacyconnector.shotScenario", "").startsWith("control")) {
             LOG.error("Screenshot test timed out");
             mc.stop();
             return;

@@ -1,6 +1,9 @@
 package org.kylepitcock.legacyconnector.loader.transform;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
+import java.util.LinkedHashSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -54,6 +57,8 @@ final class SoftLink1201 implements Opcodes {
         final Set<String> missingMethods = new TreeSet<>();
         final Set<String> missingFields = new TreeSet<>();
         int sites;
+        /** The subset of the symbols above that a mixin class's handler bodies refer to (kind and symbol as in {@link #symbolList()}). */
+        final Set<String> mixinSymbols = new TreeSet<>();
 
         int symbols() {
             return missingClasses.size() + missingMethods.size() + missingFields.size();
@@ -157,6 +162,45 @@ final class SoftLink1201 implements Opcodes {
         return resolve(owner, name + desc, true, new HashSet<>()) == Res.MISSING;
     }
 
+    /**
+     * The descriptor of the one same-named method (or constructor) of a host class that takes, where the mod's call passes a subtype, a supertype
+     * of it (the other parameters and the return type unchanged); null when there is none or more than one.
+     */
+    private String widenedDesc(MethodInsnNode mi) {
+        if (!hostName(mi.owner) || mod.containsKey(mi.owner)) return null;
+        Type[] want = Type.getArgumentTypes(mi.desc);
+        Type ret = Type.getReturnType(mi.desc);
+        Set<String> owners = new LinkedHashSet<>();
+        Deque<String> todo = new ArrayDeque<>(List.of(mi.owner));
+        while (!todo.isEmpty() && owners.size() < 32) {
+            String o = todo.poll();
+            if (o == null || !owners.add(o)) continue;
+            if (!mi.name.equals("<init>")) todo.addAll(hierarchy.supers(o));
+        }
+        String found = null;
+        for (String o : owners) {
+            McMembers1201.Members mm = McMembers1201.get(o);
+            if (mm == null) continue;
+            for (String key : mm.methods()) {
+                if (!key.startsWith(mi.name + "(")) continue;
+                String d = key.substring(mi.name.length());
+                if (d.equals(mi.desc) || !Type.getReturnType(d).equals(ret)) continue;
+                Type[] have = Type.getArgumentTypes(d);
+                if (have.length != want.length) continue;
+                boolean ok = true;
+                for (int i = 0; i < want.length && ok; i++) {
+                    if (have[i].equals(want[i])) continue;
+                    ok = want[i].getSort() == Type.OBJECT && have[i].getSort() == Type.OBJECT
+                            && hierarchy.isSubclassOf(want[i].getInternalName(), have[i].getInternalName());
+                }
+                if (!ok) continue;
+                if (found != null && !found.equals(d)) return null;
+                found = d;
+            }
+        }
+        return found;
+    }
+
     private boolean fieldMissing(String owner, String name, String desc) {
         if (owner.startsWith("[")) return false;
         return resolve(owner, name + ":" + desc, false, new HashSet<>()) == Res.MISSING;
@@ -175,10 +219,10 @@ final class SoftLink1201 implements Opcodes {
      * again (a stand-in that throws: a constructor call on {@code this} cannot be skipped).
      */
     int apply(ClassNode node) {
-        if (node.invisibleAnnotations != null && node.invisibleAnnotations.stream().anyMatch(a -> MIXIN.equals(a.desc))) return 0;
-        if (node.visibleAnnotations != null && node.visibleAnnotations.stream().anyMatch(a -> MIXIN.equals(a.desc))) return 0;
         current = node;
         terminating = false;
+        if ((node.invisibleAnnotations != null && node.invisibleAnnotations.stream().anyMatch(a -> MIXIN.equals(a.desc)))
+                || (node.visibleAnnotations != null && node.visibleAnnotations.stream().anyMatch(a -> MIXIN.equals(a.desc)))) return mixinBodies(node);
         int changes = 0;
         if (missingClass(node.superName)) unfixable.add(node.superName + " (superclass of " + node.name + ")");
         for (Iterator<String> it = node.interfaces.iterator(); it.hasNext(); ) {
@@ -190,12 +234,52 @@ final class SoftLink1201 implements Opcodes {
                 changes++;
             }
         }
+        // An event handler whose event class 1.21.1 lacks (Forge's PotionColorCalculationEvent): the event is never posted, and the
+        // method's descriptor alone makes getDeclaredMethods (the automatic subscriber, the event bus) throw NoClassDefFoundError for the whole class.
+        for (Iterator<MethodNode> it = node.methods.iterator(); it.hasNext(); ) {
+            MethodNode m = it.next();
+            if (m.visibleAnnotations == null || m.visibleAnnotations.stream().noneMatch(a -> "Lnet/neoforged/bus/api/SubscribeEvent;".equals(a.desc))) continue;
+            String bad = null;
+            for (Type t : Type.getArgumentTypes(m.desc)) if (missingType(t)) bad = element(t);
+            if (bad == null) continue;
+            stats.missingClasses.add(bad);
+            stats.sites++;
+            it.remove();
+            changes++;
+        }
         for (MethodNode m : node.methods) {
             if (m.instructions == null || m.instructions.size() == 0) continue;
             int c = method(m);
             if (c > 0) m.maxStack += 3;
             changes += c;
         }
+        return changes == 0 ? 0 : terminating ? 2 : 1;
+    }
+
+    /**
+     * A mixin class keeps its shape (its annotations, shadows and accessors are Mixin's business), but its handler and helper bodies are merged into a vanilla
+     * class and call 1.21.1 members like any mod code: a call that does not link there (a packet getter that changed its return type) throws NoSuchMethodError
+     * on every use of the handler, and in a handler of the client's packet listener that closes the game. Those bodies get the same stand-ins as the mod's
+     * other classes, and the symbols are kept apart for the report note ("Mixin warning").
+     */
+    private int mixinBodies(ClassNode node) {
+        Set<String> classes = new TreeSet<>(stats.missingClasses), methods = new TreeSet<>(stats.missingMethods), fields = new TreeSet<>(stats.missingFields);
+        stats.missingClasses.clear();
+        stats.missingMethods.clear();
+        stats.missingFields.clear();
+        int changes = 0;
+        for (MethodNode m : node.methods) {
+            if (m.instructions == null || m.instructions.size() == 0) continue;
+            int c = method(m);
+            if (c > 0) m.maxStack += 3;
+            changes += c;
+        }
+        for (String c : stats.missingClasses) stats.mixinSymbols.add("class " + c);
+        for (String x : stats.missingMethods) stats.mixinSymbols.add("method " + x);
+        for (String f : stats.missingFields) stats.mixinSymbols.add("field " + f);
+        stats.missingClasses.addAll(classes);
+        stats.missingMethods.addAll(methods);
+        stats.missingFields.addAll(fields);
         return changes == 0 ? 0 : terminating ? 2 : 1;
     }
 
@@ -225,8 +309,16 @@ final class SoftLink1201 implements Opcodes {
                     stats.missingClasses.add(bad);
                     gone = true;
                 } else if (hostOrMod(mi.owner) && methodMissing(mi.owner, mi.name, mi.desc)) {
-                    stats.missingMethods.add(sym);
-                    gone = true;
+                    String widened = widenedDesc(mi);
+                    if (widened != null) {
+                        // 1.21.1 declares a supertype where 1.20.1 had the subtype (ResourceManager -> ResourceProvider): the same call links
+                        mi.desc = widened;
+                        stats.sites++;
+                        changes++;
+                    } else {
+                        stats.missingMethods.add(sym);
+                        gone = true;
+                    }
                 }
                 if (gone) {
                     // a constructor of a class that exists: the new object stays uninitialized unless its NEW goes too (a null takes its place)

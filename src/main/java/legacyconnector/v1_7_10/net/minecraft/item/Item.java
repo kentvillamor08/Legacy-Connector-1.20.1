@@ -91,7 +91,11 @@ public class Item {
     }
 
     public static Item getItemFromBlock(Block block) {
-        return ItemBridge.fromBlock(block);
+        Item item = ItemBridge.fromBlock(block);
+        // an id-based version's block that has no item (a mod never registered it, or registered it as a block only) still had an ItemBlock in 1.6.4
+        if (item == null && block != null && block.mcc$vanilla == null
+                && org.kylepitcock.legacyconnector.v1_7_10.bridge.BlockBridge.registerImplicitNow(block)) item = ItemBridge.fromBlock(block);
+        return item;
     }
 
     public static void registerItems() {
@@ -240,6 +244,19 @@ public class Item {
 
     public CreativeTabs[] getCreativeTabs() {
         return new CreativeTabs[] {getCreativeTab()};
+    }
+
+    /** Whether the mod's own class (not the shim) overrides {@code getCreativeTabs}. */
+    public boolean mcc$overridesCreativeTabs() {
+        for (Class<?> c = getClass(); c != null && c != Object.class && !c.getName().startsWith("legacyconnector."); c = c.getSuperclass()) {
+            try {
+                c.getDeclaredMethod("getCreativeTabs");
+                return true;
+            } catch (NoSuchMethodException e) {
+                // next superclass
+            }
+        }
+        return false;
     }
 
     private boolean mcc$vanillaContainerResolved;
@@ -533,7 +550,15 @@ public class Item {
     }
 
     public void getSubItems(Item item, CreativeTabs tab, List list) {
-        list.add(new ItemStack(item, 1, 0));
+        // Forge 3.x (1.2.5) and the 1.3-1.4 hook: an item lists its subtypes through addCreativeItems (RedPower's ItemParts: ruby, ingots, nikolite... on one id)
+        java.util.ArrayList<ItemStack> items = new java.util.ArrayList<>();
+        addCreativeItems(items);
+        if (items.isEmpty()) items.add(new ItemStack(item, 1, 0));
+        list.addAll(items);
+    }
+
+    /** Forge 3.x / 1.4.7: the stacks the item shows in the creative inventory and NEI (the default is the item itself); the default {@code getSubItems} reads it. */
+    public void addCreativeItems(java.util.ArrayList itemList) {
     }
 
     public void addInformation(ItemStack stack, EntityPlayer player, List list, boolean advanced) {
@@ -546,6 +571,11 @@ public class Item {
     }
 
     public boolean onItemUseFirst(ItemStack stack, EntityPlayer player, World world, int x, int y, int z, int side, float hitX, float hitY, float hitZ) {
+        return onItemUseFirst(stack, player, world, x, y, z, side);
+    }
+
+    /** Forge 3.x (Minecraft 1.2.5) {@code onItemUseFirst}: before the block is activated, without the hit position; 1.2.5 mods override this one. */
+    public boolean onItemUseFirst(ItemStack stack, EntityPlayer player, World world, int x, int y, int z, int side) {
         return false;
     }
 
@@ -583,6 +613,11 @@ public class Item {
     }
 
     public boolean itemInteractionForEntity(ItemStack stack, EntityPlayer player, EntityLivingBase entity) {
+        return itemInteractionForEntity(stack, entity);
+    }
+
+    /** Forge 3.x (Minecraft 1.2.5) {@code itemInteractionForEntity(stack, entity)}: a right click on a mob; 1.2.5 mods override this one (no player argument). */
+    public boolean itemInteractionForEntity(ItemStack stack, EntityLivingBase entity) {
         return false;
     }
 

@@ -42,10 +42,29 @@ public final class Client1710 {
             } catch (RuntimeException | LinkageError ex) {
                 org.slf4j.LoggerFactory.getLogger("LegacyConnector/SoundSystem").error("A legacy sound load handler failed", ex);
             }
+            // 1.4-1.6 mods add their sound files to the sound pools by name (no sounds.json): make those events known to the engine
+            try {
+                var modern = net.minecraft.client.Minecraft.getInstance().getSoundManager();
+                int n = LegacySoundFiles.registerPoolEvents(modern, legacyconnector.v1_6_4.net.minecraft.client.audio.SoundPool.SOUNDS.mcc$urlsByEvent());
+                n += LegacySoundFiles.registerPoolEvents(modern, legacyconnector.v1_6_4.net.minecraft.client.audio.SoundPool.STREAMING.mcc$urlsByEvent());
+                if (n > 0) org.slf4j.LoggerFactory.getLogger("LegacyConnector/SoundSystem").info("{} sound events added from legacy sound pools", n);
+            } catch (RuntimeException | LinkageError ex) {
+                org.slf4j.LoggerFactory.getLogger("LegacyConnector/SoundSystem").error("Legacy sound pools could not be registered", ex);
+            }
         });
         LegacyParticles.register();
         LegacyMusic.register();
         ClientSelfTest.register();
+        if (org.kylepitcock.legacyconnector.v1_7_10.bridge.CoremodSites.any()) { // development aid: the hook mixins inject with require = 0, so a miss is silent
+            int[] ticks = {0};
+            net.neoforged.neoforge.common.NeoForge.EVENT_BUS.addListener((net.neoforged.neoforge.client.event.ClientTickEvent.Post e) -> {
+                if (++ticks[0] != 200) return; // the renderers exist by now
+                org.slf4j.LoggerFactory.getLogger("LegacyConnector/Coremods").info("1.12.2 coremod mixins on the client: {}",
+                        org.kylepitcock.legacyconnector.v1_12_2.bridge.CoremodMixinCheck1122.report(true));
+                org.slf4j.LoggerFactory.getLogger("LegacyConnector/Coremods").info("1.7.10 coremod mixins on the client: {}",
+                        org.kylepitcock.legacyconnector.v1_7_10.bridge.CoremodMixinCheck1710.report(true));
+            });
+        }
         WorldScreenshotTest.register();
         ScreenEvents1710.register();
         RenderEvents1710.register();
@@ -72,22 +91,22 @@ public final class Client1710 {
     /** Legacy armor is drawn by its own layer on players and humanoid mobs. */
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static void onAddLayers(EntityRenderersEvent.AddLayers event) {
+        // nothing to add when no 1.7.10-family mod is installed: the renderers stay exactly as vanilla and other mods built them
+        if (!org.kylepitcock.legacyconnector.core.LegacyMods.hasFamily("1.7.10")) return;
         for (var skin : event.getSkins()) {
             var renderer = event.getSkin(skin);
             if (renderer instanceof net.minecraft.client.renderer.entity.player.PlayerRenderer player) {
                 player.addLayer(new LegacyArmorLayer(player));
-                LegacyArmorLayer.hideFromHeadLayer(player);
+                player.addLayer(new LegacyPlayerSpecialsLayer(player));
             }
         }
         for (var type : event.getEntityTypes()) {
             var renderer = event.getRenderer((net.minecraft.world.entity.EntityType) type);
             if (renderer instanceof net.minecraft.client.renderer.entity.HumanoidMobRenderer humanoid) {
                 humanoid.addLayer(new LegacyArmorLayer(humanoid));
-                LegacyArmorLayer.hideFromHeadLayer(humanoid);
             } else if (renderer instanceof net.minecraft.client.renderer.entity.ArmorStandRenderer stand) {
                 // armor stands show legacy armor too (1.7.10 had none, but players put legacy suits and armor on them)
                 stand.addLayer(new LegacyArmorLayer(stand));
-                LegacyArmorLayer.hideFromHeadLayer(stand);
             }
         }
     }

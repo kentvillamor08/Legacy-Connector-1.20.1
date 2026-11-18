@@ -16,18 +16,40 @@ import net.minecraft.world.level.storage.DimensionDataStorage;
 public class MapStorage {
     private final DimensionDataStorage storage;
     private final Map<String, WorldSavedData> loadedDataMap = new HashMap<>();
+    /** The loaded data as a list (1.7.10 kept both; access transformers and reflection of mods read it). */
+    public final java.util.List<WorldSavedData> loadedDataList = new java.util.ArrayList<>();
 
     public MapStorage(DimensionDataStorage storage) {
         this.storage = storage;
+        org.kylepitcock.legacyconnector.core.SavedDataFiles.migrate(storage);
     }
 
-    /** Mods that pass the world's save handler (Mystcraft): the data stays in memory, the world's own storage is used by {@code World.mapStorage}. */
+    /**
+     * Mods that pass the world's save handler (Mystcraft reads its saved ages this way at server start, before any world asks): the
+     * running server's own data folder; in memory only without a server (client side).
+     */
     public MapStorage(ISaveHandler handler) {
-        this((DimensionDataStorage) null);
+        this(serverStorage(handler));
+    }
+
+    private static DimensionDataStorage serverStorage(ISaveHandler handler) {
+        if (handler == null) return null;
+        var server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
+        var overworld = server == null ? null : server.overworld();
+        if (overworld == null) return null;
+        // only the save handler of the server's world (a client world's handler points nowhere)
+        java.io.File dir = handler.getWorldDirectory();
+        java.io.File root = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toFile();
+        try {
+            if (dir == null || !dir.getCanonicalFile().equals(root.getCanonicalFile())) return null;
+        } catch (java.io.IOException e) {
+            return null;
+        }
+        return overworld.getDataStorage();
     }
 
     private static String file(String name) {
-        return "legacy_" + name.replaceAll("[^a-zA-Z0-9_.-]", "_");
+        return org.kylepitcock.legacyconnector.core.SavedDataFiles.file(name);
     }
 
     /** The saved data, or null if none was saved yet (mods then create it and call {@link #setData}). */
@@ -38,12 +60,15 @@ public class MapStorage {
                 (tag, registries) -> Adapter.load(create(type, name), tag), null), file(name));
         if (adapter == null || adapter.legacy == null) return null;
         loadedDataMap.put(name, adapter.legacy);
+        loadedDataList.add(adapter.legacy);
         return adapter.legacy;
     }
 
     public void setData(String name, WorldSavedData data) {
         if (data == null) return;
-        loadedDataMap.put(name, data);
+        WorldSavedData previous = loadedDataMap.put(name, data);
+        if (previous != null) loadedDataList.remove(previous);
+        loadedDataList.add(data);
         if (storage != null) storage.set(file(name), new Adapter(data));
     }
 

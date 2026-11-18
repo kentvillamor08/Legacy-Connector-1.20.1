@@ -8,7 +8,7 @@ Legacy Connector translates a legacy mod jar at load time, links it against a ha
 mods/SomeMod-1.7.10.jar
         │  loader (FML locator service, runs before mod discovery)
         ▼
-  1. Inspect      detect the legacy version (mcmod.info, @Mod, FML/Forge references)
+  1. Inspect      detect the legacy version (mcmod.info, @Mod, FML/Forge references; notch-name fingerprint: member references that resolve against one version's obfuscated names, used for 1.4.7 and for bare ModLoader mods of 1.5.2/1.6.4 that have neither FML metadata nor mcmod.info)
   2. Translate    relocate Minecraft/Forge/FML classes into the shim namespace, SRG -> MCP names,
                   Java 8 -> 21 fixes (removed JDK APIs, reflection on final fields, Guava, LWJGL 2 -> 3)
   3. Link         every legacy API reference is resolved against, in order:
@@ -44,13 +44,12 @@ were written against:
   most-used gaps can be implemented properly.
 
 Legacy content enters the game through the **native extension points** a 1.21.1 mod would use, and the layer only translates
-the legacy API into them: biomes through the active multi-noise climate parameter list (with an optional TerraBlender region
-integration when that mod is already installed), world generators as placed features in biome modifiers, village buildings as
-extra pieces of the vanilla village structure (vanilla's layout untouched), structure chests through loot tables (and global loot
-modifiers), spawns through biome modifiers, recipes and tags as a data pack, containers as capabilities. Post-generation
-decorators, mixins that replace a vanilla result, or filling things directly are avoided where a native hook exists: they ignore
-the pack's other mods (legacy village pieces overlapped houses, legacy chests skipped the pack's loot, and a hard-coded biome
-layout would discard climate points supplied by the pack's world-generation mods).
+the legacy API into them: biomes through the pack's biome placement, world generators as placed features in biome modifiers,
+village buildings as extra pieces of the vanilla village structure (vanilla's layout untouched), structure chests through loot tables (and global loot modifiers),
+spawns through biome modifiers, recipes and tags as a data pack, containers as capabilities. Post-generation decorators,
+mixins that override a vanilla result, or filling things directly are avoided where a native hook exists: they ignore the pack's
+other mods (legacy village pieces overlapped houses, legacy chests skipped the pack's loot, a biome override was bypassed by
+TerraBlender).
 
 Mod-specific code is the exception: it is used only when no generic fix works, only for popular mods, and it is kept small
 and isolated (today: the DragonAPI crafting/smelting hooks in `CoremodHooks`).
@@ -65,7 +64,7 @@ and isolated (today: the DragonAPI crafting/smelting hooks in `CoremodHooks`).
 - A legacy event handler that fails 1,000 times in a row without one success is unregistered with one log line (handlers of a
   mod that failed to load threw about 1,000 exceptions a second). `events.skip` switches handlers off by hand.
 - A creative tab that gets the same stack twice skips the duplicate instead of failing the tab build (`CreativeTabDuplicateMixin`).
-- Mixins of other mods are never applied to classes of translated legacy jars (`LegacyMixinPlugin`, a Mixin extension that empties the mixin set of a class whose jar carries the provenance resource). A legacy mod and its modern port share class names (Mekanism `RenderFlame` vs Iris's mixin for the 1.21 one), and the failed injection would take the legacy mod down. This mod's own configs (`legacyconnector*`) still apply.
+- Mixins of other mods are never applied to classes of translated legacy jars (`LegacyMixinPlugin`, a Mixin extension that empties the mixin set of a class whose jar carries the provenance resource). A legacy mod and its modern port share class names (Mekanism `RenderFlame` vs Iris's mixin for the 1.21 one), and the failed injection would take the legacy mod down. This mod's own configs (`legacyconnector*`) still apply. A 1.12.2 jar's own mixins (`LegacyMixinConfigs`) apply to its own classes and to shim classes of vanilla types (Wolf Armor and Storage makes `EntityWolf` implement its `IArmoredWolf`) when every `@Shadow`/`@Accessor`/`@Invoker` member exists in the shim class; injectors that find nothing are skipped.
 
 ## Legacy loader behaviour that is reproduced
 
@@ -83,12 +82,36 @@ and isolated (today: the DragonAPI crafting/smelting hooks in `CoremodHooks`).
   (dev) tests this path with the libraries read from `build/legacy-libs`.
 - APIs shaded by legacy jars that a modern mod of the pack also ships (DragonAPI carries the 1.7.10 AE2 API, `appeng.api.*`, next to modern AE2)
   are relocated in every legacy jar to `legacyconnector_relocated/<version>/...` (`CrossVersionPackages.modern`), so the two never export the same
-  package. Classes only the modern mod has keep their name; packages of `@Mod` classes are never relocated.
+  package. Classes only the modern mod has keep their name. The package of a legacy `@Mod` class moves too when a modern mod defines it (CodeChickenLib 1.12.2 and
+  1.21.1 both have `codechicken.lib.CodeChickenLib`), and the generated entrypoint names the moved class. A legacy mod whose FML id a modern mod also uses loads as
+  `<id>_legacy` (the id check reads the modern jar's `neoforge.mods.toml`, tab or space indented), so a 1.12.2 CodeChickenLib in `mods/1.12.2/` runs next to the
+  1.21.1 one.
 - Coremods: their plugins are constructed and set up as FML did (construct all, then `getASMTransformerClass` /
   `injectData` / setup hook by sorting index; mod containers count as loaded mods). Their class transformers run over
   the legacy mod classes before translation, in a stand-in LaunchWrapper class loader with the legacy FML API, so
   coremods that patch *mod* classes work: CoFH `@Strippable`, AE2 `@Integration`, OpenMods, Steve's Addons, patcher
-  mods fixing other mods' API mismatches. Transformers aimed at Minecraft's own classes find nothing to patch.
+  mods fixing other mods' API mismatches.
+- Coremod hooks in Minecraft's own classes (the summary of what works and what cannot, how to read the log line and how to add a place is [Coremods](Coremods.md); 1.7.10; 1.6.4, 1.5.2, 1.4.7 and 1.12.2 are scanned the same way into their own list; the 1.12.2 list is replayed by `CoremodSites1122`, which declares places with 1.12.2 types on the same lists and binding (so far: entity base tick, all players waking, the `Item.ToolMaterial` getters, `World.isRainingAt` and `canSnowAt`, the item entity tick, `BlockFalling.canFallThrough`, the potion effect particles of `EntityLivingBase.updatePotionEffects`, the name tag check of `RenderLivingBase`, the slot ranges of the shift-click of the crafting table and the trading screen (a place keyed to one occurrence of a repeated instruction: `=` keys; `Site.plain()` keeps `(II)I` hooks from being taken for value joiners), `Entity.move` (a hook before it and one after the block collisions, with the movement that happened and the one asked for), `FoodStats` (tick, `needFood`, the 20 and 40 limits, exhaustion added: mixins on the modern `FoodData`), the exhaustion of jumping, attacking, damage, breaking a block and the hunger effect (`Site.named`: a hook parameter of the mod's own enum type gets the constant the place names, e.g. `SPRINTING_JUMP`), what a shulker box takes, the furnace input slot, the chorus fruit teleport; plugins are constructed at the first mod construct, before any vanilla `Items` exist, as FML did before Bootstrap); the 1.6.4, 1.5.2 and 1.4.7 lists are replayed by the same `CoremodSites` places: the loader writes them in 1.7.10 class names (`PreSeventeenKeys`, through the forward renames), so far one place is hit, the in-bed check of OpenBlocks; `tools/dev/agent-tasks/coremod-sites-pre17.md` lists the hooks found): those classes do not exist at run time, so on a cache-miss translation the loader shows the
+  transformers the original 1.7.10 client classes (`VanillaJar` finds the jar in a launcher folder, `coremods.vanillaJar`, or downloads it from Mojang
+  unless `coremods.downloadVanilla=false`; only the exact official file is accepted and it is never shipped), first obfuscated and then in SRG names; a transformer whose plugin has a sorting index above 1000 ran after FML's deobfuscation and is shown the SRG form only
+  (`CoremodHookScan`). `CoremodHookDiscovery` diffs each method and records every added static call with a site key
+  (`<class>.<method><desc>#head-cancel | tail | const:<v> | replace:<call> | after:<insn> | cancel-after:<insn>`) in
+  `.legacyconnector/cache/coremod-hooks-1.7.10.txt`. At run time `CoremodSites` maps site keys to modern places (mixins and shim methods that are no-ops
+  unless a hook is listed there), finds the hook method in the translated mod, binds its parameters by type to the values the place offers and applies
+  it as cancel / notify / modify / replace; a mod's own `(ZZ)Z`, `(FF)F`... helper at the site combines a hook's result with the value. It is keyed by
+  Minecraft method, never by mod. Interfaces, fields and methods a transformer adds to a game class (Factorization's `IExtraChunkData` on `Chunk`) are
+  recorded the same way in `coremod-structure-<mc>.txt`. An added interface that is a class of a mod jar is applied with its accessor methods as a mixin on the
+  legacy API class (`CoremodAdditionMixins` generates it into that jar before translation; the added fields live in `CoremodState`, per game object, because
+  a chunk view is made per lookup); static members, constructors and methods without such an interface are not applied
+  (`tools/dev/agent-tasks/coremod-structural-additions.md`). One start-up log line gives hooks found, replayed and without a place (`-Dlegacyconnector.coremodHooks.report=full`
+  lists them). Limits: Forge's binary patches are not applied before the transformers, so a transformer looking for a Forge-added instruction finds
+  nothing; whole-class replacements are not handled.
+- 1.12.2 coremods: the `FMLCorePlugin` plugins of 1.12.2 jars run in the same isolated loader as the 1.7.10 ones, over their own API flavour (`loader/src/coremodApi1122`:
+  `net.minecraftforge.fml.relauncher.*`, `FMLLog`, AT/deobfuscation stand-ins and `CoreModManager`, packed as `legacy/1.12.2/coremod-api.jar` next to the shared
+  LaunchWrapper classes; the shim is served with the `legacyconnector/v1_12_2/` prefix undone). Their class transformers run over the 1.12.2 mod classes before
+  translation and are shown the original 1.12.2 client classes (`legacy/1.12.2/notch.txt`, from `tools/extract_legacy_signatures.py 1.12.2`). A plugin's own
+  SpongePowered Mixin copy (MixinBooter, mixin-only coremods) is isolated in that loader (`LaunchClassLoader.mcc$isolate`) so it never drives the game's Mixin;
+  such plugins fail to bootstrap there and are skipped with one log line.
 - LaunchWrapper's `Launch.blackboard` / `Launch.classLoader`.
 - Resource URLs: mod jars are served from NeoForge's `union:` file system; mods that list their own jar's files
   (checking for `jar:`/`file:` URLs) get the equivalent `jar:file:` URL.

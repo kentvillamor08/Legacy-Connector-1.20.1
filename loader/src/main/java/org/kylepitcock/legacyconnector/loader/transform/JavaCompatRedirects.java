@@ -34,6 +34,9 @@ public final class JavaCompatRedirects {
         virtualToStatic("java/lang/Class", "getField", "(Ljava/lang/String;)Ljava/lang/reflect/Field;", COMPAT + "ReflectionCompat");
         virtualToStatic("java/lang/Class", "getFields", "()[Ljava/lang/reflect/Field;", COMPAT + "ReflectionCompat");
         virtualToStatic("java/lang/Class", "getMethod", "(Ljava/lang/String;[Ljava/lang/Class;)Ljava/lang/reflect/Method;", COMPAT + "ReflectionCompat");
+        // Class names put together at run time are still the legacy ones (literals were relocated): looked up in the legacy API when absent.
+        staticToStatic("java/lang/Class", "forName", "(Ljava/lang/String;)Ljava/lang/Class;", COMPAT + "ReflectionCompat", "forName");
+        staticToStatic("java/lang/Class", "forName", "(Ljava/lang/String;ZLjava/lang/ClassLoader;)Ljava/lang/Class;", COMPAT + "ReflectionCompat", "forName");
         virtualToStatic("java/lang/reflect/Field", "setInt", "(Ljava/lang/Object;I)V", COMPAT + "ReflectionCompat");
         virtualToStatic("java/lang/reflect/Field", "set", "(Ljava/lang/Object;Ljava/lang/Object;)V", COMPAT + "ReflectionCompat");
         virtualToStatic("java/lang/reflect/Field", "setBoolean", "(Ljava/lang/Object;Z)V", COMPAT + "ReflectionCompat");
@@ -113,6 +116,7 @@ public final class JavaCompatRedirects {
         staticToStatic("com/google/common/base/Objects", "toStringHelper", "(Ljava/lang/String;)Lcom/google/common/base/MoreObjects$ToStringHelper;", "com/google/common/base/MoreObjects", "toStringHelper");
         staticToStatic("com/google/common/base/Objects", "firstNonNull", "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", "com/google/common/base/MoreObjects", "firstNonNull");
         staticToStatic("com/google/common/collect/Iterators", "emptyIterator", "()Lcom/google/common/collect/UnmodifiableIterator;", COMPAT + "GuavaCompat", "emptyIterator");
+        virtualToStatic("com/google/common/hash/HashFunction", "hashString", "(Ljava/lang/CharSequence;)Lcom/google/common/hash/HashCode;", COMPAT + "GuavaCompat");
         virtualToStatic("com/google/common/base/Stopwatch", "elapsedMillis", "()J", COMPAT + "GuavaCompat");
         virtualToStatic("com/google/common/base/Stopwatch", "elapsedTime", "(Ljava/util/concurrent/TimeUnit;)J", COMPAT + "GuavaCompat");
         // Guava scans only URLClassLoaders; mods run in module class loaders (Logistics Pipes finds its packets this way).
@@ -149,6 +153,10 @@ public final class JavaCompatRedirects {
                 "(Lcom/mojang/authlib/GameProfile;Z)Ljava/util/Map;", COMPAT + "LibraryCompat");
         // jopt-simple 5: acceptsAll takes a List.
         virtualToStatic("joptsimple/OptionParser", "acceptsAll", "(Ljava/util/Collection;Ljava/lang/String;)Ljoptsimple/OptionSpecBuilder;", COMPAT + "LibraryCompat");
+        // jopt-simple 5: internal.Strings.join takes an Iterable (4: a List).
+        staticToStatic("joptsimple/internal/Strings", "join", "(Ljava/util/List;Ljava/lang/String;)Ljava/lang/String;", COMPAT + "LibraryCompat", "joinStrings");
+        // Netty 4.1: ChannelPromiseAggregator.add(ChannelPromise...) is inherited from PromiseAggregator.add(Promise...) and returns that type.
+        virtualToStatic("io/netty/channel/ChannelPromiseAggregator", "add", "([Lio/netty/channel/ChannelPromise;)Lio/netty/channel/ChannelPromiseAggregator;", COMPAT + "LibraryCompat");
         // LWJGL 2 -> 3: typed-buffer overloads got explicit suffixes (glUniform1(int, FloatBuffer) -> glUniform1fv).
         String gl20 = "org/lwjgl/opengl/GL20";
         staticToStatic(gl20, "glGetShader", "(IILjava/nio/IntBuffer;)V", COMPAT + "GlCompat", "glGetShaderiv");
@@ -250,6 +258,39 @@ public final class JavaCompatRedirects {
         staticToStatic("org/lwjgl/opengl/ARBVertexArrayObject", "glBindVertexArray", "(I)V", gl, "glBindVertexArrayARB");
         staticToStatic("org/lwjgl/opengl/ARBOcclusionQuery", "glGenQueriesARB", "(Ljava/nio/IntBuffer;)V", gl, "glGenQueriesARB");
         staticToStatic("org/lwjgl/opengl/ARBOcclusionQuery", "glDeleteQueriesARB", "(Ljava/nio/IntBuffer;)V", gl, "glDeleteQueriesARB");
+        // LWJGL 2 reads of shader state and the float-buffer attribute pointer (virtual shaders: see GlCompat); glClearBuffer is the real glClearBufferfv
+        staticToStatic(gl20, "glGetActiveUniformSize", "(II)I", gl, "glGetActiveUniformSize");
+        staticToStatic(gl20, "glGetActiveUniformType", "(II)I", gl, "glGetActiveUniformType");
+        staticToStatic(gl20, "glGetUniform", "(IILjava/nio/FloatBuffer;)V", gl, "glGetUniformf");
+        staticToStatic(gl20, "glGetUniform", "(IILjava/nio/IntBuffer;)V", gl, "glGetUniformi");
+        staticToStatic(gl20, "glGetVertexAttrib", "(IILjava/nio/FloatBuffer;)V", gl, "glGetVertexAttribf");
+        staticToStatic(gl20, "glGetVertexAttrib", "(IILjava/nio/IntBuffer;)V", gl, "glGetVertexAttribi");
+        staticToStatic(gl20, "glVertexAttribPointer", "(IIZILjava/nio/FloatBuffer;)V", gl, "glVertexAttribPointerBuffer");
+        INVOKES.put("org/lwjgl/opengl/GL30.glClearBuffer(IILjava/nio/FloatBuffer;)V",
+                new MethodInsnNode(Opcodes.INVOKESTATIC, "org/lwjgl/opengl/GL30", "glClearBufferfv", "(IILjava/nio/FloatBuffer;)V", false));
+        // OpenAL: LWJGL 2's typed-buffer overloads got explicit suffixes in LWJGL 3 (alListener(int, FloatBuffer) -> alListenerfv)
+        String al = "org/lwjgl/openal/AL10";
+        staticToStatic(al, "alGetListener", "(ILjava/nio/FloatBuffer;)V", al, "alGetListenerfv");
+        staticToStatic(al, "alListener", "(ILjava/nio/FloatBuffer;)V", al, "alListenerfv");
+        staticToStatic(al, "alSource", "(IILjava/nio/FloatBuffer;)V", al, "alSourcefv");
+        INVOKES.put(al + ".alIsExtensionPresent(Ljava/lang/String;)Z",
+                new MethodInsnNode(Opcodes.INVOKESTATIC, al, "alIsExtensionPresent", "(Ljava/lang/CharSequence;)Z", false));
+        // javac widens a byte or short argument to int; Kotlin and some bytecode generators name the narrow overload, which does not exist
+        INVOKES.put("java/lang/StringBuilder.append(B)Ljava/lang/StringBuilder;",
+                new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append", "(I)Ljava/lang/StringBuilder;", false));
+        INVOKES.put("java/lang/StringBuilder.append(S)Ljava/lang/StringBuilder;",
+                new MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append", "(I)Ljava/lang/StringBuilder;", false));
+        // fastutil 8: ObjectCollection.rem(Object) is gone (remove(Object) has the same meaning on an object list)
+        rename("it/unimi/dsi/fastutil/objects/ObjectArrayList", "rem", "(Ljava/lang/Object;)Z", "remove");
+        // authlib 6: joinServer takes the profile id, hasJoinedServer the profile name (both threw the same AuthenticationException)
+        virtualToStatic("com/mojang/authlib/minecraft/MinecraftSessionService", "joinServer",
+                "(Lcom/mojang/authlib/GameProfile;Ljava/lang/String;Ljava/lang/String;)V", COMPAT + "LibraryCompat");
+        INVOKES.put("com/mojang/authlib/yggdrasil/YggdrasilMinecraftSessionService.joinServer(Lcom/mojang/authlib/GameProfile;Ljava/lang/String;Ljava/lang/String;)V",
+                new MethodInsnNode(Opcodes.INVOKESTATIC, COMPAT + "LibraryCompat", "joinServer",
+                        "(Lcom/mojang/authlib/minecraft/MinecraftSessionService;Lcom/mojang/authlib/GameProfile;Ljava/lang/String;Ljava/lang/String;)V", false));
+        INVOKES.put("com/mojang/authlib/yggdrasil/YggdrasilMinecraftSessionService.hasJoinedServer(Lcom/mojang/authlib/GameProfile;Ljava/lang/String;Ljava/net/InetAddress;)Lcom/mojang/authlib/GameProfile;",
+                new MethodInsnNode(Opcodes.INVOKESTATIC, COMPAT + "LibraryCompat", "hasJoinedServer",
+                        "(Lcom/mojang/authlib/minecraft/MinecraftSessionService;Lcom/mojang/authlib/GameProfile;Ljava/lang/String;Ljava/net/InetAddress;)Lcom/mojang/authlib/GameProfile;", false));
         // Guava 17 -> 32: TypeToken.isAssignableFrom was renamed isSupertypeOf.
         rename("com/google/common/reflect/TypeToken", "isAssignableFrom", "(Lcom/google/common/reflect/TypeToken;)Z", "isSupertypeOf");
         rename("com/google/common/reflect/TypeToken", "isAssignableFrom", "(Ljava/lang/reflect/Type;)Z", "isSupertypeOf");
@@ -306,7 +347,7 @@ public final class JavaCompatRedirects {
         for (MethodNode method : node.methods) {
             InsnList insns = method.instructions;
             for (AbstractInsnNode insn = insns.getFirst(); insn != null; insn = insn.getNext()) {
-                if (insn instanceof MethodInsnNode call && typedToArray(insns, call)) {
+                if (insn instanceof MethodInsnNode call && typedToArray(method, call)) {
                     count++;
                     continue;
                 }
@@ -339,6 +380,35 @@ public final class JavaCompatRedirects {
                             && call.desc.equals("(Ljava/net/Proxy;Ljava/lang/String;)V")) {
                         // new YggdrasilAuthenticationService(proxy, clientToken) -> new YggdrasilAuthenticationService(proxy)
                         AbstractInsnNode replaced = rewriteConstructor(insns, call, "yggdrasilService", COMPAT + "LibraryCompat");
+                        if (replaced != null) {
+                            insn = replaced;
+                            count++;
+                        }
+                    } else if (call.getOpcode() == Opcodes.INVOKESPECIAL && call.name.equals("<init>") && method.name.equals("<init>")
+                            && call.owner.equals("org/objectweb/asm/commons/MethodRemapper") && call.owner.equals(node.superName)
+                            && (call.desc.equals("(ILjava/lang/String;Lorg/objectweb/asm/MethodVisitor;Lorg/objectweb/asm/commons/Remapper;)V")
+                            || call.desc.equals("(IILjava/lang/String;Lorg/objectweb/asm/MethodVisitor;Lorg/objectweb/asm/commons/Remapper;)V"))) {
+                        // subclass of ASM 5's RemappingMethodAdapter: super(access, desc, mv, remapper) -> super(mv, remapper), dropping the leading arguments
+                        int tmp = method.maxLocals;
+                        method.maxLocals += 2;
+                        boolean api = call.desc.startsWith("(II");
+                        InsnList fix = new InsnList();
+                        fix.add(new org.objectweb.asm.tree.VarInsnNode(Opcodes.ASTORE, tmp));
+                        fix.add(new org.objectweb.asm.tree.VarInsnNode(Opcodes.ASTORE, tmp + 1));
+                        fix.add(new InsnNode(Opcodes.POP));
+                        fix.add(new InsnNode(Opcodes.POP));
+                        if (api) fix.add(new InsnNode(Opcodes.POP));
+                        fix.add(new org.objectweb.asm.tree.VarInsnNode(Opcodes.ALOAD, tmp + 1));
+                        fix.add(new org.objectweb.asm.tree.VarInsnNode(Opcodes.ALOAD, tmp));
+                        insns.insertBefore(call, fix);
+                        call.desc = "(Lorg/objectweb/asm/MethodVisitor;Lorg/objectweb/asm/commons/Remapper;)V";
+                        count++;
+                    } else if (call.getOpcode() == Opcodes.INVOKESPECIAL && call.name.equals("<init>")
+                            && call.owner.equals("org/objectweb/asm/commons/MethodRemapper") && !node.name.equals(call.owner)
+                            && (call.desc.equals("(ILjava/lang/String;Lorg/objectweb/asm/MethodVisitor;Lorg/objectweb/asm/commons/Remapper;)V")
+                            || call.desc.equals("(IILjava/lang/String;Lorg/objectweb/asm/MethodVisitor;Lorg/objectweb/asm/commons/Remapper;)V"))) {
+                        // ASM 5's RemappingMethodAdapter(access, desc, mv, remapper) became MethodRemapper(mv, remapper)
+                        AbstractInsnNode replaced = rewriteConstructor(insns, call, "methodRemapper", COMPAT + "LibraryCompat");
                         if (replaced != null) {
                             insn = replaced;
                             count++;
@@ -394,9 +464,11 @@ public final class JavaCompatRedirects {
      * Up to Java 8, {@code Arrays.asList(...).toArray()} returned the backing array with its own type, and code cast it straight to
      * that type ({@code (Integer[]) list.toArray()}: RedPower's power search). Since Java 9 it is always an {@code Object[]} and the cast
      * fails. A {@code java.util} collection's {@code toArray()} followed by a cast to a typed array becomes {@code toArray(new T[0])},
-     * which gives that type for every collection.
+     * which gives that type for every collection. The added array argument needs one more operand stack slot (the classes are written
+     * without recomputing maxs: a getter {@code return (T[]) list.toArray();} with max stack 1 failed verification, #244).
      */
-    private static boolean typedToArray(InsnList insns, MethodInsnNode call) {
+    private static boolean typedToArray(MethodNode method, MethodInsnNode call) {
+        InsnList insns = method.instructions;
         if (!call.name.equals("toArray") || !call.desc.equals("()[Ljava/lang/Object;") || !call.owner.startsWith("java/util/")) return false;
         AbstractInsnNode next = call.getNext();
         while (next != null && next.getOpcode() < 0) next = next.getNext();
@@ -410,6 +482,7 @@ public final class JavaCompatRedirects {
         fix.add(new org.objectweb.asm.tree.TypeInsnNode(Opcodes.ANEWARRAY, element));
         insns.insertBefore(call, fix);
         call.desc = "([Ljava/lang/Object;)[Ljava/lang/Object;";
+        method.maxStack += 1;
         return true;
     }
 

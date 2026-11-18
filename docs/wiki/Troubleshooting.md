@@ -42,3 +42,37 @@ it logs `JOIN SIZE TEST`: raw and zlib-compressed size of the recipe packet (als
 
 Reference measurement (GTNH-style corpus of 1.7.10 mods, 23,081 recipes): recipes 467 KB compressed (3.98 MB raw), registry id sync of
 `minecraft:item` 103 KB, tags 54 KB, everything else under 50 KB each; total about 760 KB, well under the limit.
+
+## The game stops with "Module ... contains package org.spongepowered..."
+
+A jar bundles its own Mixin (common in 1.12.2: Spartan Weaponry, MixinBooter mods, SuperMartijn642's Core Lib). NeoForge loads such a jar from `mods/` as a launcher plugin before any mod code, including Legacy Connector, can run, so this cannot be fixed from inside the mod. Move the jar into its version folder (`mods/1.12.2/`, `mods/1.7.10/`, ...) before the first launch; Legacy Connector reads those folders and removes the bundled Mixin when it translates the jar. Cubic Chunks (OpenCubicChunks, issue #304) hits this error too, but it is not supported anyway: it replaces vanilla chunk storage, world generation and lighting, so Legacy Connector skips it with a message when it is in a version folder.
+
+## NeoForge rejects a jar by its file name
+
+NeoForge checks file names before any mod runs, so Legacy Connector cannot sort or translate such a jar from `mods/`. Known case: a version part that starts with a dot (for example `HBM-NTM-.1.0.27_X5863.jar`). Rename the jar, or put it into its version folder by hand.
+
+## "Warnings while loading mods": a missing dependency
+
+When a legacy mod needs a library or mod that is not installed, NeoForge's "Warnings while loading mods" screen names the mod, the missing dependency and the folder to put its jar into (`mods/<version>/`). The mod is still loaded and may fail or miss features without it. The same lines are in `logs/legacyconnector-report.txt`, which also lists per jar what was detected, what could not be linked and what was synthesized. Its last section, "Runtime problems", lists per mod the missing textures and models, items and blocks without a model or a name, and recipes dropped because of a missing item, seen while the game ran; `/legacyconnector problems` shows the same counts in chat (see [Development](Development.md)).
+
+## A required legacy library is missing but a modern mod with the same name is installed
+
+Legacy mods list required libraries (`required-after:codechickenlib`). A modern mod with the same id (CodeChickenLib 1.21.1) satisfies the id, but its API is another
+generation: classes the legacy mod needs (`codechicken.lib.block.property.unlisted.UnlistedGenericTile`) are not in it. Legacy Connector checks every reference into the
+package root of such a modern mod class by class and member by member; what is missing counts as unresolved. The report shows `Required library 'codechickenlib': only a modern
+mod with that id is installed and it lacks N class(es) ...` with the classes, the loading warning and the chat notice name the library, and the mod's own failure message
+repeats it. The fix is the library's jar for the legacy Minecraft version in `mods/<version>/` (for example `mods/1.12.2/CodeChickenLib-1.12.2-3.2.3.358-universal.jar`); it
+loads as `codechickenlib_legacy` next to the modern one.
+
+## Minecraft 1.2.5 jars are reported but not loaded
+
+Minecraft 1.2.5 support is alpha and on by default. A 1.2.5 jar (detected by its names, or any jar in `mods/1.2.5/`) lands in `logs/legacyconnector-report.txt` under "Mods of a Minecraft version that is not supported yet" and is not loaded in two cases:
+
+1. `versions.minecraft125=false` (or the older `experimental.minecraft125=false`) is set in `config/legacyconnector.properties`: remove the line or set it to `true` and restart.
+2. The build has no 1.2.5 name table (the line says "not supported in this build"): the jars are renamed to Minecraft 1.4.7's names through a table that the release and nightly jars carry (generated at build time from Ornithe's Calamus and Feather mappings, downloaded from maven.ornithemc.net when the mod is built, and never committed). Use a release or nightly jar, or build with network access.
+
+Put the jars (the server build of a mod on a server) into `mods/1.2.5/`. Expect mods that load and then do little: small mods register their content and draw it in a real client, six small mods (Obsidian Hilt, BucketCraft, Craftable Mob Spawners, Magic Wands, Elemental Creepers, Backpack) were played in survival and keep their items and blocks across a save and restart, and the big Forge-era mods are only link-probed. Details: [Legacy 1.2.5](Legacy-1.2.5.md), the toggle: [Configuration](Configuration.md).
+
+## Reporting
+
+Open a GitHub issue and attach `logs/latest.log` and `logs/legacyconnector-report.txt` as files, with the Legacy Connector version (for a nightly build, the full version from the jar name), the mod and its Minecraft version.

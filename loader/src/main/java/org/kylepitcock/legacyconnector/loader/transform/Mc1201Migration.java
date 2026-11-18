@@ -53,6 +53,11 @@ final class Mc1201Migration {
         int providerCalls;
         int selectionListPositionCalls;
         int widgetNarrationOverrides;
+        /** Classes (names in this jar) generated as the 1.20.1-shaped {@code ItemPredicate} base of the jar's subclasses of it. */
+        final java.util.Set<String> itemPredicateStandIns = new java.util.TreeSet<>();
+        /** The class being migrated and the static methods generated for method handles whose call rule rewrites the call in place (see redirectHandles). */
+        ClassNode current;
+        final java.util.List<MethodNode> trampolines = new java.util.ArrayList<>();
 
         int total() {
             return calls + constructors + fields + bridges + providerCalls + selectionListPositionCalls
@@ -67,6 +72,7 @@ final class Mc1201Migration {
             providerCalls += o.providerCalls;
             selectionListPositionCalls += o.selectionListPositionCalls;
             widgetNarrationOverrides += o.widgetNarrationOverrides;
+            itemPredicateStandIns.addAll(o.itemPredicateStandIns);
         }
 
         @Override
@@ -92,17 +98,31 @@ final class Mc1201Migration {
         renameWidgetNarrationOverride(node, h, c);
         renameOverrides(node, h, t, c);
         swapMobBucketSuper(node);
+        swapItemPredicateSuper(node, c);
         renameBusConstant(node);
         dropEmptySubscriber(node);
+        c.current = node;
         for (MethodNode m : node.methods) {
             if (m.instructions == null || m.instructions.size() == 0) continue;
             rewriteBody(m, h, t, c);
         }
+        // a method reference that needs an in-place call rule (BucketItem::new) points at a generated static method now; its body is rewritten like any other
+        for (int i = 0; i < c.trampolines.size(); i++) {
+            MethodNode tramp = c.trampolines.get(i);
+            node.methods.add(tramp);
+            rewriteBody(tramp, h, t, c);
+        }
+        c.trampolines.clear();
+        // calls to methods 1.21.1 made protected, on objects that are not the caller's own class
+        c.calls += ProtectedCalls1201.apply(node, h);
+        c.current = null;
         if ((node.access & Opcodes.ACC_INTERFACE) == 0) {
             addBridges(node, h, t, c);
             addRecipeSerializerCodecs(node, c);
             addTriggerCodec(node, c);
+            addInstanceValidate(node, c);
             addConditionCodec(node, c);
+            addSerializerCodec(node, c);
         }
         return c;
     }
@@ -130,6 +150,25 @@ final class Mc1201Migration {
     }
 
     /** A recipe condition written for 1.20.1 ({@code getID()} and {@code test}) lacks the {@code codec()} of 1.21.1: the codec of the serializer registered under its id. */
+    /**
+     * A class implementing {@code EntityDataSerializer} with the 1.20.1 methods {@code write(FriendlyByteBuf, T)} / {@code read(FriendlyByteBuf)} gets the
+     * {@code codec()} 1.21.1 asks for: a stream codec that calls those two methods on the object (see {@code MiscCompat.serializerCodec}).
+     */
+    private static void addSerializerCodec(ClassNode node, Counts c) {
+        if (node.interfaces == null || node.interfaces.stream().noneMatch(i -> i.startsWith("net/minecraft/network/syncher/EntityDataSerializer"))) return;
+        String desc = "()Lnet/minecraft/network/codec/StreamCodec;";
+        if (declared(node, "codec", desc) != null) return;
+        MethodNode m = new MethodNode(Opcodes.ACC_PUBLIC, "codec", desc, null, null);
+        m.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        m.instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, "org/kylepitcock/legacyconnector/v1_20_1/migrate/MiscCompat", "serializerCodec",
+                "(Ljava/lang/Object;)Lnet/minecraft/network/codec/StreamCodec;", false));
+        m.instructions.add(new InsnNode(Opcodes.ARETURN));
+        m.maxStack = 1;
+        m.maxLocals = 1;
+        node.methods.add(m);
+        c.bridges++;
+    }
+
     private static void addConditionCodec(ClassNode node, Counts c) {
         if (node.interfaces == null || !node.interfaces.contains("net/neoforged/neoforge/common/conditions/ICondition")) return;
         String desc = "()Lcom/mojang/serialization/MapCodec;";
@@ -142,6 +181,19 @@ final class Mc1201Migration {
         m.instructions.add(new InsnNode(Opcodes.ARETURN));
         m.maxStack = 1;
         m.maxLocals = 1;
+        node.methods.add(m);
+        c.bridges++;
+    }
+
+    /** A class that implements {@code CriterionTriggerInstance} itself (not through {@code AbstractCriterionTriggerInstance}) lacks 1.21.1's abstract {@code validate(CriterionValidator)}: nothing to validate. */
+    private static void addInstanceValidate(ClassNode node, Counts c) {
+        if (node.interfaces == null || !node.interfaces.contains("net/minecraft/advancements/CriterionTriggerInstance")) return;
+        String desc = "(Lnet/minecraft/advancements/critereon/CriterionValidator;)V";
+        if (declared(node, "validate", desc) != null) return;
+        MethodNode m = new MethodNode(Opcodes.ACC_PUBLIC, "validate", desc, null, null);
+        m.instructions.add(new InsnNode(Opcodes.RETURN));
+        m.maxStack = 0;
+        m.maxLocals = 2;
         node.methods.add(m);
         c.bridges++;
     }
@@ -187,6 +239,8 @@ final class Mc1201Migration {
     /** The 1.21.1 type interfaces whose single {@code codec()} returns a {@code MapCodec} (it was a {@code Codec} in 1.20.1: a lambda {@code () -> CODEC} implements them). */
     private static final java.util.Set<String> MAP_CODEC_TYPES = java.util.Set.of(
             "net/minecraft/world/level/levelgen/structure/StructureType",
+            "net/minecraft/world/level/levelgen/structure/pools/StructurePoolElementType",
+            "net/minecraft/world/level/levelgen/blockpredicates/BlockPredicateType",
             "net/minecraft/world/level/levelgen/structure/placement/StructurePlacementType",
             "net/minecraft/world/level/levelgen/structure/templatesystem/StructureProcessorType",
             "net/minecraft/world/level/levelgen/structure/templatesystem/RuleTestType",
@@ -195,7 +249,10 @@ final class Mc1201Migration {
             "net/minecraft/world/level/levelgen/feature/featuresize/FeatureSizeType",
             "net/minecraft/world/level/levelgen/feature/foliageplacers/FoliagePlacerType",
             "net/minecraft/world/level/levelgen/feature/stateproviders/BlockStateProviderType",
-            "net/minecraft/world/level/levelgen/feature/trunkplacers/TrunkPlacerType");
+            "net/minecraft/world/level/levelgen/feature/trunkplacers/TrunkPlacerType",
+            "net/minecraft/util/valueproviders/IntProviderType",
+            "net/minecraft/util/valueproviders/FloatProviderType",
+            "net/minecraft/world/level/levelgen/heightproviders/HeightProviderType");
 
     /**
      * {@code StructureType<S> type = () -> CODEC}: the lambda is built as a {@code Supplier} of the old codec instead, and a helper makes the interface
@@ -218,6 +275,29 @@ final class Mc1201Migration {
         after.add(new org.objectweb.asm.tree.TypeInsnNode(Opcodes.CHECKCAST, made.getInternalName()));
         m.instructions.insert(d, after);
         return true;
+    }
+
+    /**
+     * A class extending {@code ItemPredicate} (a final record in 1.21.1; Mekanism's {@code CustomItemPredicate}, Apotheosis, Forbidden Arcanus): it extends the
+     * stand-in {@code LegacyItemPredicate} instead, whose constructors are the 1.20.1 ones ({@code ()} and the eight parts) and whose {@code test} asks the
+     * mod's {@code matches}. The superclass constructor calls follow.
+     */
+    private static void swapItemPredicateSuper(ClassNode node, Counts counts) {
+        final String pred = "net/minecraft/advancements/critereon/ItemPredicate";
+        if (!pred.equals(node.superName)) return;
+        // the stand-in cannot be compiled into the layer (javac refuses to extend the record): it is generated into the jar, in the package of the first subclass
+        int slash = node.name.lastIndexOf('/');
+        String standIn = (slash < 0 ? "" : node.name.substring(0, slash + 1)) + "$LegacyItemPredicate";
+        for (MethodNode m : node.methods) {
+            if (!m.name.equals("<init>")) continue;
+            for (AbstractInsnNode in : m.instructions.toArray()) {
+                if (in instanceof MethodInsnNode call && call.getOpcode() == Opcodes.INVOKESPECIAL && call.owner.equals(pred) && call.name.equals("<init>")) {
+                    call.owner = standIn;
+                }
+            }
+        }
+        node.superName = standIn;
+        counts.itemPredicateStandIns.add(standIn);
     }
 
     /**
@@ -395,6 +475,7 @@ final class Mc1201Migration {
             } else if (in instanceof org.objectweb.asm.tree.InvokeDynamicInsnNode d) {
                 if (codecLambda(m, d)) c.calls++;   // the stack grew: counted so the class gets its frames and limits computed again
                 registryBufferLambda(d);
+                if (adaptLambda(d, t, c)) c.calls++;
                 redirectHandles(d, h, t, c);
             } else if (in instanceof FieldInsnNode f && (f.getOpcode() == Opcodes.GETFIELD || f.getOpcode() == Opcodes.PUTFIELD)) {
                 // an instance field Minecraft dropped: mc-calls.tsv rows named $get$field / $set$field (descriptors "()T" / "(T)V") with a helper taking the receiver
@@ -425,6 +506,19 @@ final class Mc1201Migration {
                     rewriteField(m, f, rule);
                     c.fields++;
                 }
+            } else if (in instanceof FieldInsnNode f && f.getOpcode() == Opcodes.PUTSTATIC && !h.isMod(f.owner)) {
+                // a static field of Minecraft that mods WRITE and that no longer exists (Chicken.FOOD_ITEMS = ...): mc-calls.tsv rows named $put$field
+                // (descriptor "(T)V") with a static helper taking the value
+                Call rule = null;
+                for (String owner : h.minecraftAncestors(f.owner)) {
+                    rule = t.calls.get(owner + ".$put$" + f.name + "(" + f.desc + ")V");
+                    if (rule != null) break;
+                }
+                if (rule != null) {
+                    String hd = rule.helperDesc() != null ? rule.helperDesc() : "(" + f.desc + ")V";
+                    m.instructions.set(f, new MethodInsnNode(Opcodes.INVOKESTATIC, rule.helper(), rule.helperName(), hd, false));
+                    c.fields++;
+                }
             }
         }
     }
@@ -434,6 +528,66 @@ final class Mc1201Migration {
     private static final java.util.Set<String> CLASSES_THAT_BECAME_INTERFACES = java.util.Set.of("com/mojang/serialization/DataResult");
 
     private static final java.util.Set<String> CLASSES_THAT_WERE_INTERFACES = java.util.Set.of("software/bernie/geckolib/cache/object/GeoBone");
+
+    /**
+     * A lambda or method reference for a library functional interface whose method changed its parameters (Architectury's {@code ClientGuiEvent.RenderHud}:
+     * {@code (GuiGraphics, float)} became {@code (GuiGraphics, DeltaTracker)}): lib-lambdas.tsv rows. The metafactory gets a generated static adapter with the
+     * new signature that converts the parameters (a static helper per changed parameter, and one more entry for the result, {@code Class.method} in the migrate package, or {@code -}; Round 9's {@code CauldronInteraction} is a row too) and calls
+     * the original implementation.
+     */
+    private static boolean adaptLambda(org.objectweb.asm.tree.InvokeDynamicInsnNode d, Mc1201Tables t, Counts c) {
+        if (t.lambdas.isEmpty() || c.current == null || !d.bsm.getOwner().equals("java/lang/invoke/LambdaMetafactory") || d.bsmArgs.length < 3
+                || !(d.bsmArgs[0] instanceof Type sam) || !(d.bsmArgs[1] instanceof org.objectweb.asm.Handle impl)) return false;
+        String[] row = t.lambdas.get(Type.getReturnType(d.desc).getInternalName() + "." + d.name + sam.getDescriptor());
+        if (row == null) return false;
+        Type newSam = Type.getMethodType(row[3]);
+        Type[] oldParams = sam.getArgumentTypes();
+        Type[] newParams = newSam.getArgumentTypes();
+        String[] conv = row.length > 4 ? row[4].split(",") : new String[0];
+        Type[] captured = Type.getArgumentTypes(d.desc);
+        StringBuilder desc = new StringBuilder("(");
+        for (Type ct : captured) desc.append(ct.getDescriptor());
+        for (Type np : newParams) desc.append(np.getDescriptor());
+        String adapterDesc = desc.append(')').append(newSam.getReturnType().getDescriptor()).toString();
+        String name = "mcc$lambda$" + c.trampolines.size() + "$" + d.name;
+        int op = switch (impl.getTag()) {
+            case Opcodes.H_INVOKESTATIC -> Opcodes.INVOKESTATIC;
+            case Opcodes.H_INVOKEINTERFACE -> Opcodes.INVOKEINTERFACE;
+            case Opcodes.H_INVOKESPECIAL, Opcodes.H_INVOKEVIRTUAL -> Opcodes.INVOKEVIRTUAL;
+            default -> -1;
+        };
+        if (op < 0) return false;
+        MethodNode a = new MethodNode(Opcodes.ASM9, Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC, name, adapterDesc, null, null);
+        int slot = 0;
+        for (Type ct : captured) { a.visitVarInsn(ct.getOpcode(Opcodes.ILOAD), slot); slot += ct.getSize(); }
+        for (int i = 0; i < newParams.length; i++) {
+            a.visitVarInsn(newParams[i].getOpcode(Opcodes.ILOAD), slot);
+            slot += newParams[i].getSize();
+            String cv = i < conv.length ? conv[i] : "-";
+            if (cv.equals("-") && !newParams[i].equals(oldParams[i]) && oldParams[i].getSort() == Type.OBJECT) {
+                a.visitTypeInsn(Opcodes.CHECKCAST, oldParams[i].getInternalName());   // the interface is generic now: the impl keeps its own type
+            }
+            if (!cv.equals("-")) {
+                int dot = cv.lastIndexOf('.');
+                a.visitMethodInsn(Opcodes.INVOKESTATIC, "org/kylepitcock/legacyconnector/v1_20_1/migrate/" + cv.substring(0, dot), cv.substring(dot + 1),
+                        "(" + newParams[i].getDescriptor() + ")" + oldParams[i].getDescriptor(), false);
+            }
+        }
+        a.visitMethodInsn(op, impl.getOwner(), impl.getName(), impl.getDesc(), impl.isInterface());
+        String rc = conv.length > newParams.length ? conv[newParams.length] : "-";
+        if (!rc.equals("-")) {   // one more converter than parameters: the result (old return type to the new one)
+            int dot = rc.lastIndexOf('.');
+            a.visitMethodInsn(Opcodes.INVOKESTATIC, "org/kylepitcock/legacyconnector/v1_20_1/migrate/" + rc.substring(0, dot), rc.substring(dot + 1),
+                    "(" + sam.getReturnType().getDescriptor() + ")" + newSam.getReturnType().getDescriptor(), false);
+        }
+        a.visitInsn(newSam.getReturnType().getOpcode(Opcodes.IRETURN));
+        a.visitMaxs(0, 0);
+        c.trampolines.add(a);
+        d.bsmArgs[0] = newSam;
+        d.bsmArgs[1] = new org.objectweb.asm.Handle(Opcodes.H_INVOKESTATIC, c.current.name, name, adapterDesc, (c.current.access & Opcodes.ACC_INTERFACE) != 0);
+        d.bsmArgs[2] = newSam;
+        return true;
+    }
 
     /** Functional interfaces whose buffer parameter became a {@code RegistryFriendlyByteBuf}: a lambda written for the 1.20.1 {@code FriendlyByteBuf} would not link. */
     private static final java.util.Set<String> REGISTRY_BUFFER_INTERFACES = java.util.Set.of("net/neoforged/neoforge/network/IContainerFactory");
@@ -461,14 +615,37 @@ final class Mc1201Migration {
         for (int i = 0; i < d.bsmArgs.length; i++) {
             if (!(d.bsmArgs[i] instanceof org.objectweb.asm.Handle hd)) continue;
             int tag = hd.getTag();
-            if (tag < Opcodes.H_INVOKEVIRTUAL || tag > Opcodes.H_NEWINVOKESPECIAL || hd.getOwner().startsWith("[")) continue;
+            // H_INVOKEINTERFACE (9) counts too: Recipe::getId, ItemStack-like interface references are handles of an interface method
+            if (tag < Opcodes.H_INVOKEVIRTUAL || tag > Opcodes.H_INVOKEINTERFACE || hd.getOwner().startsWith("[")) continue;
+            if (CLASSES_THAT_BECAME_INTERFACES.contains(hd.getOwner()) && !hd.isInterface()) {
+                // DataResult::success: a static method reference to a class that is an interface now
+                d.bsmArgs[i] = hd = new org.objectweb.asm.Handle(tag == Opcodes.H_INVOKEVIRTUAL ? Opcodes.H_INVOKEINTERFACE : tag, hd.getOwner(), hd.getName(), hd.getDesc(), true);
+                c.calls++;
+                tag = hd.getTag();
+            }
             boolean ctor = tag == Opcodes.H_NEWINVOKESPECIAL;
             Call rule = null;
             for (String owner : h.minecraftAncestors(hd.getOwner())) {
                 rule = t.calls.get(owner + "." + hd.getName() + hd.getDesc());
                 if (rule != null) break;
             }
-            if (rule == null || rule.helper().startsWith("=")) continue;
+            if (rule == null) continue;
+            if (rule.helper().equals("=")) {
+                // an in-place rename of a method that kept its descriptor (Holder::get is Holder::value now): the handle follows, unless the mod declares the method
+                if (rule.helperDesc() == null && !rule.helperName().equals("-") && !ctor && tag != Opcodes.H_INVOKESTATIC
+                        && h.declaredIn(hd.getOwner(), hd.getName(), hd.getDesc()) != Origin.MOD) {
+                    d.bsmArgs[i] = new org.objectweb.asm.Handle(tag, hd.getOwner(), rule.helperName(), hd.getDesc(), hd.isInterface());
+                    c.calls++;
+                }
+                continue;
+            }
+            if (rule.helper().startsWith("=")) {
+                if (c.current != null && !(tag != Opcodes.H_INVOKESTATIC && !ctor && h.declaredIn(hd.getOwner(), hd.getName(), hd.getDesc()) == Origin.MOD)) {
+                    d.bsmArgs[i] = trampoline(c, hd, tag);
+                    c.calls++;
+                }
+                continue;
+            }
             if (!ctor && tag != Opcodes.H_INVOKESTATIC && h.declaredIn(hd.getOwner(), hd.getName(), hd.getDesc()) == Origin.MOD) continue;
             String desc = rule.helperDesc();
             if (desc == null) {
@@ -483,6 +660,43 @@ final class Mc1201Migration {
         }
     }
 
+    /**
+     * A handle whose call the tables rewrite in place (a {@code =args} constructor row: {@code BucketItem::new}) cannot name a helper: the handle goes to a
+     * generated static method of the class that makes the call the handle stood for, and the normal rewrite then changes that call.
+     */
+    private static org.objectweb.asm.Handle trampoline(Counts c, org.objectweb.asm.Handle hd, int tag) {
+        ClassNode node = c.current;
+        Type[] args = Type.getArgumentTypes(hd.getDesc());
+        Type ret = Type.getReturnType(hd.getDesc());
+        boolean ctor = tag == Opcodes.H_NEWINVOKESPECIAL;
+        boolean isStatic = tag == Opcodes.H_INVOKESTATIC;
+        StringBuilder desc = new StringBuilder("(");
+        if (!ctor && !isStatic) desc.append('L').append(hd.getOwner()).append(';');
+        for (Type a : args) desc.append(a.getDescriptor());
+        desc.append(')').append(ctor ? "L" + hd.getOwner() + ";" : ret.getDescriptor());
+        String name = "lambda$mcc1201$" + (node.methods.size() + c.trampolines.size());
+        MethodNode m = new MethodNode(Opcodes.ACC_PRIVATE | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC, name, desc.toString(), null, null);
+        org.objectweb.asm.tree.InsnList il = m.instructions;
+        int slot = 0;
+        if (ctor) {
+            il.add(new org.objectweb.asm.tree.TypeInsnNode(Opcodes.NEW, hd.getOwner()));
+            il.add(new org.objectweb.asm.tree.InsnNode(Opcodes.DUP));
+        } else if (!isStatic) {
+            il.add(new org.objectweb.asm.tree.VarInsnNode(Opcodes.ALOAD, slot++));
+        }
+        for (Type a : args) {
+            il.add(new org.objectweb.asm.tree.VarInsnNode(a.getOpcode(Opcodes.ILOAD), slot));
+            slot += a.getSize();
+        }
+        int op = ctor ? Opcodes.INVOKESPECIAL : isStatic ? Opcodes.INVOKESTATIC : tag == Opcodes.H_INVOKEINTERFACE ? Opcodes.INVOKEINTERFACE : tag == Opcodes.H_INVOKESPECIAL ? Opcodes.INVOKESPECIAL : Opcodes.INVOKEVIRTUAL;
+        il.add(new MethodInsnNode(op, hd.getOwner(), hd.getName(), hd.getDesc(), hd.isInterface()));
+        il.add(new org.objectweb.asm.tree.InsnNode(ctor ? Opcodes.ARETURN : ret.getOpcode(Opcodes.IRETURN)));
+        m.maxStack = slot + 3;
+        m.maxLocals = slot;
+        c.trampolines.add(m);
+        return new org.objectweb.asm.Handle(Opcodes.H_INVOKESTATIC, node.name, name, desc.toString(), (node.access & Opcodes.ACC_INTERFACE) != 0);
+    }
+
     /** The first rule found at the receiver type or one of its Minecraft ancestors, if no mod class declares the method. */
     private static boolean redirect(MethodNode m, MethodInsnNode call, Mc1201Hierarchy h, Mc1201Tables t) {
         Call rule = null;
@@ -492,6 +706,11 @@ final class Mc1201Migration {
             else rule = t.calls.get(owner + "." + call.name + call.desc + "@virtual");   // rows that must not touch super calls
             if (rule == null) rule = t.calls.get(owner + "." + call.name + call.desc);
             if (rule != null) break;
+        }
+        if (rule == null && special && h.reachesUnknown(call.owner)) {
+            // super.appendHoverText(...) through a class of a library that is not in the set (its native 1.21.1 build replaces the 1.20.1 copy): the class is not
+            // known, and the old signature does not exist in it either way, so the rule of the Minecraft method with that name and descriptor applies
+            rule = t.specialRuleFor(call.name, call.desc);
         }
         if (rule == null) return false;
         if (call.getOpcode() != Opcodes.INVOKESTATIC && !special && h.declaredIn(call.owner, call.name, call.desc) == Origin.MOD) return false;
@@ -514,8 +733,33 @@ final class Mc1201Migration {
             if (discarded == null || discarded.getOpcode() != popOpcode) return false;
             m.instructions.remove(discarded);
         }
+        if (call.getOpcode() != Opcodes.INVOKESTATIC && !special && call.owner.startsWith("net/minecraft/client/") && hd.startsWith("(L" + rule.owner() + ";")) {
+            castClientReceiver(m, call, rule.owner());
+        }
         m.instructions.set(call, new MethodInsnNode(Opcodes.INVOKESTATIC, rule.helper(), rule.helperName(), hd, false));
         return true;
+    }
+
+    /**
+     * The receiver of a call that becomes a static helper call is a client class ({@code Minecraft.player} is a LocalPlayer) passed where the helper wants a
+     * supertype: the verifier loads the client class to check that, and a dedicated server refuses to load it (RuntimeDistCleaner) while the class is
+     * linked. A CHECKCAST in front of the call (after parking the arguments) types the value as the supertype without loading anything.
+     */
+    private static void castClientReceiver(MethodNode m, MethodInsnNode call, String target) {
+        Type[] args = Type.getArgumentTypes(call.desc);
+        int base = m.maxLocals;
+        int[] slot = new int[args.length];
+        int next = base;
+        for (int i = 0; i < args.length; i++) {
+            slot[i] = next;
+            next += args[i].getSize();
+        }
+        m.maxLocals = next;
+        org.objectweb.asm.tree.InsnList il = new org.objectweb.asm.tree.InsnList();
+        for (int i = args.length - 1; i >= 0; i--) il.add(new org.objectweb.asm.tree.VarInsnNode(args[i].getOpcode(Opcodes.ISTORE), slot[i]));
+        il.add(new org.objectweb.asm.tree.TypeInsnNode(Opcodes.CHECKCAST, target));
+        for (int i = 0; i < args.length; i++) il.add(new org.objectweb.asm.tree.VarInsnNode(args[i].getOpcode(Opcodes.ILOAD), slot[i]));
+        m.instructions.insertBefore(call, il);
     }
 
     /**
@@ -570,6 +814,16 @@ final class Mc1201Migration {
                 continue;
             }
             String helper = tok.substring(0, at);
+            if (tok.substring(at + 1).startsWith("this")) {
+                // the receiver (below the spilled arguments) goes to the helper first: "Class.method@this:the/helper/ParameterType" (only as the first new parameter)
+                String type = tok.contains(":") ? tok.substring(tok.indexOf(':') + 1) : call.owner;
+                il.add(new InsnNode(Opcodes.DUP));
+                int dot = helper.lastIndexOf('.');
+                String cls = helper.substring(0, dot);
+                if (!cls.contains("/")) cls = Mc1201Tables.HELPER_PACKAGE + cls;
+                il.add(new MethodInsnNode(Opcodes.INVOKESTATIC, cls, helper.substring(dot + 1), "(L" + type + ";)" + now[j].getDescriptor(), false));
+                continue;
+            }
             StringBuilder desc = new StringBuilder("(");
             for (String a : tok.substring(at + 1).split("\\+")) {
                 int i = Integer.parseInt(a);
@@ -593,6 +847,19 @@ final class Mc1201Migration {
         String newDesc = rule.newDesc().equals("-") ? f.desc : rule.newDesc();
         InsnList after = new InsnList();
         String post = rule.post();
+        if (rule.newDesc().equals("none-name")) {
+            // the field is gone and its value derives from its name: a helper taking the field name produces it
+            int dot = post.lastIndexOf('.');
+            String cls = post.substring(0, dot);
+            if (!cls.contains("/")) cls = Mc1201Tables.HELPER_PACKAGE + cls;
+            InsnList call = new InsnList();
+            call.add(new org.objectweb.asm.tree.LdcInsnNode(f.name));
+            call.add(new MethodInsnNode(Opcodes.INVOKESTATIC, cls, post.substring(dot + 1), "(Ljava/lang/String;)" + f.desc, false));
+            m.instructions.insert(f, call);
+            m.instructions.remove(f);
+            m.maxStack = Math.max(m.maxStack, 2);
+            return;
+        }
         if (rule.newDesc().equals("none")) {
             // the field is gone: a helper without arguments produces the value
             int dot = post.lastIndexOf('.');
@@ -653,11 +920,24 @@ final class Mc1201Migration {
             if (old == null || (old.access & (Opcodes.ACC_STATIC | Opcodes.ACC_ABSTRACT)) != 0) continue;
             if (declared(node, b.newName(), b.newDesc()) != null) continue;
             if (!h.isSubclassOf(node.name, b.owner()) && !h.reachesUnknown(node.name)) continue;
-            MethodNode bridge = bridge(node, old, b);
+            // a row of a nearer owner for the same old method wins (Mob.getLootTable is final in 1.21.1: a Mob subclass bridges getDefaultLootTable instead)
+            if (moreSpecificBridge(node, h, t, b)) continue;
+            // a mod ancestor that already declares the 1.21.1-shaped method (same signature in both versions: inventoryTick) keeps running: the bridge calls it first
+            boolean callSuper = h.declaredIn(node.superName, b.newName(), b.newDesc()) == Origin.MOD;
+            MethodNode bridge = bridge(node, old, b, callSuper);
             if (bridge == null) continue;
             node.methods.add(bridge);
             c.bridges++;
         }
+    }
+
+    private static boolean moreSpecificBridge(ClassNode node, Mc1201Hierarchy h, Mc1201Tables t, Bridge b) {
+        for (Bridge o : t.bridges) {
+            if (o == b || !o.oldName().equals(b.oldName()) || !o.oldDesc().equals(b.oldDesc())) continue;
+            if (o.owner().equals(b.owner()) || !h.isSubclassOf(o.owner(), b.owner())) continue;
+            if (h.isSubclassOf(node.name, o.owner())) return true;
+        }
+        return false;
     }
 
     private static MethodNode declared(ClassNode node, String name, String desc) {
@@ -665,7 +945,7 @@ final class Mc1201Migration {
         return null;
     }
 
-    private static MethodNode bridge(ClassNode node, MethodNode old, Bridge b) {
+    private static MethodNode bridge(ClassNode node, MethodNode old, Bridge b, boolean callSuper) {
         Type[] newArgs = Type.getArgumentTypes(b.newDesc());
         int[] slots = new int[newArgs.length];
         int slot = 1;
@@ -677,14 +957,51 @@ final class Mc1201Migration {
         List<String> tokens = b.args().isEmpty() ? identity(oldArgs.length) : b.args();
         if (tokens.size() != oldArgs.length) return null;
         InsnList il = new InsnList();
+        if (callSuper) {
+            Type superRet = Type.getReturnType(b.newDesc());
+            if (superRet.getSort() != Type.VOID) return null;
+            il.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            for (int i = 0; i < newArgs.length; i++) il.add(new VarInsnNode(newArgs[i].getOpcode(Opcodes.ILOAD), slots[i]));
+            il.add(new MethodInsnNode(Opcodes.INVOKESPECIAL, node.superName, b.newName(), b.newDesc(), false));
+        }
         if (b.remember() >= 0) {
             il.add(new VarInsnNode(Opcodes.ALOAD, slots[b.remember()]));
             il.add(new MethodInsnNode(Opcodes.INVOKESTATIC, CONTEXT, "remember", "(Ljava/lang/Object;)V", false));
+        }
+        // guarded tokens ("?Class.method@a+b": the helper answers null when the old method must not run, then the bridge returns): evaluated first
+        int[] guardSlot = new int[oldArgs.length];
+        org.objectweb.asm.tree.LabelNode skip = null;
+        for (int p = 0; p < oldArgs.length; p++) {
+            String tok = tokens.get(p);
+            if (!tok.startsWith("?")) continue;
+            if (Type.getReturnType(b.newDesc()).getSort() != Type.VOID) return null;
+            if (skip == null) skip = new org.objectweb.asm.tree.LabelNode();
+            String helper = tok.substring(1, tok.indexOf('@'));
+            StringBuilder hd = new StringBuilder("(");
+            for (String a : tok.substring(tok.indexOf('@') + 1).split("\\+")) {
+                int i = Integer.parseInt(a);
+                il.add(new VarInsnNode(newArgs[i].getOpcode(Opcodes.ILOAD), slots[i]));
+                hd.append(newArgs[i].getDescriptor());
+            }
+            hd.append(')').append(oldArgs[p].getDescriptor());
+            int dot = helper.lastIndexOf('.');
+            String cls = helper.substring(0, dot);
+            if (!cls.contains("/")) cls = Mc1201Tables.HELPER_PACKAGE + cls;
+            il.add(new MethodInsnNode(Opcodes.INVOKESTATIC, cls, helper.substring(dot + 1), hd.toString(), false));
+            guardSlot[p] = slot++;
+            il.add(new VarInsnNode(Opcodes.ASTORE, guardSlot[p]));
+            il.add(new VarInsnNode(Opcodes.ALOAD, guardSlot[p]));
+            il.add(new org.objectweb.asm.tree.JumpInsnNode(Opcodes.IFNULL, skip));
         }
         il.add(new VarInsnNode(Opcodes.ALOAD, 0));
         int stack = 1;
         for (int p = 0; p < oldArgs.length; p++) {
             String tok = tokens.get(p);
+            if (tok.startsWith("?")) {
+                il.add(new VarInsnNode(Opcodes.ALOAD, guardSlot[p]));
+                stack += 1;
+                continue;
+            }
             if (tok.equals("this")) {
                 il.add(new VarInsnNode(Opcodes.ALOAD, 0));
                 stack += 1;
@@ -700,6 +1017,22 @@ final class Mc1201Migration {
             if (at > 0) {
                 helper = tok.substring(0, at);
                 tok = tok.substring(at + 1);
+            }
+            if (helper != null && tok.contains("+")) {
+                // a helper taking several new parameters (in the order listed) and answering the old parameter
+                StringBuilder hd = new StringBuilder("(");
+                for (String a : tok.split("\\+")) {
+                    int k = Integer.parseInt(a);
+                    il.add(new VarInsnNode(newArgs[k].getOpcode(Opcodes.ILOAD), slots[k]));
+                    hd.append(newArgs[k].getDescriptor());
+                }
+                hd.append(')').append(oldArgs[p].getDescriptor());
+                int dot = helper.lastIndexOf('.');
+                String cls = helper.substring(0, dot);
+                if (!cls.contains("/")) cls = Mc1201Tables.HELPER_PACKAGE + cls;
+                il.add(new MethodInsnNode(Opcodes.INVOKESTATIC, cls, helper.substring(dot + 1), hd.toString(), false));
+                stack += oldArgs[p].getSize() + 4;
+                continue;
             }
             int i = Integer.parseInt(tok);
             il.add(new VarInsnNode(newArgs[i].getOpcode(Opcodes.ILOAD), slots[i]));
@@ -724,6 +1057,23 @@ final class Mc1201Migration {
             if (oldRet.getSort() != Type.VOID) il.add(new InsnNode(oldRet.getSize() == 2 ? Opcodes.POP2 : Opcodes.POP));
             int i = Integer.parseInt(b.ret().substring(4));
             il.add(new VarInsnNode(newArgs[i].getOpcode(Opcodes.ILOAD), slots[i]));
+        } else if (b.ret() != null && b.ret().startsWith("call:")) {
+            // the 1.21.1 method answers what the old (void) method left behind: a static helper of the migrate package takes new parameter N and returns the new result
+            // (ParticleRenderType.begin: the builder the mod's begin(builder, textureManager) started on the tesselator)
+            if (oldRet.getSort() != Type.VOID) il.add(new InsnNode(oldRet.getSize() == 2 ? Opcodes.POP2 : Opcodes.POP));
+            String spec = b.ret().substring(5);
+            int at = spec.indexOf('@');
+            int i = Integer.parseInt(spec.substring(at + 1));
+            String helper = spec.substring(0, at);
+            int dot = helper.lastIndexOf('.');
+            String cls = helper.substring(0, dot);
+            if (!cls.contains("/")) cls = Mc1201Tables.HELPER_PACKAGE + cls;
+            il.add(new VarInsnNode(newArgs[i].getOpcode(Opcodes.ILOAD), slots[i]));
+            il.add(new MethodInsnNode(Opcodes.INVOKESTATIC, cls, helper.substring(dot + 1), "(" + newArgs[i].getDescriptor() + ")" + newRet.getDescriptor(), false));
+        } else if (b.ret() != null && (b.ret().equals("const:true") || b.ret().equals("const:false"))) {
+            // the 1.21.1 method returns a boolean the old (void or other) method had no answer for: the constant, after the old result is dropped
+            if (oldRet.getSort() != Type.VOID) il.add(new InsnNode(oldRet.getSize() == 2 ? Opcodes.POP2 : Opcodes.POP));
+            il.add(new InsnNode(b.ret().equals("const:true") ? Opcodes.ICONST_1 : Opcodes.ICONST_0));
         } else if (b.ret() != null) {
             int dot = b.ret().lastIndexOf('.');
             String cls = b.ret().substring(0, dot);
@@ -736,10 +1086,14 @@ final class Mc1201Migration {
             else return null;
         }
         il.add(new InsnNode(newRet.getOpcode(Opcodes.IRETURN)));
+        if (skip != null) {
+            il.add(skip);
+            il.add(new InsnNode(Opcodes.RETURN));
+        }
         MethodNode out = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_SYNTHETIC, b.newName(), b.newDesc(), null, null);
         out.instructions = il;
         out.maxLocals = slot;
-        out.maxStack = Math.max(stack + 1, 3) + Math.max(newRet.getSize(), oldRet.getSize());
+        out.maxStack = Math.max(stack + 1, 3) + Math.max(newRet.getSize(), oldRet.getSize()) + (callSuper ? slot : 0);
         return out;
     }
 

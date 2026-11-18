@@ -39,9 +39,12 @@ public final class RenderContext {
 
     /** {@code open}: the matrices this frame's legacy code pushed and has not popped yet (what the frame may still pop at its end). */
     private record Frame(GuiGraphics gui, PoseStack pose, MultiBufferSource buffers, int light, int overlay, PoseStack.Pose base, boolean locked,
-            int kind, int[] open) {
+            int kind, boolean exactDepthState, int[] open) {
         Frame(GuiGraphics gui, PoseStack pose, MultiBufferSource buffers, int light, int overlay, PoseStack.Pose base, boolean locked, int kind) {
-            this(gui, pose, buffers, light, overlay, base, locked, kind, new int[1]);
+            this(gui, pose, buffers, light, overlay, base, locked, kind, false, new int[1]);
+        }
+        Frame(GuiGraphics gui, PoseStack pose, MultiBufferSource buffers, int light, int overlay, PoseStack.Pose base, boolean locked, int kind, boolean exactDepthState) {
+            this(gui, pose, buffers, light, overlay, base, locked, kind, exactDepthState, new int[1]);
         }
     }
 
@@ -88,6 +91,7 @@ public final class RenderContext {
     static final class State {
         final Deque<Frame> frames = new ArrayDeque<>();
         Capture capture;
+        final Deque<float[]> itemBrightness = new ArrayDeque<>();
         /** The 1.4.7 sprite sheet path last bound by string (null when a texture was bound by location). */
         String sheet;
         /** glBegin/glEnd geometry (GL11's immediate mode). */
@@ -124,6 +128,13 @@ public final class RenderContext {
         /** The emulated texture matrix applied to legacy texture coordinates; null is the identity. */
         org.joml.Matrix4f textureMatrix;
         final Deque<org.joml.Matrix4f> textureStack = new ArrayDeque<>();
+        /** Emulated glTexGen per texture coordinate S, T, R, Q (end-portal style effects): enabled, mode, object and eye planes. */
+        final boolean[] texGenOn = new boolean[4];
+        final int[] texGenMode = {0x2400, 0x2400, 0x2400, 0x2400};
+        final float[][] texGenObjPlane = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}};
+        final float[][] texGenEyePlane = {{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 0, 0}, {0, 0, 0, 0}};
+        int texGenMask;
+        boolean texGenSub;
         /** The legacy projection while legacy code has replaced the modern one; null while it has not. */
         org.joml.Matrix4f projection;
         final Deque<org.joml.Matrix4f> projectionStack = new ArrayDeque<>();
@@ -153,12 +164,15 @@ public final class RenderContext {
      * Captures (chunk-meshing threads, and the render thread's own synchronous rebuilds) run one at a time, as legacy block renderers
      * did on 1.7.10's single chunk thread. Reentrant for nested frames on one thread.
      */
-    private static final java.util.concurrent.locks.ReentrantLock CAPTURE_LOCK = new java.util.concurrent.locks.ReentrantLock();
+    /** {@code -Dlegacyconnector.itemLock=false} turns off the lock {@link #beginItem} forces (measurement A/B for #293). */
+    private static final boolean ITEM_LOCK = !"false".equals(System.getProperty("legacyconnector.itemLock"));
+    private static final boolean RENDER_LOCK =Boolean.getBoolean("legacyconnector.renderLock");
+    /** Fair when the render thread takes it too: chunk threads re-taking it back to back must not starve the frame. */
+    private static final java.util.concurrent.locks.ReentrantLock CAPTURE_LOCK = new java.util.concurrent.locks.ReentrantLock(true);
     /**
      * {@code -Dlegacyconnector.renderLock=true}: the render thread takes {@link #CAPTURE_LOCK} for every legacy render too, as
      * before the state was made per thread (a mod whose block renderer and tile/item renderer share static scratch state).
      */
-    private static final boolean RENDER_LOCK = Boolean.getBoolean("legacyconnector.renderLock");
 
     /** Geometry drawn while capturing: quads of {x, y, z, u, v, argb, light, own colour, own light} corners (flat) and their face normals. */
     public static final class Capture {
@@ -225,7 +239,11 @@ public final class RenderContext {
     private RenderContext() {}
 
     private static boolean lockRender() {
-        if (!RENDER_LOCK) return false;
+        return lockRender(false);
+    }
+
+    private static boolean lockRender(boolean force) {
+        if (!RENDER_LOCK && !force) return false;
         CAPTURE_LOCK.lock();
         return true;
     }
@@ -243,12 +261,58 @@ public final class RenderContext {
         beginWorld(pose, buffers, light, overlay, KIND_WORLD);
     }
 
-    /** A world context for sky renderers ({@link #KIND_SKY}) or particles ({@link #KIND_PARTICLES}): see {@link #geometryBuffer}. */
-    public static void beginWorld(PoseStack pose, MultiBufferSource buffers, int light, int overlay, int kind) {
-        boolean locked = lockRender();
+    /**
+     * An item drawn by a legacy renderer: holds the capture lock even without {@code legacyconnector.renderLock}. Legacy item renderers and
+     * block handlers share static state (CodeChickenLib's CCRenderState: colour, brightness, normals, the vertex buffer); a chunk
+     * mesh thread capturing a handler at the same moment changed it under the item being drawn, so items turned white, black or dark
+     * from one frame to the next (Thermal Expansion in slots, #293). The light the item is drawn with is also what
+     * {@code OpenGlHelper.lastBrightnessX/Y} holds for the draw, nested in another legacy frame or not, and is restored afterwards.
+     */
+    public static void beginItem(PoseStack pose, MultiBufferSource buffers, int light, int overlay) {
+        float[] saved = {legacyconnector.v1_7_10.net.minecraft.client.renderer.OpenGlHelper.lastBrightnessX,
+                legacyconnector.v1_7_10.net.minecraft.client.renderer.OpenGlHelper.lastBrightnessY};
+        boolean locked = lockRender(ITEM_LOCK);
         State s = STATE.get();
         if (s.frames.isEmpty()) legacyconnector.v1_7_10.net.minecraft.client.renderer.Tessellator.mcc$get$instance().mcc$reset();
-        s.frames.push(new Frame(null, pose, buffers, light, overlay, pose.last(), locked, kind));
+        legacyconnector.v1_7_10.net.minecraft.client.renderer.OpenGlHelper.lastBrightnessX = light & 0xFFFF;
+        legacyconnector.v1_7_10.net.minecraft.client.renderer.OpenGlHelper.lastBrightnessY = (light >>> 16) & 0xFFFF;
+        s.itemBrightness.push(saved);
+        s.frames.push(new Frame(null, pose, buffers, light, overlay, pose.last(), locked, KIND_WORLD, false));
+        resetColor(s);
+    }
+
+    /** Ends {@link #beginItem}. */
+    public static void endItem() {
+        State s = STATE.get();
+        float[] saved = s.itemBrightness.isEmpty() ? null : s.itemBrightness.pop();
+        try {
+            end();
+        } finally {
+            if (saved != null) {
+                legacyconnector.v1_7_10.net.minecraft.client.renderer.OpenGlHelper.lastBrightnessX = saved[0];
+                legacyconnector.v1_7_10.net.minecraft.client.renderer.OpenGlHelper.lastBrightnessY = saved[1];
+            }
+        }
+    }
+
+    /** A world context for sky renderers ({@link #KIND_SKY}) or particles ({@link #KIND_PARTICLES}): see {@link #geometryBuffer}. */
+    public static void beginWorld(PoseStack pose, MultiBufferSource buffers, int light, int overlay, int kind) {
+        beginWorld(pose, buffers, light, overlay, kind, false);
+    }
+
+    /** Opt in when original multipass world rendering requires its precise depth and alpha-blend state. */
+    public static void beginWorld(PoseStack pose, MultiBufferSource buffers, int light, int overlay, int kind, boolean exactDepthState) {
+        boolean locked = lockRender();
+        State s = STATE.get();
+        if (s.frames.isEmpty()) {
+            legacyconnector.v1_7_10.net.minecraft.client.renderer.Tessellator.mcc$get$instance().mcc$reset();
+            // 1.7.10's "last lightmap coordinates" (OpenGlHelper.lastBrightnessX/Y) always held the light of whatever was drawn last; renderers
+            // that start with CCRenderState.pullLightmap() (CoFH's RenderUtils.preItemRender: Thermal Expansion's cells, tesseracts, dynamos
+            // and lamps in slots) read it and drew black when it was never set.
+            legacyconnector.v1_7_10.net.minecraft.client.renderer.OpenGlHelper.lastBrightnessX = light & 0xFFFF;
+            legacyconnector.v1_7_10.net.minecraft.client.renderer.OpenGlHelper.lastBrightnessY = (light >>> 16) & 0xFFFF;
+        }
+        s.frames.push(new Frame(null, pose, buffers, light, overlay, pose.last(), locked, kind, exactDepthState));
         resetColor(s);
     }
 
@@ -354,6 +418,43 @@ public final class RenderContext {
         return f == null ? null : f.pose;
     }
 
+    /**
+     * glGetFloat(GL_MODELVIEW_MATRIX): in 1.7.10 the matrix includes the camera rotation, the modern entity pose does not (it lives in
+     * the render system's model-view). Legacy code that divides two reads (a scale ratio taken from a matrix element) got 0/0 without it.
+     * Under a legacy projection the camera is already folded into the pose.
+     */
+    public static void readModelView(java.nio.FloatBuffer out) {
+        PoseStack p = pose();
+        if (p == null) return;
+        org.joml.Matrix4f m = new org.joml.Matrix4f(p.last().pose());
+        State s = STATE.get();
+        if (s.projection == null && RenderSystem.isOnRenderThread()) m.mulLocal(RenderSystem.getModelViewMatrix());
+        // GL's matrices come out of float sin/cos, so a rotation by a multiple of 90 degrees leaves an element like -8.7e-8, never an exact 0. Legacy
+        // code that derives a scale from the ratio of two reads of one element (m[8] before/after a pre-render callback) works on that noise; with an
+        // exact 0 it divides 0/0 and gets NaN. Emulate the noise on the elements such ratios use, proportional to the column length so the ratio is the scale.
+        float c0 = (float) Math.sqrt(m.m00() * m.m00() + m.m01() * m.m01() + m.m02() * m.m02());
+        float c1 = (float) Math.sqrt(m.m10() * m.m10() + m.m11() * m.m11() + m.m12() * m.m12());
+        float c2 = (float) Math.sqrt(m.m20() * m.m20() + m.m21() * m.m21() + m.m22() * m.m22());
+        if (Math.abs(m.m00()) < c0 * 1e-6f) m.m00(m.m00() + c0 * 1.2e-7f);
+        if (Math.abs(m.m11()) < c1 * 1e-6f) m.m11(m.m11() + c1 * 1.2e-7f);
+        if (Math.abs(m.m20()) < c2 * 1e-6f) m.m20(m.m20() + c2 * 1.2e-7f);
+        m.get(out.position(), out);
+    }
+
+    /** glLoadMatrix of a matrix read with {@link #readModelView}: strips the camera part again. */
+    public static void loadModelViewMatrix(org.joml.Matrix4f m) {
+        State s = STATE.get();
+        if (s.matrixMode == GL_MODELVIEW && s.projection == null && pose(s) != null && RenderSystem.isOnRenderThread()) {
+            org.joml.Matrix4f v = new org.joml.Matrix4f(RenderSystem.getModelViewMatrix());
+            if (Math.abs(v.determinant()) > 1e-6f) {
+                pose(s).last().pose().set(v.invert().mul(m));
+                pose(s).last().normal().identity();
+                return;
+            }
+        }
+        loadMatrix(m);
+    }
+
     private static PoseStack pose(State s) {
         Frame f = s.frames.peek();
         return f == null ? null : f.pose;
@@ -419,6 +520,21 @@ public final class RenderContext {
         st.sheet = null;
         if(st.capture!=null)return;
         RenderSystem.setShaderTexture(0, rl);
+    }
+
+    /**
+     * Makes the texture legacy code bound (a binding that only lives in this context, see {@link #bindTexture}) the real GL
+     * 2D binding, for GL calls that change the bound texture itself: glCopyTexSubImage2D (a legacy title screen that blurs its panorama
+     * through one) acts on whatever GL has bound, which is otherwise texture 0 or a texture the modern renderer used last.
+     */
+    public static net.minecraft.client.renderer.texture.AbstractTexture bindCurrentTextureToGl() {
+        State st = STATE.get();
+        if (st.texture == null || st.texture == UNKNOWN_TEXTURE) return null;
+        var manager = Minecraft.getInstance().getTextureManager();
+        if (manager == null) return null;
+        var tex = manager.getTexture(st.texture);
+        if (tex != null) com.mojang.blaze3d.platform.GlStateManager._bindTexture(tex.getId());
+        return tex;
     }
 
     /** Minecraft 1.4.7: the sprite sheet path ({@code /eloraam/base/base1.png}) just bound, whose tiles the pack cut into the atlas (see IsbrhQuads). */
@@ -509,6 +625,17 @@ public final class RenderContext {
         else if (s.activeUnit == 1) s.lightmap = on;
     }
 
+    /**
+     * The lightmap unit off, as 1.7.10's EntityRenderer left it for the block outline and RenderWorldLastEvent
+     * ({@code disableLightmap} runs before both): Tessellator.setBrightness and the light of a lit draw have no effect there, so
+     * overlays such as Thaumcraft's aspect icons (setBrightness(220) over an aura node) stay at full brightness.
+     */
+    public static void disableLightmap() {
+        State s = STATE.get();
+        s.lightmap = false;
+        s.lighting = false; // RenderHelper.disableStandardItemLighting ran there too
+    }
+
     /** glIsEnabled(GL_TEXTURE_2D) for the active unit. */
     public static boolean unitTexture2d() {
         State s = STATE.get();
@@ -531,11 +658,21 @@ public final class RenderContext {
     public static void mcc$flushGui(GuiGraphics gui) {
         State s = STATE.get();
         gui.flush();
+        if (!s.frames.isEmpty()) {
+            s.gl.save(LegacyGlState.DEPTH_TEST);
+            s.gl.save(LegacyGlState.DEPTH_MASK);
+            s.gl.save(LegacyGlState.DEPTH_FUNC);
+        }
         if (!s.legacyDepthTest) {
-            if (!s.frames.isEmpty()) s.gl.save(LegacyGlState.DEPTH_TEST);
             com.mojang.blaze3d.systems.RenderSystem.disableDepthTest();
             org.lwjgl.opengl.GL11.glDisable(org.lwjgl.opengl.GL11.GL_DEPTH_TEST);
+        } else {
+            com.mojang.blaze3d.systems.RenderSystem.enableDepthTest();
         }
+        // the render types just drawn put the depth function and writes back to theirs: the immediate draw that follows (a blit)
+        // runs with the legacy ones (the Thaumonomicon draws its map tiles with GL_GEQUAL; with LEQUAL they failed against the backdrop)
+        com.mojang.blaze3d.systems.RenderSystem.depthFunc(s.depthFunc);
+        com.mojang.blaze3d.systems.RenderSystem.depthMask(s.depthWrite);
         if (s.blend) {
             if (!s.frames.isEmpty()) {
                 s.gl.save(LegacyGlState.BLEND);
@@ -548,6 +685,26 @@ public final class RenderContext {
 
     public static boolean depthTest() {
         return STATE.get().depthTest;
+    }
+
+    /**
+     * The depth state a legacy screen starts with, as 1.7.10's EntityRenderer handed it to drawScreen: a cleared depth buffer (the held
+     * item's depth must not keep the backdrop off it) and the depth test on with GL_LEQUAL and depth writes. Screens rely on it: the
+     * achievement-style maps (vanilla's, the Thaumonomicon's) draw the backdrop at z=0, their map tiles behind it at z=-200 with GL_GEQUAL
+     * (so tiles write depth only inside the map), then the connection lines and nodes with GL_LEQUAL, which clips them to the map; with
+     * the test off nothing wrote depth and the lines ran out of the book frame over the whole screen.
+     */
+    public static void mcc$beginScreenDepth() {
+        State s = STATE.get();
+        com.mojang.blaze3d.systems.RenderSystem.clear(org.lwjgl.opengl.GL11.GL_DEPTH_BUFFER_BIT, net.minecraft.client.Minecraft.ON_OSX);
+        s.legacyDepthTest = true;
+        s.depthTest = true;
+        s.depthFunc = 515; // GL_LEQUAL
+        s.depthWrite = true;
+        com.mojang.blaze3d.systems.RenderSystem.enableDepthTest();
+        org.lwjgl.opengl.GL11.glEnable(org.lwjgl.opengl.GL11.GL_DEPTH_TEST); // the state cache can be out of step with GL
+        com.mojang.blaze3d.systems.RenderSystem.depthFunc(515);
+        com.mojang.blaze3d.systems.RenderSystem.depthMask(true);
     }
 
     /**
@@ -604,8 +761,18 @@ public final class RenderContext {
         return geometryBuffer(STATE.get());
     }
 
+    /**
+     * Geometry a screen draws into the depth buffer only (colour writes off, depth writes on): a clip frame as OpenComputers' manual
+     * and JourneyMap's minimap draw. Legacy GL sampled whatever texture was bound with alpha test usually off, so the quad always wrote
+     * depth; the textured GUI types discard transparent texels, which left holes in the mask. It is drawn untextured instead.
+     */
+    private static boolean depthOnlyMask(State s) {
+        return s.colorWrite == 0 && s.depthWrite && s.depthTest && gui(s) != null;
+    }
+
     private static VertexConsumer geometryBuffer(State s) {
         boolean gui = gui(s) != null;
+        if (depthOnlyMask(s)) return buffers(s).getBuffer(stated(s, RenderType.debugQuads()));
         ResourceLocation texture = s.texture;
         MultiBufferSource buffers = buffers(s);
         if (!gui && IrisState.compatPack()) {
@@ -620,10 +787,11 @@ public final class RenderContext {
         if (s.blend && s.additiveAlpha && s.texture2d) return buffers.getBuffer(stated(s, LegacyRenderTypes.additiveAlpha(texture, s.depthTest)));
         if (!s.depthTest && !s.additive) {
             if (!s.texture2d) return buffers.getBuffer(stated(s, LegacyRenderTypes.untexturedNoDepth()));
+            if (s.blend && !s.lighting && !s.lightmap) return buffers.getBuffer(stated(s, LegacyRenderTypes.translucentUnlitNoDepth(texture)));
             return buffers.getBuffer(stated(s, s.blend ? LegacyRenderTypes.translucentNoDepth(texture) : LegacyRenderTypes.cutoutNoDepth(texture)));
         }
         if (!s.texture2d) return buffers.getBuffer(stated(s, s.additive ? RenderType.lightning() : RenderType.debugQuads()));
-        if (s.additive) return buffers.getBuffer(stated(s, RenderType.eyes(texture)));
+        if (s.additive) return buffers.getBuffer(stated(s, LegacyRenderTypes.additiveCutout(texture)));
         return buffers.getBuffer(stated(s, s.blend ? RenderType.entityTranslucent(texture) : RenderType.entityCutoutNoCull(texture)));
     }
 
@@ -662,7 +830,9 @@ public final class RenderContext {
     public static void setDepthFunc(int func) {
         State s = STATE.get();
         if (func == s.depthFunc) return;
-        if (gui(s) != null) flushBatch(s);
+        Frame frame=s.frames.peek();
+        // An EQUAL overlay needs the body in depth first, even when its texture uses a fixed buffer.
+        if (gui(s) != null || frame!=null&&frame.exactDepthState) flushBatch(s);
         s.depthFunc = func;
     }
 
@@ -696,10 +866,11 @@ public final class RenderContext {
      * alpha blended it covered the slot and its neighbours with black squares and starbursts.
      */
     private static RenderType stated(State s, RenderType base) {
+        Frame frame=s.frames.peek();boolean exactDepthState=frame!=null&&frame.exactDepthState;
         // Untextured world glows (AM2's lectern rays) must not occlude geometry behind their transparent edges.
-        boolean depthState = gui(s) != null && !(s.depthFunc == 515 && s.depthWrite && s.colorWrite == 0xF)
+        boolean depthState = (gui(s) != null || exactDepthState) && !(s.depthFunc == 515 && s.depthWrite && s.colorWrite == 0xF)
                 || !s.texture2d && s.blend && !s.depthWrite;
-        boolean blendState = s.blend && (s.blendSrc != 770 || s.blendDst != 771);
+        boolean blendState = s.blend && (exactDepthState || s.blendSrc != 770 || s.blendDst != 771);
         if (!depthState && !blendState) return base;
         // -1: the part is not carried, the base type's own state stays (a translucent type's depth writes are off)
         Stated key = new Stated(base, depthState ? s.depthFunc : -1, !depthState || s.depthWrite, depthState ? s.colorWrite : 0xF,
@@ -742,7 +913,8 @@ public final class RenderContext {
 
     /** Whether the current geometry buffer takes the full entity vertex format (uv, overlay, light, normal). */
     public static boolean geometryHasEntityFormat() {
-        return STATE.get().texture2d;
+        State s = STATE.get();
+        return s.texture2d && !depthOnlyMask(s);
     }
 
     /** Quads handed to quad() on this thread so far (diagnostics: did a legacy renderer draw anything). */
@@ -774,7 +946,28 @@ public final class RenderContext {
 
     static void quad(State s, double[] v0, double[] v1, double[] v2, double[] v3, float nx, float ny, float nz) {
         s.quadCount++;
-        if (s.textureMatrix != null && s.texture2d) {
+        if (s.texture2d && s.texGenMask != 0 && s.texGenOn[3] && !s.texGenSub) {
+            // GL divides the generated coordinates per pixel; here it happens per vertex, so a big quad is cut into a grid first
+            s.texGenSub = true;
+            try {
+                int n = TEXGEN_GRID;
+                for (int i = 0; i < n; i++) {
+                    for (int j = 0; j < n; j++) {
+                        quad(s, lerp4(v0, v1, v2, v3, i / (double) n, j / (double) n), lerp4(v0, v1, v2, v3, (i + 1) / (double) n, j / (double) n),
+                                lerp4(v0, v1, v2, v3, (i + 1) / (double) n, (j + 1) / (double) n), lerp4(v0, v1, v2, v3, i / (double) n, (j + 1) / (double) n), nx, ny, nz);
+                    }
+                }
+            } finally {
+                s.texGenSub = false;
+            }
+            return;
+        }
+        if (s.texture2d && s.texGenMask != 0) {
+            v0 = texGenerated(s, v0, 0);
+            v1 = texGenerated(s, v1, 1);
+            v2 = texGenerated(s, v2, 2);
+            v3 = texGenerated(s, v3, 3);
+        } else if (s.textureMatrix != null && s.texture2d) {
             v0 = textured(s, v0, 0);
             v1 = textured(s, v1, 1);
             v2 = textured(s, v2, 2);
@@ -827,7 +1020,7 @@ public final class RenderContext {
             if (s.inDraw) s.drawBuffer = buffer;
         }
         PoseStack.Pose last = p.last();
-        boolean entity = s.texture2d;
+        boolean entity = s.texture2d && !depthOnlyMask(s);
         int overlay = s.frames.peek().overlay;
         emitCorner(s, buffer, last, entity, overlay, v0, nx, ny, nz);
         emitCorner(s, buffer, last, entity, overlay, v1, nx, ny, nz);
@@ -893,7 +1086,7 @@ public final class RenderContext {
     private static void emitCorner(State s, VertexConsumer buffer, PoseStack.Pose last, boolean entity, int overlay, double[] x, float nx, float ny, float nz) {
         int argb = (int) color(s, x);
         var vc = buffer.addVertex(last, (float) x[0], (float) x[1], (float) x[2]).setColor(argb);
-        if (s.texture2d) vc.setUv((float) x[3], (float) x[4]);
+        if (s.texture2d && !depthOnlyMask(s)) vc.setUv((float) x[3], (float) x[4]);
         if (entity) {
             vc.setOverlay(overlay);
             vc.setLight(s.lightmap ? (int) x[6] : LightTexture.FULL_BRIGHT); // lightmap unit off: its brightness was not applied
@@ -979,7 +1172,7 @@ public final class RenderContext {
      * A GL_LINES segment in the world through the line pipeline (screen-space width); false when there is nowhere to draw it
      * (chunk capture), and the caller draws a thin quad instead.
      */
-    static boolean line(double[] a, double[] b) {
+    public static boolean line(double[] a, double[] b) {
         State s = STATE.get();
         PoseStack p = pose(s);
         if (p == null || s.capture != null) return false;
@@ -1013,7 +1206,7 @@ public final class RenderContext {
                 return buffers.getBuffer(stated(s, LegacyRenderTypes.glow(s.texture, s.additiveAlpha, !s.additiveAlpha || s.depthTest)));
             }
             if (s.additiveAlpha) return buffers.getBuffer(stated(s, LegacyRenderTypes.additiveAlpha(s.texture, s.depthTest)));
-            if (s.additive) return buffers.getBuffer(stated(s, RenderType.eyes(s.texture)));
+            if (s.additive) return buffers.getBuffer(stated(s, LegacyRenderTypes.additiveCutout(s.texture)));
             if (IrisState.compatPack() && binaryAlphaOverlay(s)) {
                 // a lamp layer of a few texels drawn as plain alpha shows nothing in vanilla rendering (Doctor Octopus's claw lights:
                 // the eye cube sits inside the claw), but a shader pack's entity pass showed it as a solid red cube on every claw
@@ -1199,8 +1392,10 @@ public final class RenderContext {
         RenderSystem.setProjectionMatrix(s.savedProjection, s.savedSorting);
         RenderSystem.getModelViewStack().popMatrix();
         RenderSystem.applyModelViewMatrix();
-        PoseStack p = pose(s);
-        if (p != null && p.last() == s.foldedPose) s.foldedPose.pose().mulLocal(new org.joml.Matrix4f(s.savedModelView).invert());
+        // The folded base pose is un-folded wherever it sits in the stack: legacy code may pop its projection BEFORE its
+        // model-view (a panorama menu pushes both and pops GL_PROJECTION first), so the base
+        // is not the top pose yet; leaving it folded shifts everything the screen draws afterwards out of view.
+        if (s.foldedPose != null) s.foldedPose.pose().mulLocal(new org.joml.Matrix4f(s.savedModelView).invert());
         s.projection = null;
         s.projectionStack.clear();
         s.foldedPose = null;
@@ -1214,6 +1409,91 @@ public final class RenderContext {
         } else if (buffers(s) instanceof MultiBufferSource.BufferSource source) {
             source.endBatch();
         }
+    }
+
+    // ------------------------------------------------------------------ glTexGen
+
+    public static void mcc$texGenEnable(int coord, boolean on) {
+        if (coord < 0 || coord > 3) return;
+        State s = STATE.get();
+        s.texGenOn[coord] = on;
+        int mask = 0;
+        for (int i = 0; i < 4; i++) if (s.texGenOn[i]) mask |= 1 << i;
+        s.texGenMask = mask;
+    }
+
+    /** {@code glTexGeni(GL_S..GL_Q, GL_TEXTURE_GEN_MODE, mode)}. */
+    public static void mcc$texGeni(int coord, int pname, int param) {
+        coord -= 0x2000;
+        if (coord < 0 || coord > 3 || pname != 0x2500) return;
+        STATE.get().texGenMode[coord] = param;
+    }
+
+    /** {@code glTexGen(GL_S..GL_Q, GL_OBJECT_PLANE | GL_EYE_PLANE, plane)}; an eye plane is taken through the inverse of the current modelview matrix, as GL does. */
+    public static void mcc$texGenPlane(int coord, int pname, float x, float y, float z, float w) {
+        coord -= 0x2000;
+        if (coord < 0 || coord > 3) return;
+        State s = STATE.get();
+        if (pname == 0x2501) {
+            s.texGenObjPlane[coord] = new float[] {x, y, z, w};
+        } else if (pname == 0x2502) {
+            org.joml.Vector4f v = new org.joml.Vector4f(x, y, z, w);
+            PoseStack p = pose(s);
+            if (p != null) new org.joml.Matrix4f(p.last().pose()).invert().transpose().transform(v);
+            s.texGenEyePlane[coord] = new float[] {v.x, v.y, v.z, v.w};
+        }
+    }
+
+    /**
+     * Texture coordinates of a corner generated from its position (object or eye linear planes, the others keep the corner's own), then through the
+     * emulated texture matrix with the perspective divide: the end-portal style effect of Thaumcraft's eldritch obelisk panel and other legacy
+     * renderers.
+     */
+    private static final int TEXGEN_GRID = 8;
+
+    /** Bilinear point of a corner quad: position and texture coordinates interpolated (indices 0 to 4), colour and light taken from the first corner. */
+    private static double[] lerp4(double[] v0, double[] v1, double[] v2, double[] v3, double u, double w) {
+        double[] r = v0.clone();
+        for (int k = 0; k < Math.min(5, v0.length); k++) {
+            r[k] = (1 - u) * (1 - w) * v0[k] + u * (1 - w) * v1[k] + u * w * v2[k] + (1 - u) * w * v3[k];
+        }
+        return r;
+    }
+
+    private static double[] texGenerated(State s, double[] v, int slot) {
+        double[] out = s.uvScratch[slot];
+        if (out.length < v.length) out = s.uvScratch[slot] = new double[v.length];
+        System.arraycopy(v, 0, out, 0, v.length);
+        for (int k = v.length; k < out.length; k++) out[k] = 0.0D;
+        float x = (float) v[0], y = (float) v[1], z = (float) v[2];
+        float[] c = {(float) v[3], (float) v[4], 0F, 1F};
+        org.joml.Vector4f eye = null;
+        for (int i = 0; i < 4; i++) {
+            if (!s.texGenOn[i]) continue;
+            int mode = s.texGenMode[i];
+            if (mode == 0x2401) {
+                float[] pl = s.texGenObjPlane[i];
+                c[i] = pl[0] * x + pl[1] * y + pl[2] * z + pl[3];
+            } else if (mode == 0x2400) {
+                if (eye == null) {
+                    eye = new org.joml.Vector4f(x, y, z, 1F);
+                    PoseStack p = pose(s);
+                    if (p != null) p.last().pose().transform(eye);
+                }
+                float[] pl = s.texGenEyePlane[i];
+                c[i] = pl[0] * eye.x + pl[1] * eye.y + pl[2] * eye.z + pl[3] * eye.w;
+            }
+        }
+        org.joml.Vector4f tc = new org.joml.Vector4f(c[0], c[1], c[2], c[3]);
+        if (s.textureMatrix != null) s.textureMatrix.transform(tc);
+        float w = tc.w;
+        if (Math.abs(w) > 1.0E-6F && w != 1F) {
+            tc.x /= w;
+            tc.y /= w;
+        }
+        out[3] = tc.x;
+        out[4] = tc.y;
+        return out;
     }
 
     /** Texture coordinates of a corner through the emulated texture matrix, into the scratch corner {@code slot}. */
@@ -1233,5 +1513,7 @@ public final class RenderContext {
         s.matrixMode = GL_MODELVIEW;
         s.textureMatrix = null;
         s.textureStack.clear();
+        java.util.Arrays.fill(s.texGenOn, false);
+        s.texGenMask = 0;
     }
 }

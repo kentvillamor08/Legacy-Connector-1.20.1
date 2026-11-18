@@ -55,6 +55,22 @@ public abstract class GuiContainer extends GuiScreen {
         return mouseX >= x - 1 && mouseX < x + w + 1 && mouseY >= y - 1 && mouseY < y + h + 1;
     }
 
+    /** NEI 1.4.7 / 1.5.2 patched {@code GuiContainer} with a {@code manager} field (see {@link #mcc$get$manager}). */
+    public legacyconnector.v1_7_10.codechicken.nei.forge.GuiContainerManager manager;
+    /** The manager a stand-in screen was given (the recipe screen of the JEI bridge); other screens get theirs from the manager table. */
+    public legacyconnector.v1_7_10.codechicken.nei.forge.GuiContainerManager mcc$manager;
+
+    /** The virtual {@code GuiContainer.manager} of NEI 1.4.7 / 1.5.2: the screen's drawing hub. */
+    public static legacyconnector.v1_7_10.codechicken.nei.forge.GuiContainerManager mcc$get$manager(GuiContainer self) {
+        if (self != null && self.mcc$manager != null) return self.mcc$manager;
+        return legacyconnector.v1_7_10.codechicken.nei.forge.GuiContainerManager.getManager(self);
+    }
+
+    /** The slot under GUI coordinates (x, y), or null. */
+    public Slot mcc$slotAt(int x, int y) {
+        return inventorySlots == null ? null : getSlotAtPosition(x, y);
+    }
+
     protected Slot getSlotAtPosition(int x, int y) {
         for (Object o : inventorySlots.inventorySlots) {
             Slot s = (Slot) o;
@@ -63,7 +79,30 @@ public abstract class GuiContainer extends GuiScreen {
         return null;
     }
 
+    /** The slot under the pointer, as the hosting modern screen tracks it (1.7.10's private {@code theSlot}). */
+    public java.util.function.Supplier<legacyconnector.v1_7_10.net.minecraft.inventory.Slot> mcc$hovered;
+
+    private legacyconnector.v1_7_10.net.minecraft.inventory.Slot mcc$theSlot() {
+        return mcc$hovered == null ? null : mcc$hovered.get();
+    }
+
+    /**
+     * A number key over a slot swaps that slot with the hotbar slot of the key (click mode 2), while the cursor holds nothing; true when it did
+     * (1.7.10's {@code checkHotbarKeys}). The hosting screen hands every key to a GUI that overrides {@code keyTyped}, so the swap the modern
+     * screen would do itself is done here, where the GUI's own {@code super.keyTyped} call reaches it.
+     */
     protected boolean checkHotbarKeys(int key) {
+        var player = net.minecraft.client.Minecraft.getInstance().player;
+        var slot = mcc$theSlot();
+        if (player == null || slot == null || !player.containerMenu.getCarried().isEmpty()) return false;
+        var settings = legacyconnector.v1_7_10.net.minecraft.client.Minecraft.mcc$get$gameSettings(mc);
+        if (settings == null) return false;
+        for (int j = 0; j < 9; j++) {
+            if (key == settings.keyBindsHotbar[j].getKeyCode()) {
+                handleMouseClick(slot, slot.slotNumber, j, 2);
+                return true;
+            }
+        }
         return false;
     }
 
@@ -114,5 +153,72 @@ public abstract class GuiContainer extends GuiScreen {
     }
 
     protected void drawSlot(legacyconnector.v1_7_10.net.minecraft.inventory.Slot slot) {
+    }
+
+    // Members125 batch 3: the accessors NEI's patched GuiContainer of 1.2.5 added
+
+    /** The game instance ({@code mc} of the screen, which NEI's patch exposed as a method). */
+    public legacyconnector.v1_7_10.net.minecraft.client.Minecraft mcc125$mc() {
+        return legacyconnector.v1_7_10.net.minecraft.client.Minecraft.getMinecraft();
+    }
+
+    public legacyconnector.v1_7_10.net.minecraft.client.Minecraft mc() {
+        return mcc125$mc();
+    }
+
+    public legacyconnector.v1_7_10.net.minecraft.client.gui.FontRenderer fontRenderer() {
+        return fontRendererObj;
+    }
+
+    public void setZLevel(int level) {
+        this.zLevel = level;
+    }
+
+    /** NEI's {@code clickSlot(slot, slotId, button, shift)}: a click on a slot, shift as click mode 1. */
+    public void clickSlot(legacyconnector.v1_7_10.net.minecraft.inventory.Slot slot, int slotId, int button, boolean shift) {
+        handleMouseClick(slot, slotId, button, shift ? 1 : 0);
+    }
+
+    /**
+     * 1.7.10's GuiContainer closed on Escape and on the inventory key, so a screen that handles keys itself (a focused text
+     * field of its own) keeps the keystroke by not calling super. The hosting modern screen leaves the inventory key to this method
+     * when the legacy GUI overrides keyTyped (a name field would otherwise close the GUI on every "e").
+     */
+    @Override
+    protected void keyTyped(char c, int keyCode) {
+        if (keyCode == 0) return;
+        boolean inventoryKey = false;
+        try {
+            var settings = legacyconnector.v1_7_10.net.minecraft.client.Minecraft.mcc$get$gameSettings(mc);
+            inventoryKey = settings != null && settings.keyBindInventory.getKeyCode() == keyCode;
+        } catch (RuntimeException | LinkageError ignored) {
+            // no settings yet
+        }
+        if (keyCode == 1 || inventoryKey) {
+            var player = net.minecraft.client.Minecraft.getInstance().player;
+            if (player != null) player.closeContainer();
+            else super.keyTyped(c, keyCode);
+            return;
+        }
+        // as 1.7.10's GuiContainer.keyTyped after the close checks: hotbar swap, pick block and drop over a slot holding a stack
+        checkHotbarKeys(keyCode);
+        var slot = mcc$theSlot();
+        if (slot != null && slot.getHasStack()) {
+            try {
+                var settings = legacyconnector.v1_7_10.net.minecraft.client.Minecraft.mcc$get$gameSettings(mc);
+                if (settings != null && keyCode == settings.keyBindPickBlock.getKeyCode()) {
+                    handleMouseClick(slot, slot.slotNumber, 0, 3);
+                } else if (settings != null && keyCode == settings.keyBindDrop.getKeyCode()) {
+                    handleMouseClick(slot, slot.slotNumber, isCtrlKeyDown() ? 1 : 0, 4);
+                }
+            } catch (RuntimeException | LinkageError ignored) {
+                // no settings yet
+            }
+        }
+    }
+
+    /** NEI's {@code containerKeyPress(char, key)}: hands a key to the container screen. */
+    public void containerKeyPress(char typed, int key) {
+        keyTyped(typed, key);
     }
 }

@@ -50,7 +50,7 @@ public final class Hierarchy {
     private static final String[] RUNTIME_LIBRARIES = {"java/", "javax/", "jdk/", "sun/", "com/google/", "io/netty/", "org/apache/",
             "com/mojang/", "org/lwjgl/", "gnu/trove/", "it/unimi/", "org/slf4j/", "com/typesafe/", "org/objectweb/", "net/minecraft/",
             "net/neoforged/", "org/joml/", "paulscode/", "com/ibm/icu/", "org/openjdk/nashorn/", "oshi/", "org/kylepitcock/",
-            "scala/", "javax/vecmath/"};
+            "scala/", "akka/", "javax/vecmath/", "LZMA/", "argo/"};
 
     /**
      * True only for a class that cannot exist at runtime: not in any legacy jar, the shim, the synthesized API or a
@@ -67,6 +67,33 @@ public final class Hierarchy {
     /** Classes jars of other legacy versions hold: not absent at run time (see {@link LegacyJarTransformer#bundledByOtherVersions}). */
     public void bundledElsewhere(java.util.Set<String> names) {
         this.bundledElsewhere = names;
+    }
+
+    private ModernLibraries requiredLibs = ModernLibraries.NONE;
+    private final Map<String, Optional<ClassInfo>> requiredLibCache = new HashMap<>();
+
+    /** Modern mods this jar's mods list as required dependencies: a class in their packages must exist there (with the member) to link. */
+    public void requiredLibraries(ModernLibraries libs) {
+        this.requiredLibs = libs;
+    }
+
+    /** The id of the required modern mod whose package {@code name} is in, or null. */
+    public String requiredLibrary(String name) {
+        ModernLibraries.Lib l = requiredLibs.ownerOfPackage(name);
+        return l == null ? null : l.id();
+    }
+
+    private ClassInfo modernRequired(String name) {
+        if (requiredLibs.isEmpty()) return null;
+        return requiredLibCache.computeIfAbsent(name, n -> {
+            byte[] b = requiredLibs.read(n);
+            if (b == null) return Optional.empty();
+            try {
+                return Optional.of(ShimIndexGenerator.read(new ClassReader(b)));
+            } catch (RuntimeException e) {
+                return Optional.empty();
+            }
+        }).orElse(null);
     }
 
     public boolean isPeer(String name) {
@@ -147,7 +174,8 @@ public final class Hierarchy {
             return info;
         }
         if (name.startsWith("[")) return null;
-        return LIBRARY_CACHE.computeIfAbsent(name, this::loadLibrary).orElse(null);
+        info = LIBRARY_CACHE.computeIfAbsent(name, this::loadLibrary).orElse(null);
+        return info != null ? info : modernRequired(name);
     }
 
     /** Packages of libraries the game itself ships, which mods commonly bundle (shaded or not). */

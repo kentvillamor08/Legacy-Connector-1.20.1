@@ -166,6 +166,15 @@ public final class ForgeEvents1710 {
             });
         });
 
+        game.addListener((net.neoforged.neoforge.event.entity.player.PlayerFlyableFallEvent e) -> {
+            if (!wants(legacyconnector.v1_7_10.net.minecraftforge.event.entity.player.PlayerFlyableFallEvent.class)) return;
+            EntityPlayer p = player(e.getEntity());
+            if (p == null) return;
+            var legacy = new legacyconnector.v1_7_10.net.minecraftforge.event.entity.player.PlayerFlyableFallEvent(p, e.getDistance());
+            forge().post(legacy);
+            e.setDistance(legacy.distance);
+        });
+
         game.addListener((net.neoforged.neoforge.event.entity.player.PlayerXpEvent.PickupXp e) -> {
             if (!wants(legacyconnector.v1_7_10.net.minecraftforge.event.entity.player.PlayerPickupXpEvent.class)) return;
             EntityPlayer p = player(e.getEntity());
@@ -229,7 +238,8 @@ public final class ForgeEvents1710 {
 
         game.addListener((net.neoforged.neoforge.event.entity.living.MobDespawnEvent e) -> {
             if (!wants(legacyconnector.v1_7_10.net.minecraftforge.event.entity.living.LivingSpawnEvent.AllowDespawn.class)) return;
-            if (!(EntityBridge.wrap(e.getEntity()) instanceof EntityLivingBase living)) return;
+            // 1.7.10 asks only EntityLiving.despawnEntity: an EntityLivingBase subclass hosted as a modern mob never got this event, and handlers cast to EntityLiving
+            if (!(EntityBridge.wrap(e.getEntity()) instanceof legacyconnector.v1_7_10.net.minecraft.entity.EntityLiving living)) return;
             var legacy = new legacyconnector.v1_7_10.net.minecraftforge.event.entity.living.LivingSpawnEvent.AllowDespawn(living);
             forge().post(legacy);
             if (legacy.getResult() == Event.Result.ALLOW) e.setResult(net.neoforged.neoforge.event.entity.living.MobDespawnEvent.Result.ALLOW);

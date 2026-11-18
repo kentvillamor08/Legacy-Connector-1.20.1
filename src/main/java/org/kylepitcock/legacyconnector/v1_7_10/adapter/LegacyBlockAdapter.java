@@ -71,9 +71,13 @@ public class LegacyBlockAdapter extends net.minecraft.world.level.block.Block {
     private LegacyBlockAdapter deepVariant;
     private LegacyBlockAdapter deepBase;
     private final boolean dynamicBounds;
+    /** The mod overrides shouldSideBeRendered (translucent blocks hiding the faces between neighbours of their own kind): its answer decides the face culling. */
+    private final boolean customSideRender;
     private final boolean customHardness;
     private final VoxelShape[] staticShapes = new VoxelShape[16];
     private final boolean collisionList;
+    /** The mod's block answers the ray trace itself: a multipart block (RedPower's wires, covers and machines) picks the part a ray meets and leaves its bounds. */
+    private final boolean ownRaycast;
     private final boolean ladder;
     private final boolean pickBlock;
     private final boolean fireSource;
@@ -118,9 +122,15 @@ public class LegacyBlockAdapter extends net.minecraft.world.level.block.Block {
         this.familyBase = spec == null ? this : spec.base();
         this.metaProperty = spec == null ? META : spec.property();
         this.keyMeta = spec == null ? 0 : spec.key();
-        this.dynamicBounds = overrides(legacy, "setBlockBoundsBasedOnState", legacyconnector.v1_7_10.net.minecraft.world.IBlockAccess.class, int.class, int.class, int.class);
+        // a mod's portal block inherits the shim BlockPortal's thin slab (overrides() does not look into shim classes): without its
+        // bounds-by-state the portal was a full cube
+        this.customSideRender = overrides(legacy, "shouldSideBeRendered", legacyconnector.v1_7_10.net.minecraft.world.IBlockAccess.class, int.class, int.class, int.class, int.class);
+        this.dynamicBounds = overrides(legacy, "setBlockBoundsBasedOnState", legacyconnector.v1_7_10.net.minecraft.world.IBlockAccess.class, int.class, int.class, int.class)
+                || legacy instanceof legacyconnector.v1_7_10.net.minecraft.block.BlockPortal;
         this.customHardness = overrides(legacy, "getPlayerRelativeBlockHardness", EntityPlayer.class, World.class, int.class, int.class, int.class)
                 || overrides(legacy, "getBlockHardness", World.class, int.class, int.class, int.class);
+        this.ownRaycast = overrides(legacy, "collisionRayTrace", World.class, int.class, int.class, int.class,
+                legacyconnector.v1_7_10.net.minecraft.util.Vec3.class, legacyconnector.v1_7_10.net.minecraft.util.Vec3.class);
         this.collisionList = overrides(legacy, "addCollisionBoxesToList", World.class, int.class, int.class, int.class, AxisAlignedBB.class,
                 java.util.List.class, legacyconnector.v1_7_10.net.minecraft.entity.Entity.class);
         this.ladder = overrides(legacy, "isLadder", legacyconnector.v1_7_10.net.minecraft.world.IBlockAccess.class, int.class, int.class, int.class,
@@ -227,6 +237,25 @@ public class LegacyBlockAdapter extends net.minecraft.world.level.block.Block {
     protected boolean skipRendering(BlockState state, BlockState adjacent, Direction direction) {
         return sameFamily(adjacent) && legacy instanceof legacyconnector.v1_7_10.net.minecraft.block.BlockBreakable bb && bb.mcc$hidesSimilarNeighbours()
                 && metaOf(adjacent) == metaIn(state);
+    }
+
+    /**
+     * 1.7.10 asked the block being drawn ({@code shouldSideBeRendered(world, x, y, z, side)} with the neighbour's coordinates and the
+     * drawn face): translucent blocks whose faces touch their own kind drew none, and without this every face between two clouds showed.
+     * The modern culling asks the neighbour, which here answers with the drawn block's legacy rule.
+     */
+    @Override
+    public boolean hidesNeighborFace(BlockGetter level, BlockPos pos, BlockState state, BlockState neighborState, Direction dir) {
+        if (neighborState.getBlock() instanceof LegacyBlockAdapter drawn && drawn.customSideRender) {
+            try {
+                // no lock: this runs on chunk mesher threads, and holding a block's lock there while the server thread holds it for a
+                // world access has deadlocked before (a face-culling answer only reads blocks)
+                return !drawn.legacy.shouldSideBeRendered(BlockAccessView.of(level), pos.getX(), pos.getY(), pos.getZ(), dir.getOpposite().get3DDataValue());
+            } catch (RuntimeException | LinkageError e) {
+                return false;
+            }
+        }
+        return super.hidesNeighborFace(level, pos, state, neighborState, dir);
     }
 
     @Override
@@ -398,7 +427,47 @@ public class LegacyBlockAdapter extends net.minecraft.world.level.block.Block {
                 // a broken name falls back to the key
             }
         }
+        if (memberDescription == null) {
+            String alt = subtypeNameKey();
+            if (alt != null) return net.minecraft.network.chat.Component.translatable(alt);
+        }
         return super.getName();
+    }
+
+    /** The name key found for a block whose plain key has no text (see {@link #subtypeNameKey()}); remembered once found. */
+    private volatile String subtypeNameKey;
+
+    /**
+     * A block that 1.7.10 named per metadata through its ItemBlock or {@code unlocalizedName.meta} keys has no text under its plain
+     * {@code unlocalizedName.name} key, so Jade (which names a block without a pick item by the block alone) showed the raw key
+     * (Thaumcraft's aura node: only {@code tile.blockAiry.0.name} exists). The name of its metadata 0, as the ItemBlock gave it, is
+     * used then. Null when the plain key has text or no such key exists.
+     */
+    private String subtypeNameKey() {
+        net.minecraft.locale.Language lang = net.minecraft.locale.Language.getInstance();
+        String plain = getDescriptionId();
+        if (lang.has(plain) || org.kylepitcock.legacyconnector.v1_7_10.bridge.LegacyLang.lookup(lang, plain) != null) return null;
+        String found = subtypeNameKey;
+        if (found != null) return found;
+        java.util.List<String> candidates = new ArrayList<>(2);
+        try {
+            legacyconnector.v1_7_10.net.minecraft.item.Item item = org.kylepitcock.legacyconnector.v1_7_10.bridge.ItemBridge.fromBlock(legacy);
+            if (item instanceof legacyconnector.v1_7_10.net.minecraft.item.ItemBlock ib) {
+                String n = ib.getUnlocalizedName(new ItemStack(ib, 1, 0));
+                if (n != null && !n.isEmpty()) candidates.add(n + ".name");
+            }
+        } catch (RuntimeException | LinkageError ignored) {
+            // falls through to the metadata key
+        }
+        candidates.add(legacy.getUnlocalizedName() + ".0.name");
+        for (String c : candidates) {
+            if (c.equals(plain)) continue;
+            if (lang.has(c) || org.kylepitcock.legacyconnector.v1_7_10.bridge.LegacyLang.lookup(lang, c) != null) {
+                subtypeNameKey = c;
+                return c;
+            }
+        }
+        return null;
     }
 
     // ------------------------------------------------------------------ interaction
@@ -738,6 +807,11 @@ public class LegacyBlockAdapter extends net.minecraft.world.level.block.Block {
     protected VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
         // air and liquids are never targeted (1.7.10's canCollideCheck): a mod fluid (Thaumcraft's purifying fluid) broke at a click
         if (legacy.getMaterial() == Material.air || legacy.getMaterial().isLiquid()) return Shapes.empty();
+        if (ownRaycast && context instanceof net.minecraft.world.phys.shapes.EntityCollisionContext entityContext
+                && entityContext.getEntity() instanceof net.minecraft.world.entity.player.Player player && level instanceof net.minecraft.world.level.Level l) {
+            VoxelShape part = targetedPart(l, pos, player);
+            if (part != null) return part;
+        }
         if (selectedBox && level instanceof LevelAccessor acc) {
             // IndustrialCraft 2's cables never set their block bounds (full blocks) and answer the selection box from their tile entity:
             // 1.7.10 outlined and ray traced that box (collisionRayTrace aside), here it is the shape.
@@ -773,6 +847,36 @@ public class LegacyBlockAdapter extends net.minecraft.world.level.block.Block {
                 // tile entity; a full block is the safe answer there.
                 shapeFailure(e);
                 return Shapes.block();
+            }
+        }
+    }
+
+    /**
+     * What the player's crosshair targets in a multipart block: the part the block's own {@code collisionRayTrace} hits along the player's look (the bounds it leaves are the
+     * part's), so a ray through the empty part of the cell reaches the block behind (a second wire is placed against a wall that already carries one). Empty when the ray meets
+     * no part, null when the block cannot be asked (the ordinary shape then applies).
+     */
+    private VoxelShape targetedPart(net.minecraft.world.level.Level level, BlockPos pos, net.minecraft.world.entity.player.Player player) {
+        var eye = player.getEyePosition();
+        var look = player.getViewVector(1.0F);
+        double reach = player.blockInteractionRange() + 1.0;
+        var from = legacyconnector.v1_7_10.net.minecraft.util.Vec3.createVectorHelper(eye.x, eye.y, eye.z);
+        var to = legacyconnector.v1_7_10.net.minecraft.util.Vec3.createVectorHelper(eye.x + look.x * reach, eye.y + look.y * reach, eye.z + look.z * reach);
+        synchronized (legacy) {
+            double x1 = legacy.getBlockBoundsMinX(), y1 = legacy.getBlockBoundsMinY(), z1 = legacy.getBlockBoundsMinZ();
+            double x2 = legacy.getBlockBoundsMaxX(), y2 = legacy.getBlockBoundsMaxY(), z2 = legacy.getBlockBoundsMaxZ();
+            try {
+                var hit = legacy.collisionRayTrace(world(level), pos.getX(), pos.getY(), pos.getZ(), from, to);
+                if (hit == null) return Shapes.empty();
+                double minX = legacy.getBlockBoundsMinX(), minY = legacy.getBlockBoundsMinY(), minZ = legacy.getBlockBoundsMinZ();
+                double maxX = legacy.getBlockBoundsMaxX(), maxY = legacy.getBlockBoundsMaxY(), maxZ = legacy.getBlockBoundsMaxZ();
+                if (maxX <= minX || maxY <= minY || maxZ <= minZ) return null;
+                return Shapes.box(Math.max(0, minX), Math.max(0, minY), Math.max(0, minZ), Math.min(1, maxX), Math.min(1, maxY), Math.min(1, maxZ));
+            } catch (RuntimeException | LinkageError e) {
+                shapeFailure(e);
+                return null;
+            } finally {
+                legacy.setBlockBounds((float) x1, (float) y1, (float) z1, (float) x2, (float) y2, (float) z2);
             }
         }
     }

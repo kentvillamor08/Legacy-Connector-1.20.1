@@ -53,6 +53,7 @@ net/minecraft/world/item/alchemy/PotionUtils	org/kylepitcock/legacyconnector/v1_
 net/minecraft/world/item/RecordItem	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyRecordItem
 net/minecraft/world/item/DyeableLeatherItem	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyDyeableLeatherItem
 net/minecraft/core/particles/ParticleOptions$Deserializer	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyParticleDeserializer
+net/minecraft/core/particles/DustParticleOptionsBase	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyDustParticleOptionsBase
 net/minecraft/world/level/block/grower/AbstractTreeGrower	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyTreeGrower
 net/minecraft/world/level/storage/loot/Serializer	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyLootSerializer
 net/minecraft/world/level/storage/loot/functions/LootItemConditionalFunction$Serializer	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyConditionalFunctionSerializer
@@ -79,8 +80,70 @@ net/minecraft/world/item/enchantment/ProtectionEnchantment$Type	org/kylepitcock/
 net/minecraft/world/item/enchantment/DamageEnchantment	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyDamageEnchantment
 net/minecraft/world/item/Vanishable	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyVanishable
 net/minecraft/world/item/DyeableArmorItem	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyDyeableArmorItem
-net/minecraft/world/level/block/StemGrownBlock	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyStemGrownBlock
+net/minecraft/world/level/block/StemGrownBlock	net/minecraft/world/level/block/Block
 # --- round 4 batch 9
 net/minecraft/world/scores/Score	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyScore
 net/minecraft/world/item/crafting/SimpleCookingSerializer$CookieBaker	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyCookieBaker
 net/minecraft/world/item/crafting/SimpleCraftingRecipeSerializer$Factory	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyCraftingFactory
+# 2026-11-13 ATM 9 gap round: PositionImpl is a Vec3 (a Position) and BlockSourceImpl a BlockSource record now
+net/minecraft/core/PositionImpl	net/minecraft/world/phys/Vec3
+net/minecraft/core/BlockSourceImpl	net/minecraft/core/dispenser/BlockSource
+# 2026-11-13 ATM 9 gap round 2: packets that moved to the common package (1.20.2) or got the Packet suffix
+net/minecraft/network/protocol/game/ServerboundCustomPayloadPacket	net/minecraft/network/protocol/common/ServerboundCustomPayloadPacket
+net/minecraft/network/protocol/game/ClientboundCustomPayloadPacket	net/minecraft/network/protocol/common/ClientboundCustomPayloadPacket
+net/minecraft/network/protocol/game/ServerboundKeepAlivePacket	net/minecraft/network/protocol/common/ServerboundKeepAlivePacket
+net/minecraft/network/protocol/game/ClientboundKeepAlivePacket	net/minecraft/network/protocol/common/ClientboundKeepAlivePacket
+net/minecraft/network/protocol/game/ServerboundPongPacket	net/minecraft/network/protocol/common/ServerboundPongPacket
+net/minecraft/network/protocol/game/ServerboundClientInformationPacket	net/minecraft/network/protocol/common/ServerboundClientInformationPacket
+net/minecraft/network/protocol/game/ServerboundResourcePackPacket	net/minecraft/network/protocol/common/ServerboundResourcePackPacket
+net/minecraft/network/protocol/game/ServerboundBlockEntityTagQuery	net/minecraft/network/protocol/game/ServerboundBlockEntityTagQueryPacket
+net/minecraft/network/protocol/game/ServerboundEntityTagQuery	net/minecraft/network/protocol/game/ServerboundEntityTagQueryPacket
+net/minecraft/client/gui/components/Checkbox	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyCheckbox
+net/minecraft/world/item/HorseArmorItem	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyHorseArmorItem
+net/minecraft/world/item/DyeableHorseArmorItem	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyDyeableHorseArmorItem
+net/minecraft/advancements/Advancement$Builder	net/minecraft/advancements/Advancement$Builder
+net/minecraft/advancements/AdvancementList	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyAdvancementList
+net/minecraft/advancements/AdvancementList$Listener	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyAdvancementList$Listener
+net/neoforged/neoforge/client/model/pipeline/QuadBakingVertexConsumer	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyQuadBakingVertexConsumer
+net/neoforged/neoforge/client/model/pipeline/QuadBakingVertexConsumer$Buffered	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyQuadBakingVertexConsumer$Buffered
+net/minecraft/world/entity/ai/goal/MeleeAttackGoal	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyMeleeAttackGoal
+net/neoforged/fml/OptionalMod	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyOptionalMod
+net/minecraft/world/level/storage/loot/functions/CopyNbtFunction	net/minecraft/world/level/storage/loot/functions/CopyCustomDataFunction
+net/minecraft/world/level/storage/loot/functions/CopyNbtFunction$Builder	net/minecraft/world/level/storage/loot/functions/CopyCustomDataFunction$Builder
+net/minecraft/world/level/storage/loot/functions/CopyNbtFunction$CopyOperation	net/minecraft/world/level/storage/loot/functions/CopyCustomDataFunction$CopyOperation
+net/minecraft/world/level/storage/loot/functions/CopyNbtFunction$MergeStrategy	net/minecraft/world/level/storage/loot/functions/CopyCustomDataFunction$MergeStrategy
+net/minecraft/world/level/storage/loot/Deserializers	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyLootDeserializers
+net/minecraft/world/level/storage/loot/entries/LootPoolEntryContainer$Serializer	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyLootEntrySerializer
+net/minecraft/world/level/storage/loot/entries/LootPoolSingletonContainer$Serializer	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyLootPoolSingletonSerializer
+net/minecraft/world/item/enchantment/FrostWalkerEnchantment	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyFrostWalker
+net/minecraft/world/item/ItemStack$TooltipPart	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyTooltipPart
+net/minecraft/world/level/block/entity/BannerPattern$Builder	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyBannerPatternBuilder
+net/minecraft/world/item/enchantment/ThornsEnchantment	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyThorns
+net/minecraft/server/commands/ResetChunksCommand	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyResetChunksCommand
+net/minecraft/world/item/alchemy/PotionBrewing$Mix	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyBrewing$Mix
+net/minecraft/world/level/storage/loot/functions/SetNbtFunction	net/minecraft/world/level/storage/loot/functions/SetCustomDataFunction
+# 1.20.1's ModelResourceLocation extends ResourceLocation (it carries the variant); 1.21.1's is an unrelated record. Legacy code gets a ResourceLocation subclass, conversion happens at the boundary (ModelLocationCompat).
+net/minecraft/client/resources/model/ModelResourceLocation	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyModelResourceLocation
+net/minecraft/client/renderer/ChunkBufferBuilderPack	net/minecraft/client/renderer/SectionBufferBuilderPack
+net/minecraft/world/effect/MobEffectInstance$FactorData	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyFactorData
+net/minecraft/server/packs/repository/Pack$Info	net/minecraft/server/packs/repository/Pack$Metadata
+net/minecraft/client/gui/screens/inventory/BookViewScreen$WrittenBookAccess	net/minecraft/client/gui/screens/inventory/BookViewScreen$BookAccess
+net/minecraft/world/item/enchantment/DigDurabilityEnchantment	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyDigDurabilityEnchantment
+net/minecraft/world/item/enchantment/ArrowPiercingEnchantment	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyArrowPiercingEnchantment
+net/minecraft/world/level/block/MelonBlock	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyMelonBlock
+# gap round 11: 1.20.1 looting loot classes are the enchanted-bonus ones of 1.21.1 (an instanceof test or a builder call keeps its meaning)
+net/minecraft/world/level/storage/loot/functions/LootingEnchantFunction	net/minecraft/world/level/storage/loot/functions/EnchantedCountIncreaseFunction
+net/minecraft/world/level/storage/loot/functions/LootingEnchantFunction$Builder	net/minecraft/world/level/storage/loot/functions/EnchantedCountIncreaseFunction$Builder
+net/minecraft/world/level/storage/loot/predicates/LootItemRandomChanceWithLootingCondition	net/minecraft/world/level/storage/loot/predicates/LootItemRandomChanceWithEnchantedBonusCondition
+net/minecraft/client/gui/components/TextAndImageButton	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyTextAndImageButton
+net/minecraft/client/gui/components/TextAndImageButton$Builder	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyTextAndImageButton$Builder
+com/mojang/blaze3d/vertex/BufferBuilder$DrawState	com/mojang/blaze3d/vertex/MeshData$DrawState
+net/minecraft/world/level/chunk/status/ChunkStatus$ChunkType	net/minecraft/world/level/chunk/status/ChunkType
+net/minecraft/world/level/chunk/ChunkStatus$ChunkType	net/minecraft/world/level/chunk/status/ChunkType
+net/neoforged/neoforge/common/crafting/StrictNBTIngredient$Serializer	legacyconnector/v1_20_1/net/minecraftforge/common/crafting/VanillaIngredientSerializer
+# --- gap round 12
+net/minecraft/client/resources/model/ModelBakery$LoadedJson	net/minecraft/client/resources/model/BlockStateModelLoader$LoadedJson
+net/neoforged/neoforge/client/model/data/MultipartModelData$Builder	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyMultipartBuilder
+net/minecraft/client/gui/screens/controls/KeyBindsList$Entry	net/minecraft/client/gui/screens/options/controls/KeyBindsList$Entry
+net/minecraft/client/gui/screens/controls/KeyBindsList$KeyEntry	net/minecraft/client/gui/screens/options/controls/KeyBindsList$KeyEntry
+net/minecraft/client/gui/screens/controls/KeyBindsList$CategoryEntry	net/minecraft/client/gui/screens/options/controls/KeyBindsList$CategoryEntry

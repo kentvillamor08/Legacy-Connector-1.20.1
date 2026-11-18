@@ -23,7 +23,14 @@ public final class BuiltinAdapters {
     // ------------------------------------------------------------------ 1.7.10
 
     public static IItemHandler inventory1710(Object tile, Direction side, BlockEntity host) {
+        // BuildCraft 3.1's IPipeEntry (a pipe taking items from outside; not an inventory)
+        boolean mc125 = org.kylepitcock.legacyconnector.v1_6_4.bridge.Mc125Host.active(); // the two 1.2.x item APIs below: only with Minecraft 1.2.5 hosting
+        IItemHandler pipe = mc125 ? org.kylepitcock.legacyconnector.v1_6_4.bridge.PipeEntry125.forTile(tile, side) : null;
+        if (pipe != null) return pipe;
         if (!(tile instanceof legacyconnector.v1_7_10.net.minecraft.inventory.IInventory inv)) return null;
+        // BuildCraft 3.1's ISpecialInventory (1.2.x machines): the machine's own addItem/extractItem rules, not its slots
+        IItemHandler special = mc125 ? org.kylepitcock.legacyconnector.v1_6_4.bridge.SpecialInventory125.forTile(tile, side) : null;
+        if (special != null) return special;
         var container = LegacyInventoryContainer.of(inv);
         if (side != null && inv instanceof legacyconnector.v1_7_10.net.minecraft.inventory.ISidedInventory) return new SidedInvWrapper(container, side);
         return new InvWrapper(container);
@@ -35,6 +42,14 @@ public final class BuiltinAdapters {
 
     public static IEnergyStorage rf1710(Object tile, Direction side, BlockEntity host) {
         return tile instanceof legacyconnector.v1_7_10.net.minecraft.tileentity.TileEntity t ? EnergyBridge.forTile(t, side) : null;
+    }
+
+    // ------------------------------------------------------------------ Beta 1.7.3
+
+    /** A Beta {@code IInventory} tile as an item handler (Beta has no sided inventories: the side is ignored). */
+    public static IItemHandler inventoryB173(Object tile, Direction side, BlockEntity host) {
+        if (!(tile instanceof legacyconnector.vb1_7_3.net.minecraft.inventory.Inventory inv)) return null;
+        return new InvWrapper(org.kylepitcock.legacyconnector.vb1_7_3.LegacyInventoryB173.of(inv));
     }
 
     // ------------------------------------------------------------------ 1.12.2

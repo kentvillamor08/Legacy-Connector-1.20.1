@@ -178,4 +178,24 @@ class Forward164MembersTest {
         assertEquals(1, t.fieldCallRules().size());
         assertEquals(1, t.constructorRules().size());
     }
+
+    @Test
+    void gapRoundRowsResolve() {
+        ForwardMembers t = ForwardMembers.forVersion(V);
+        assertEquals("getAISit", t.method("net/minecraft/entity/passive/EntityWolf", "func_70907_r", "()Lnet/minecraft/entity/ai/EntityAISit;", null));
+        assertEquals("getHeadRotationPointY", t.method("net/minecraft/entity/passive/EntitySheep", "func_70894_j", "(F)F", null));
+        assertEquals("canBeHovered", t.method("net/minecraft/inventory/SlotFurnace", "func_111238_b", "()Z", null));
+        assertEquals("handleHookRetraction", t.method("net/minecraft/entity/projectile/EntityFishHook", "catchFish", "()I", null));
+        assertEquals("caughtEntity", t.field("net/minecraft/entity/projectile/EntityFishHook", "bobber", null));
+    }
+
+    @Test
+    void unnamedSrgMethodsResolveLikeNamedOnes() {
+        // gap round 3: methods MCP had not named in 1.6.4 (func_ ids) are renamed to the name 1.7.10's MCP gave them (generator pass for func_ names)
+        ForwardMembers t = ForwardMembers.forVersion(V);
+        assertEquals("getAttribute", t.method("net/minecraft/entity/ai/attributes/AttributeInstance", "func_111123_a", "()Lnet/minecraft/entity/ai/attributes/Attribute;", null));
+        assertEquals("getTeam", t.method("net/minecraft/scoreboard/Scoreboard", "func_96508_e", "(Ljava/lang/String;)Lnet/minecraft/scoreboard/ScorePlayerTeam;", null));
+        assertEquals("setRecordPlaying", t.method("net/minecraft/client/gui/GuiIngame", "func_110326_a", "(Ljava/lang/String;Z)V", null));
+        assertEquals("func_145856_a", t.method("net/minecraft/tileentity/TileEntityRecordPlayer", "func_96097_a", "()Lnet/minecraft/item/ItemStack;", null));
+    }
 }

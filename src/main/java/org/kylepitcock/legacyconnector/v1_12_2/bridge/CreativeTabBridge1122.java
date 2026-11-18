@@ -24,6 +24,13 @@ public final class CreativeTabBridge1122 {
     private CreativeTabBridge1122() {}
 
     /** Registers a modern tab for every mod-created legacy tab; runs at the end of legacy loading. */
+    private static final java.util.Map<CreativeTabs, ResourceLocation> TAB_IDS = new java.util.IdentityHashMap<>();
+
+    /** The id of the modern creative tab of a legacy custom tab, or null for vanilla tabs and tabs not registered (yet). */
+    public static synchronized ResourceLocation modernTabId(CreativeTabs tab) {
+        return TAB_IDS.get(tab);
+    }
+
     public static void registerTabs() {
         List<CreativeTabs> tabs;
         synchronized (CreativeTabs.mcc$TABS) {
@@ -33,6 +40,9 @@ public final class CreativeTabBridge1122 {
             if (tab.getTabIndex() < VANILLA_TABS) continue;
             String label = tab.getTabLabel() != null ? tab.getTabLabel() : "tab" + tab.getTabIndex();
             ResourceLocation id = ResourceLocation.fromNamespaceAndPath("legacyconnector", "legacy12_" + Ids.normalizePath(label).replace('/', '_').replace('.', '_'));
+            synchronized (CreativeTabBridge1122.class) {
+                TAB_IDS.put(tab, id);
+            }
             if (BuiltInRegistries.CREATIVE_MODE_TAB.containsKey(id)) continue;
             CreativeModeTab modern = CreativeModeTab.builder()
                     .title(title(tab, label))
@@ -60,7 +70,9 @@ public final class CreativeTabBridge1122 {
 
     private static net.minecraft.world.item.ItemStack icon(CreativeTabs tab) {
         try {
-            var s = Stacks1122.toModern(tab.getTabIconItem());
+            // what 1.12's tab button asked: getIconItemStack (mods may override it instead of getTabIconItem), which defaults to getTabIconItem
+            var s = Stacks1122.toModern(tab.getIconItemStack());
+            if (s.isEmpty()) s = Stacks1122.toModern(tab.getTabIconItem());
             if (!s.isEmpty()) return s;
         } catch (RuntimeException | LinkageError e) {
             // fall through to the first item
@@ -82,9 +94,14 @@ public final class CreativeTabBridge1122 {
         }
         for (var s : raw) {
             var modern = Stacks1122.toModern(s);
-            if (!modern.isEmpty()) out.add(modern);
+            if (!modern.isEmpty() && registered(modern)) out.add(modern);
         }
         return new ArrayList<>(out);
+    }
+
+    /** A stack of an item that was never registered (a dropped duplicate) must stay out of the tabs: the search trees read each item's registry key. */
+    private static boolean registered(net.minecraft.world.item.ItemStack stack) {
+        return stack.getItem().builtInRegistryHolder().isBound();
     }
 
     private static ResourceKey<CreativeModeTab> vanillaKey(String label) {
@@ -101,6 +118,18 @@ public final class CreativeTabBridge1122 {
     }
 
     public static void onBuildContents(BuildCreativeModeTabContentsEvent event) {
+        // the buckets of 1.12.2 fluids (Forge listed its universal bucket's fluids in the misc tab; modern buckets are tools)
+        if (event.getTabKey().equals(CreativeModeTabs.TOOLS_AND_UTILITIES)) {
+            for (var bucket : FluidBridge1122.generatedBuckets().keySet()) {
+                var stack = new net.minecraft.world.item.ItemStack(bucket);
+                if (event.getParentEntries().contains(stack)) continue;
+                try {
+                    event.accept(stack);
+                } catch (IllegalArgumentException | IllegalStateException duplicate) {
+                    // already in the tab
+                }
+            }
+        }
         for (Item item : ItemBridge1122.modItems()) {
             CreativeTabs tab;
             try {
@@ -117,7 +146,7 @@ public final class CreativeTabBridge1122 {
             }
             for (var s : list) {
                 var modern = Stacks1122.toModern(s);
-                if (modern.isEmpty() || event.getParentEntries().contains(modern) || event.getSearchEntries().contains(modern)) continue;
+                if (modern.isEmpty() || !registered(modern) || event.getParentEntries().contains(modern) || event.getSearchEntries().contains(modern)) continue;
                 try {
                     event.accept(modern);
                 } catch (IllegalArgumentException | IllegalStateException duplicate) {

@@ -63,6 +63,15 @@ class Forge1201ApiTest {
     }
 
     @Test
+    void nonClientEventsMovedByPackageOrNameAreMapped() {
+        Forge1201Transformer transformer = new Forge1201Transformer(ShimIndex.empty());
+        assertEquals("net/neoforged/neoforge/event/level/block/CropGrowEvent$Pre", transformer.mapClass("net/minecraftforge/event/level/BlockEvent$CropGrowEvent$Pre"));
+        assertEquals("net/neoforged/neoforge/event/level/block/CropGrowEvent$Post", transformer.mapClass("net/minecraftforge/event/level/BlockEvent$CropGrowEvent$Post"));
+        assertEquals("net/neoforged/neoforge/event/level/block/CreateFluidSourceEvent", transformer.mapClass("net/minecraftforge/event/level/BlockEvent$CreateFluidSourceEvent"));
+        assertEquals("net/neoforged/neoforge/event/entity/living/SpawnClusterSizeEvent", transformer.mapClass("net/minecraftforge/event/entity/living/LivingPackSizeEvent"));
+    }
+
+    @Test
     void tableLoadsAndLinesAreClean() {
         Map<String, String> table = ForgeApiRewrites1201.table();
         assertFalse(table.isEmpty());
@@ -155,7 +164,11 @@ class Forge1201ApiTest {
         MethodNode plain = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "other", "(L" + event + ";)V", null, null);
         plain.instructions.add(new InsnNode(Opcodes.RETURN));
         node.methods.add(plain);
-        assertEquals(1, AttachGuards1201.apply(node, java.util.Set.of()));
+        MethodNode ctor = new MethodNode(Opcodes.ACC_PUBLIC, "<init>", "(L" + event + ";)V", "(L" + event + "<Lnet/minecraft/world/entity/Entity;>;)V", null);
+        ctor.instructions.add(new InsnNode(Opcodes.RETURN));
+        node.methods.add(ctor);
+        assertEquals(1, AttachGuards1201.apply(node, java.util.Set.of()), "a constructor takes no guard (it cannot return before super)");
+        assertEquals(1, ctor.instructions.size());
         assertEquals(7, m.instructions.size(), "aload, getObject, instanceof, ifne, return, label, then the original return");
         assertEquals(1, plain.instructions.size());
         assertEquals("net/minecraft/world/entity/Entity", AttachGuards1201.typeArgument("(L" + event + "<Lnet/minecraft/world/entity/Entity;>;)V", 0));

@@ -848,8 +848,13 @@ public class GL11Guard extends org.lwjgl.opengl.GL11 {
         // not in the core profile
     }
 
+    /**
+     * Through the modern state, as the line shader's width: the game's forward-compatible core profile rejects a raw width above 1
+     * with GL_INVALID_VALUE (strict drivers such as AMD's logged it once per call: thousands of errors a second from the
+     * Thaumonomicon's research lines, glLineWidth(3)), and the layer draws legacy lines through the line shader anyway.
+     */
     public static void glLineWidth(float p0) {
-        if (RenderSystem.isOnRenderThread()) org.lwjgl.opengl.GL11.glLineWidth(p0);
+        if (RenderSystem.isOnRenderThread()) RenderSystem.lineWidth(p0);
     }
 
     public static void glListBase(int p0) {
@@ -1478,7 +1483,7 @@ public class GL11Guard extends org.lwjgl.opengl.GL11 {
     }
 
     public static void glTexGeni(int p0, int p1, int p2) {
-        // not in the core profile
+        org.kylepitcock.legacyconnector.v1_7_10.client.RenderContext.mcc$texGeni(p0, p1, p2);
     }
 
     public static void glTexGeniv(int p0, int p1, java.nio.IntBuffer p2) {

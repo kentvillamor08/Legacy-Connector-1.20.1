@@ -15,7 +15,10 @@ import net.minecraft.world.entity.animal.horse.Horse;
  * 2 mule, 3 zombie, 4 skeleton), variant in slot 20 (colour | markings << 8), owner in 21, armor in 22 (0 none, 1 iron, 2 gold,
  * 3 diamond). A view of a modern horse, donkey, mule, llama or undead horse answers from the modern animal.
  */
-public class EntityHorse extends EntityAnimal {
+public class EntityHorse extends EntityAnimal implements legacyconnector.v1_7_10.net.minecraft.inventory.IInvBasic {
+    /** 1.7.10 {@code horseChest}: slot 0 saddle, slot 1 armor, slots 2-16 the chest of a donkey or mule (a mod's horse only). */
+    public legacyconnector.v1_7_10.net.minecraft.inventory.AnimalChest horseChest;
+
     private static final String[] horseTextures = {"textures/entity/horse/horse_white.png", "textures/entity/horse/horse_creamy.png",
             "textures/entity/horse/horse_chestnut.png", "textures/entity/horse/horse_brown.png", "textures/entity/horse/horse_black.png",
             "textures/entity/horse/horse_gray.png", "textures/entity/horse/horse_darkbrown.png"};
@@ -39,6 +42,115 @@ public class EntityHorse extends EntityAnimal {
     public EntityHorse(World world) {
         super(world);
         setSize(1.4F, 1.6F);
+        func_110226_cD();
+    }
+
+    // ------------------------------------------------------------------ the horse chest (1.7.10 semantics)
+
+    /** The size of the horse chest: 17 for a chested donkey or mule, 2 (saddle, armor) otherwise. */
+    protected int func_110225_cC() {
+        int type = getHorseType();
+        return isChested() && (type == 1 || type == 2) ? 17 : 2;
+    }
+
+    /** (Re)creates the horse chest at the current size, keeping what fits, and listens to it. */
+    protected void func_110226_cD() {
+        if (mcc$horse() != null) return; // a view of a modern horse keeps its own inventory
+        var old = horseChest;
+        horseChest = new legacyconnector.v1_7_10.net.minecraft.inventory.AnimalChest("HorseChest", func_110225_cC());
+        horseChest.func_110133_a(getCommandSenderName());
+        if (old != null) {
+            old.func_110132_b(this);
+            int n = Math.min(old.getSizeInventory(), horseChest.getSizeInventory());
+            for (int i = 0; i < n; i++) {
+                ItemStack stack = old.getStackInSlot(i);
+                if (stack != null) horseChest.setInventorySlotContents(i, stack.copy());
+            }
+        }
+        horseChest.func_110134_a(this);
+        func_110232_cE();
+    }
+
+    /** Applies the saddle and armor slots of the chest to the horse's flags. */
+    protected void func_110232_cE() {
+        if (horseChest == null || mcc$horse() != null || mcc$world().isRemote) return;
+        setHorseSaddled(horseChest.getStackInSlot(0) != null);
+        if (canWearArmor()) setHorseArmorStack(horseChest.getStackInSlot(1));
+    }
+
+    @Override
+    public void onInventoryChanged(legacyconnector.v1_7_10.net.minecraft.inventory.InventoryBasic inventory) {
+        boolean saddled = isHorseSaddled();
+        func_110232_cE();
+        if (mcc$get$ticksExisted(this) > 20 && !saddled && isHorseSaddled()) playSound("mob.horse.leather", 0.5F, 1.0F);
+    }
+
+    /** Opens the horse inventory for the player (a tame horse without another rider). */
+    public void openGUI(legacyconnector.v1_7_10.net.minecraft.entity.player.EntityPlayer player) {
+        if (horseChest == null || mcc$world().isRemote || !isTame()) return;
+        var rider = mcc$get$riddenByEntity(this);
+        if (rider != null && rider != player) return;
+        horseChest.func_110133_a(getCommandSenderName());
+        player.displayGUIHorse(this, horseChest);
+    }
+
+    /** Saves like 1.7.10: {@code ChestedHorse}, {@code Items} (slots 2+), {@code ArmorItem}, {@code SaddleItem}, type, variant, tame, owner. */
+    @Override
+    public void writeEntityToNBT(legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound tag) {
+        super.writeEntityToNBT(tag);
+        if (mcc$horse() != null) return;
+        tag.setBoolean("ChestedHorse", isChested());
+        tag.setInteger("Type", getHorseType());
+        tag.setInteger("Variant", getHorseVariant());
+        tag.setBoolean("Tame", isTame());
+        tag.setString("OwnerUUID", func_152119_ch());
+        if (horseChest == null) return;
+        if (isChested()) {
+            var items = new legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagList();
+            for (int i = 2; i < horseChest.getSizeInventory(); i++) {
+                ItemStack stack = horseChest.getStackInSlot(i);
+                if (stack == null) continue;
+                var entry = new legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound();
+                entry.setByte("Slot", (byte) i);
+                stack.writeToNBT(entry);
+                items.appendTag(entry);
+            }
+            tag.setTag("Items", items);
+        }
+        if (horseChest.getStackInSlot(1) != null) tag.setTag("ArmorItem", horseChest.getStackInSlot(1).writeToNBT(new legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound()));
+        if (horseChest.getStackInSlot(0) != null) tag.setTag("SaddleItem", horseChest.getStackInSlot(0).writeToNBT(new legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound()));
+    }
+
+    @Override
+    public void readEntityFromNBT(legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound tag) {
+        super.readEntityFromNBT(tag);
+        if (mcc$horse() != null) return;
+        if (tag.hasKey("Type")) setHorseType(tag.getInteger("Type"));
+        if (tag.hasKey("Variant")) setHorseVariant(tag.getInteger("Variant"));
+        if (tag.hasKey("ChestedHorse")) setChested(tag.getBoolean("ChestedHorse"));
+        if (tag.hasKey("Tame")) setHorseTamed(tag.getBoolean("Tame"));
+        if (tag.hasKey("OwnerUUID")) func_152120_b(tag.getString("OwnerUUID"));
+        func_110226_cD(); // the size follows the chested flag and type just read
+        if (horseChest == null) return;
+        if (isChested()) {
+            var items = tag.getTagList("Items", 10);
+            for (int i = 0; i < items.tagCount(); i++) {
+                var entry = items.getCompoundTagAt(i);
+                int slot = entry.getByte("Slot") & 255;
+                if (slot >= 2 && slot < horseChest.getSizeInventory()) horseChest.setInventorySlotContents(slot, ItemStack.loadItemStackFromNBT(entry));
+            }
+        }
+        if (tag.hasKey("ArmorItem", 10)) {
+            ItemStack armor = ItemStack.loadItemStackFromNBT(tag.getCompoundTag("ArmorItem"));
+            if (armor != null && func_146085_a(armor.getItem())) horseChest.setInventorySlotContents(1, armor);
+        }
+        if (tag.hasKey("SaddleItem", 10)) {
+            ItemStack saddle = ItemStack.loadItemStackFromNBT(tag.getCompoundTag("SaddleItem"));
+            if (saddle != null && saddle.getItem() == Items.saddle) horseChest.setInventorySlotContents(0, saddle);
+        } else if (tag.getBoolean("Saddle")) {
+            horseChest.setInventorySlotContents(0, new ItemStack(Items.saddle));
+        }
+        func_110232_cE();
     }
 
     /** The modern horse this is a view of (null for a mod's horse, which keeps the legacy watcher). */
@@ -194,10 +306,64 @@ public class EntityHorse extends EntityAnimal {
         return owner != null ? owner.getGameProfile().getName() : "";
     }
 
-    /** The horse's temper (how far it is from being tamed by riding; 0 for a hosted or untamed one). */
+    private int mcc$temper;
+
+    /** The horse's temper (how far it is from being tamed by riding; a mod's own horse keeps what its code set). */
     public int getTemper() {
         var h = mcc$horse();
-        return h != null ? h.getTemper() : 0;
+        return h != null ? h.getTemper() : mcc$temper;
+    }
+
+    /** Sets the temper (0 to the maximum). */
+    public void setTemper(int temper) {
+        var h = mcc$horse();
+        if (h != null) h.setTemper(Math.max(0, Math.min(h.getMaxTemper(), temper)));
+        else mcc$temper = temper;
+    }
+
+    /** Donkeys and mules cannot breed. */
+    public boolean isSterile() {
+        int type = getHorseType();
+        return type == 1 || type == 2;
+    }
+
+    /** {@code func_110201_q}: how far the mouth is open (0-1), as {@link #getMouthOpennessAngle}. */
+    public float func_110201_q(float partialTicks) {
+        return getMouthOpennessAngle(partialTicks);
+    }
+
+    /** Whether a rider is making the horse jump (the charge bar); a modern horse keeps it as its own flag. */
+    public void setHorseJumping(boolean jumping) {
+        mcc$jumping = jumping;
+        var h = mcc$horse();
+        if (h != null) h.setIsJumping(jumping);
+    }
+
+    private boolean mcc$jumping;
+
+    /** Whether the horse is in the middle of a charged jump. */
+    public boolean isHorseJumping() {
+        return mcc$jumping;
+    }
+
+    /** The charge of the rider's jump (0 to 100): a modern horse jumps with it. */
+    public void setJumpPower(int power) {
+        var h = mcc$horse();
+        if (h != null) h.onPlayerJump(power);
+        else mcc$jumpPower = power;
+    }
+
+    private int mcc$jumpPower;
+
+    /** The type and variant a spawned horse is created with (the group the natural spawn carries). */
+    public static class GroupData implements legacyconnector.v1_7_10.net.minecraft.entity.IEntityLivingData {
+        public int field_111107_a;
+        public int field_111106_b;
+
+        public GroupData(int type, int variant) {
+            this.field_111107_a = type;
+            this.field_111106_b = variant;
+        }
     }
 
     /** Whether the horse has bred already: modern horses do not track it. */
@@ -214,6 +380,19 @@ public class EntityHorse extends EntityAnimal {
     public boolean isEatingHaystack() {
         var h = mcc$horse();
         return h != null && h.isEating();
+    }
+
+    /** Starts or stops the eating animation (head down to the grass). */
+    public void setEatingHaystack(boolean eating) {
+        var h = mcc$horse();
+        if (h != null) h.setEating(eating);
+    }
+
+    /** Rears the horse up on its hind legs or puts it down. */
+    public void setRearing(boolean rearing) {
+        var h = mcc$horse();
+        if (h != null) h.setStanding(rearing);
+        else setHorseWatchableBoolean(64, rearing);
     }
 
     /** Whether the horse is rearing (up on its hind legs). */
@@ -291,6 +470,15 @@ public class EntityHorse extends EntityAnimal {
                 for (int i = 1; i < inv.getContainerSize(); i++) {
                     var stack = inv.removeItemNoUpdate(i);
                     if (!stack.isEmpty()) h.spawnAtLocation(stack);
+                }
+            }
+        } else if (horseChest != null && !mcc$world().isRemote && isChested()) {
+            // a mod's horse: the chest slots (2 and up) fall to the ground, the saddle and armor stay with the horse
+            for (int i = 2; i < horseChest.getSizeInventory(); i++) {
+                ItemStack stack = horseChest.getStackInSlot(i);
+                if (stack != null) {
+                    entityDropItem(stack, 0.0F);
+                    horseChest.setInventorySlotContents(i, null);
                 }
             }
         }

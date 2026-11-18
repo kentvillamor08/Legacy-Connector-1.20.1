@@ -34,8 +34,13 @@ public final class ModLoader {
     }
 
     /** Whether no loading error has happened so far. */
-    public boolean isLoadingStateValid() {
+    public static boolean isLoadingStateValid() {
         return !net.neoforged.fml.ModLoader.hasErrors();
+    }
+
+    /** {@code ModLoader.get().addWarning(warning)}: listed on the loading warnings screen. */
+    public void addWarning(ModLoadingWarning warning) {
+        net.neoforged.fml.ModLoader.addLoadingIssue(warning.toIssue());
     }
 
     public boolean hasErrors() {

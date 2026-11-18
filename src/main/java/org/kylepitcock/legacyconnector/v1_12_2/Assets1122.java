@@ -135,6 +135,7 @@ public final class Assets1122 implements GeneratedPack.Contributor {
         JSON_FILES.clear();
         STATE_MODELS_BUILDING.clear();
         clientProxies();
+        vanillaModelAliases(out);
         itemModels(out);
         long itemsMs = (System.nanoTime() - t0) / 1_000_000;
         Stats stats = new Stats();
@@ -164,6 +165,28 @@ public final class Assets1122 implements GeneratedPack.Contributor {
                         + (stats.fallbacks.size() > 60 ? "; ... " + (stats.fallbacks.size() - 60) + " more" : "") + ")");
     }
 
+    /** Vanilla block models the 1.13 flattening renamed (1.12.2 name to 1.21.1 name): mods' models and blockstates still name the old ones as parents. */
+    private static final String[][] VANILLA_MODEL_ALIASES = {
+            {"lit_redstone_torch", "redstone_torch"}, {"lit_redstone_torch_wall", "redstone_wall_torch"},
+            {"unlit_redstone_torch", "redstone_torch_off"}, {"unlit_redstone_torch_wall", "redstone_wall_torch_off"},
+            {"comparator_unlit", "comparator"}, {"comparator_unlit_subtract", "comparator_subtract"},
+            {"comparator_lit", "comparator_on"}, {"comparator_lit_subtract", "comparator_on_subtract"},
+    };
+
+    /** Writes a model file of the old name that only names the renamed vanilla model as its parent. */
+    private static void vanillaModelAliases(Map<String, Supplier<byte[]>> out) {
+        java.util.List<String[]> renames = new java.util.ArrayList<>();
+        for (String[] r : VANILLA_MODEL_ALIASES) renames.add(r);
+        for (int ticks = 1; ticks <= 4; ticks++) {
+            renames.add(new String[] {"repeater_on_" + ticks + "tick", "repeater_" + ticks + "tick_on"});
+            renames.add(new String[] {"repeater_on_" + ticks + "tick_locked", "repeater_" + ticks + "tick_on_locked"});
+        }
+        for (String[] r : renames) {
+            byte[] bytes = ("{\"parent\":\"minecraft:block/" + r[1] + "\"}").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            out.putIfAbsent("assets/minecraft/models/block/" + r[0] + ".json", () -> bytes);
+        }
+    }
+
     /**
      * Development only ({@code -Dlegacyconnector.assetsClientProxies=mekanism.client.ClientProxy,...}, set it in the server self test with
      * {@code -PclientProxies=...}): a dedicated server never runs a mod's client proxy, so the state mappers and model registrations it makes
@@ -173,6 +196,12 @@ public final class Assets1122 implements GeneratedPack.Contributor {
     private static void clientProxies() {
         String names = System.getProperty("legacyconnector.assetsClientProxies");
         if (names == null || names.isEmpty()) return;
+        // the client posts ModelRegistryEvent (mods' @EventBusSubscriber handlers register state mappers and item models there)
+        try {
+            Platform1122.post(new legacyconnector.v1_12_2.net.minecraftforge.client.event.ModelRegistryEvent());
+        } catch (RuntimeException | LinkageError e) {
+            LOG.warn("ModelRegistryEvent failed: {}", e.toString());
+        }
         for (String name : names.split(",")) {
             try {
                 Class<?> c = Class.forName(name.trim(), true, Thread.currentThread().getContextClassLoader());
@@ -196,13 +225,17 @@ public final class Assets1122 implements GeneratedPack.Contributor {
     private static void itemModels(Map<String, Supplier<byte[]>> out) {
         meshIds = meshItemIds();
         for (legacyconnector.v1_12_2.net.minecraft.item.Item item : org.kylepitcock.legacyconnector.v1_12_2.bridge.ItemBridge1122.modItems()) {
-            if (item.getRegistryName() == null || item instanceof legacyconnector.v1_12_2.net.minecraft.item.ItemBlock) continue;
+            if (item.getRegistryName() == null) continue;
+            // an ItemBlock draws its block's model of the same metadata unless the mod registered models for it (blockItemModels): torches, lamps and
+            // repeaters of Colored Redstone have the colour as the stack's damage, which is not the block's metadata (a facing)
+            boolean blockItem = item instanceof legacyconnector.v1_12_2.net.minecraft.item.ItemBlock;
             // every subtype the item registered (metadata goes beyond 15: AbyssalCraft's crystal shards run to 26 and more)
             for (int meta : org.kylepitcock.legacyconnector.v1_12_2.bridge.ItemBridge1122.variants(item).keySet()) {
                 var modern = org.kylepitcock.legacyconnector.v1_12_2.bridge.ItemBridge1122.modern(item, meta);
                 if (modern == null) continue;
                 var mrl = legacyconnector.v1_12_2.net.minecraftforge.client.model.ModelLoader.mcc$model(item, meta);
                 // a subtype the mod gave no model of its own shows the base subtype's (instead of the missing-model cube)
+                if (mrl == null && blockItem) continue;
                 if (mrl == null && meta != 0) mrl = legacyconnector.v1_12_2.net.minecraftforge.client.model.ModelLoader.mcc$model(item, 0);
                 ResourceLocation id = BuiltInRegistries.ITEM.getKey(modern);
                 if (meshModel(item, mrl, id, out)) continue;
@@ -272,6 +305,11 @@ public final class Assets1122 implements GeneratedPack.Contributor {
         keys.add(variant);
         keys.add(keyOf(props));
         Acc acc = merge(file, props, keys);
+        // the file's "inventory" variant is the item's own: its textures and model on top of the defaults (a block's variants skip it, see merge)
+        // (the controller of a smeltery names its front texture only there)
+        if ("inventory".equals(variant) && file.has("variants") && file.get("variants").isJsonObject() && file.getAsJsonObject("variants").has("inventory")) {
+            apply(acc, file.getAsJsonObject("variants").get("inventory"));
+        }
         if (acc.alts.isEmpty()) return null;
         JsonObject alt = acc.alts.get(0);
         String m = alt.has("model") && alt.get("model").isJsonPrimitive() ? alt.get("model").getAsString().toLowerCase(java.util.Locale.ROOT) : "forge:item-layer";
@@ -288,8 +326,14 @@ public final class Assets1122 implements GeneratedPack.Contributor {
             int colon = m.indexOf(':');
             String mNs = colon < 0 ? ns : Ids.namespace(m.substring(0, colon));
             String mPath = Ids.normalizePath(colon < 0 ? m : m.substring(colon + 1));
-            if (mPath.startsWith("item/") || mPath.startsWith("block/")) parent = mNs + ":" + mPath;
-            else parent = mNs + ":" + (modelExists(mNs, "item/" + mPath) ? "item/" : "block/") + mPath;
+            String folderPath = mPath.startsWith("item/") || mPath.startsWith("block/") ? mPath : (modelExists(mNs, "item/" + mPath) ? "item/" : "block/") + mPath;
+            // a name without a namespace is the mod's own model when the mod has such a file and vanilla's otherwise (the controller of a
+            // smeltery says "model": "orientable"), as the block variants of blockStateModels resolve it
+            if (colon < 0 && !modelExists(mNs, folderPath)) {
+                mNs = "minecraft";
+                folderPath = VANILLA_MODEL_RENAMES.getOrDefault(folderPath, folderPath);
+            }
+            parent = mNs + ":" + folderPath;
         }
         JsonObject model = new JsonObject();
         model.addProperty("parent", parent);
@@ -368,9 +412,19 @@ public final class Assets1122 implements GeneratedPack.Contributor {
      */
     private static final ThreadLocal<Boolean> FORGE_MARKER = ThreadLocal.withInitial(() -> Boolean.TRUE);
 
+    /** The name the mod's own files carry for a block: its 1.12 registry name when the modern block lives under the layer's alias for a replaced vanilla block. */
+    private static ResourceLocation legacyFileId(Block block, ResourceLocation id) {
+        if (!"legacyconnector".equals(id.getNamespace()) || !id.getPath().startsWith("minecraft_") || block.getRegistryName() == null) return id;
+        var name = block.getRegistryName();
+        ResourceLocation own = ResourceLocation.fromNamespaceAndPath(Ids.namespace(name.getNamespace()), Ids.normalizePath(name.getPath()));
+        return "minecraft".equals(own.getNamespace()) ? own : id;
+    }
+
     private static void translate(Block block, ResourceLocation id, Map<String, Supplier<byte[]>> out, Stats stats) {
         boolean debug = System.getProperty("legacyconnector.debugAssets") != null && id.getPath().equals(System.getProperty("legacyconnector.debugAssets"));
-        JsonObject original = readOriginal(id);
+        // a block that replaces a vanilla block is registered under an id of the layer's own (BlockBridge1122) but its mod's blockstate file is
+        // named for the 1.12 registry name ("minecraft:redstone_wire")
+        JsonObject original = readOriginal(legacyFileId(block, id));
         FORGE_MARKER.set(original != null && original.has("forge_marker"));
         boolean multipart = original != null && original.has("multipart") && original.get("multipart").isJsonArray() && !original.has("variants");
         IBlockState def = null;
@@ -527,6 +581,8 @@ public final class Assets1122 implements GeneratedPack.Contributor {
      * getActualState, drawn by the models of their metadata as before).
      */
     private static final int MAX_STATE_MODELS = 64;
+    /** Most states beyond the metadata of one block whose variants are resolved at all. */
+    private static final int MAX_STATE_MODEL_STATES = 1024;
     private static final Map<String, ResourceLocation> STATE_MODELS_BUILDING = new java.util.concurrent.ConcurrentHashMap<>();
     private static volatile Map<String, ResourceLocation> stateModels = Map.of();
 
@@ -560,7 +616,9 @@ public final class Assets1122 implements GeneratedPack.Contributor {
             else extra.add(state);
         }
         // no state held at all: getStateFromMeta does not answer with the block's own states, so nothing tells the states apart
-        if (held == 0 || extra.isEmpty() || extra.size() > MAX_STATE_MODELS) return;
+        // many states may share a few models (a block with a 16-value color property and a render property: EnderIO's fused quartz has 352 states
+        // beyond its metadata but about 20 distinct variants), so the cap is on the distinct models below, and this one only bounds the work
+        if (held == 0 || extra.isEmpty() || extra.size() > MAX_STATE_MODEL_STATES) return;
         var locations = mapped != null ? mapped
                 : new legacyconnector.v1_12_2.net.minecraft.client.renderer.block.statemap.DefaultStateMapper().putStateModelLocations(block);
         if (locations == null || locations.isEmpty()) return;
@@ -568,6 +626,8 @@ public final class Assets1122 implements GeneratedPack.Contributor {
         java.util.Set<String> metaLocations = new java.util.HashSet<>();
         for (var e : locations.entrySet()) if (e.getValue() != null && StatesBridge1122.metaHolds(e.getKey())) metaLocations.add(e.getValue().toString());
         java.util.Set<String> done = new java.util.HashSet<>();
+        Map<String, ResourceLocation> byName = new java.util.LinkedHashMap<>();
+        Map<String, ResourceLocation> byContent = new java.util.HashMap<>();
         int n = 0;
         for (IBlockState state : extra) {
             var location = locations.get(state);
@@ -582,6 +642,8 @@ public final class Assets1122 implements GeneratedPack.Contributor {
                 continue;
             }
             if (r.fallback != null) continue; // nothing better than the model of its metadata
+            // the state's own textures may live outside blocks/ and items/ (Betweenlands' puddles: fluids/); the metadata's states listed only theirs
+            collectModelTextures(r, out);
             String renderType = renderTypeOf(block, state, r, out);
             List<JsonElement> all = new ArrayList<>();
             if (r.model != null) all.add(renderType == null ? r.model : withRenderType(r.model, renderType, id, out));
@@ -599,9 +661,17 @@ public final class Assets1122 implements GeneratedPack.Contributor {
                 metaAll.addAll(metaRes.parts);
                 if (GSON.toJson(metaAll).equals(GSON.toJson(all))) continue;
             }
-            ResourceLocation model = stateModelFile(id, key, all, out);
-            if (model != null) STATE_MODELS_BUILDING.put(name, model);
+            // states with the same variant share one model file
+            String content = GSON.toJson(all);
+            ResourceLocation model = byContent.get(content);
+            if (model == null) {
+                if (byContent.size() >= MAX_STATE_MODELS) return; // connection states, not render parts: the models of their metadata draw them
+                model = stateModelFile(id, key, all, out);
+                if (model != null) byContent.put(content, model);
+            }
+            if (model != null) byName.put(name, model);
         }
+        STATE_MODELS_BUILDING.putAll(byName);
     }
 
     /** One model of a state's variant: its model as it is, a wrapper with the rotation, or a composite of the variant and its submodels. */
@@ -1754,7 +1824,16 @@ public final class Assets1122 implements GeneratedPack.Contributor {
      * item gets a flat model of its texture ({@code textures/items/<name>.png} or {@code item/<name>.png}), or its block's model for an ItemBlock.
      */
     private static void itemFallbackModels(Map<String, Supplier<byte[]>> out) {
-        int made = 0;
+        int made = 0, codeDrawn = 0;
+        // spawn eggs of mod entities (EntityRegistry egg colours): vanilla's tinted egg model
+        for (ResourceLocation eggId : org.kylepitcock.legacyconnector.v1_12_2.entity.Hosts1122.spawnEggIds()) {
+            String file = "assets/" + eggId.getNamespace() + "/models/item/" + eggId.getPath() + ".json";
+            if (out.containsKey(file) || modelExists(eggId.getNamespace(), "item/" + eggId.getPath())) continue;
+            String json = "{\"parent\":\"minecraft:item/template_spawn_egg\"}";
+            byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+            out.put(file, () -> bytes);
+            if (net.neoforged.fml.loading.FMLEnvironment.dist.isClient()) org.kylepitcock.legacyconnector.v1_7_10.client.SharedItemModels.note(eggId, json);
+        }
         for (legacyconnector.v1_12_2.net.minecraft.item.Item item : org.kylepitcock.legacyconnector.v1_12_2.bridge.ItemBridge1122.modItems()) {
             if (item.getRegistryName() == null) continue;
             for (int meta : org.kylepitcock.legacyconnector.v1_12_2.bridge.ItemBridge1122.variants(item).keySet()) {
@@ -1780,15 +1859,21 @@ public final class Assets1122 implements GeneratedPack.Contributor {
                 } else if (item instanceof legacyconnector.v1_12_2.net.minecraft.item.ItemBlock && modelExists(ns, "block/" + base)) {
                     model.addProperty("parent", ns + ":block/" + base);
                 } else {
-                    continue;
+                    // no file and no texture: the item is drawn by code (a model a mod replaces in ModelBakeEvent, a TEISR, a TESR bound with
+                    // registerTESRItemStack); a built-in model keeps the game from logging "Unable to load model" per item, and draws nothing
+                    // by itself (LegacyItemStackRenderer1122 draws it when the item has a renderer)
+                    model.addProperty("parent", "minecraft:builtin/entity");
+                    codeDrawn++;
                 }
                 String json = GSON.toJson(model);
                 byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
                 out.put(file, () -> bytes);
+                if (!model.has("textures") && model.get("parent").getAsString().equals("minecraft:builtin/entity")) continue;
                 if (net.neoforged.fml.loading.FMLEnvironment.dist.isClient()) org.kylepitcock.legacyconnector.v1_7_10.client.SharedItemModels.note(id, json);
                 made++;
             }
         }
+        if (codeDrawn > 0) LOG.info("1.12.2 item models: {} item(s) without a model file or texture got a built-in model (drawn by code)", codeDrawn);
         if (made > 0) LOG.info("1.12.2 item models: {} item(s) without a model file got a flat model of their texture", made);
     }
 
@@ -1796,20 +1881,65 @@ public final class Assets1122 implements GeneratedPack.Contributor {
     private static void blockItemModels(Block block, ResourceLocation blockId, Map<Integer, String> models, Map<String, Supplier<byte[]>> out) {
         var item = org.kylepitcock.legacyconnector.v1_12_2.bridge.ItemBridge1122.itemOf(block);
         if (item == null || item.getRegistryName() == null) return;
+        var variants = org.kylepitcock.legacyconnector.v1_12_2.bridge.ItemBridge1122.variants(item);
         for (int meta = 0; meta < 16; meta++) {
-            var modern = org.kylepitcock.legacyconnector.v1_12_2.bridge.ItemBridge1122.modern(item, meta);
+            // an ItemBlock with subtypes has an item (and so a model) per metadata; one without has one item, which any metadata's model may stand for
+            var modern = variants.size() > 1 ? variants.get(meta) : org.kylepitcock.legacyconnector.v1_12_2.bridge.ItemBridge1122.modern(item, meta);
             if (modern == null) continue;
             ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(modern);
-            if (!itemId.getNamespace().equals(blockId.getNamespace()) || modelExists(itemId.getNamespace(), "item/" + itemId.getPath())) continue;
+            if (!itemId.getNamespace().equals(blockId.getNamespace()) || modelExists(itemId.getNamespace(), "item/" + itemId.getPath())
+                    || out.containsKey("assets/" + itemId.getNamespace() + "/models/item/" + itemId.getPath() + ".json")) continue;
             String m = models.get(meta);
             if (m == null) continue;
             JsonObject model = new JsonObject();
-            model.addProperty("parent", m);
+            String flat = crossTexture(m, out);
+            if (flat != null) {
+                // plants (saplings, bushes, mushrooms) drawn as crossed quads in the world are flat sprites in the inventory, as 1.12's ItemBlock of a plant was
+                model.addProperty("parent", "minecraft:item/generated");
+                JsonObject textures = new JsonObject();
+                textures.addProperty("layer0", flat);
+                model.add("textures", textures);
+            } else {
+                model.addProperty("parent", m);
+            }
             String json = GSON.toJson(model);
             byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
             out.put("assets/" + itemId.getNamespace() + "/models/item/" + itemId.getPath() + ".json", () -> bytes);
             if (net.neoforged.fml.loading.FMLEnvironment.dist.isClient()) org.kylepitcock.legacyconnector.v1_7_10.client.SharedItemModels.note(itemId, json);
         }
+    }
+
+    /**
+     * The sprite of a model that is a plain crossed-quads plant ({@code block/cross}, {@code block/tinted_cross} or a mod model whose parent chain ends there),
+     * as "namespace:path", or null for any other model.
+     */
+    private static String crossTexture(String model, Map<String, Supplier<byte[]>> out) {
+        Map<String, String> textures = new java.util.HashMap<>();
+        String current = model;
+        for (int depth = 0; depth < 8 && current != null; depth++) {
+            String c = current.toLowerCase(java.util.Locale.ROOT);
+            String bare = c.startsWith("minecraft:") ? c.substring("minecraft:".length()) : c;
+            if (bare.equals("block/cross") || bare.equals("block/tinted_cross")) {
+                String t = textures.get("cross");
+                for (int hops = 0; t != null && t.startsWith("#") && hops < 6; hops++) t = textures.get(t.substring(1));
+                return t == null || t.startsWith("#") ? null : (t.indexOf(':') < 0 ? "minecraft:" + t : t);
+            }
+            JsonObject json = modelJson(current, out);
+            if (json == null) return null;
+            if (json.has("elements")) return null;
+            if (json.has("textures") && json.get("textures").isJsonObject()) {
+                for (var e : json.getAsJsonObject("textures").entrySet()) {
+                    if (e.getValue().isJsonPrimitive()) textures.putIfAbsent(e.getKey(), e.getValue().getAsString());
+                }
+            }
+            if (!json.has("parent") || !json.get("parent").isJsonPrimitive()) return null;
+            String parent = json.get("parent").getAsString();
+            // a parent without a namespace is looked up in the model's own namespace first
+            int colon = current.indexOf(':');
+            if (parent.indexOf(':') < 0 && colon >= 0 && modelExists(current.substring(0, colon), parent)) parent = current.substring(0, colon) + ":" + parent;
+            current = parent;
+        }
+        return null;
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})

@@ -94,8 +94,81 @@ public final class ReflectionCompat {
                     // report the name the mod asked for
                 }
             }
+            java.lang.reflect.Method notch = notchMethod(owner, name, true, types);
+            if (notch != null) return notch;
             throw e;
         }
+    }
+
+    private static final String[] LEGACY_ROOTS = {"net.minecraft.", "net.minecraftforge.", "cpw.mods.fml."};
+    private static final String[] API_1122 = {"legacyconnector.v1_12_2.", "legacyconnector_synth.v1_12_2."};
+
+    /**
+     * {@code Class.forName} of a legacy mod. Class names in string constants were relocated by the loader; a name put together at run time (read from the
+     * mod's access transformer file, a config, a network message) still is the legacy one, so when the plain lookup fails a game or loader class is looked up
+     * in the API of the caller's Minecraft version. A class that version never had stays absent.
+     */
+    public static Class<?> forName(String name) throws ClassNotFoundException {
+        Class<?> caller = Reflection.getCallerClass(2);
+        return forName(name, true, caller == null ? ReflectionCompat.class.getClassLoader() : caller.getClassLoader(), caller);
+    }
+
+    public static Class<?> forName(String name, boolean initialize, ClassLoader loader) throws ClassNotFoundException {
+        return forName(name, initialize, loader, Reflection.getCallerClass(2));
+    }
+
+    private static Class<?> forName(String name, boolean initialize, ClassLoader loader, Class<?> caller) throws ClassNotFoundException {
+        // A legacy name built at run time (an access transformer line, a config) means the legacy class: where the host has a class of the same name
+        // (net.minecraft.client.Minecraft) the plain lookup would hand out the modern one, which lacks the legacy members.
+        if (name != null && isLegacyRoot(name) && !name.startsWith("legacyconnector")) {
+            for (String prefix : legacyApiOf(caller)) {
+                try {
+                    return Class.forName(prefix + name, initialize, ReflectionCompat.class.getClassLoader());
+                } catch (ClassNotFoundException | LinkageError ignored) {
+                    // not in the shim: the plain lookup below
+                }
+            }
+        }
+        try {
+            return Class.forName(name, initialize, loader);
+        } catch (ClassNotFoundException e) {
+            if (name != null && isLegacyRoot(name)) {
+                for (String prefix : legacyApiOf(caller)) {
+                    try {
+                        return Class.forName(prefix + name, initialize, ReflectionCompat.class.getClassLoader());
+                    } catch (ClassNotFoundException | LinkageError ignored) {
+                        // next root; the mod gets the failure for the name it asked for
+                    }
+                }
+            }
+            throw e;
+        }
+    }
+
+    private static boolean isLegacyRoot(String name) {
+        for (String root : LEGACY_ROOTS) if (name.startsWith(root)) return true;
+        return false;
+    }
+
+    /** The package roots of the legacy API the calling mod class was translated against (none for a version that keeps Minecraft's own names). */
+    private static String[] legacyApiOf(Class<?> caller) {
+        String family = null;
+        boolean has1710 = false, has1122 = false;
+        java.security.CodeSource source = caller == null ? null : caller.getProtectionDomain().getCodeSource();
+        for (org.kylepitcock.legacyconnector.core.LegacyModRecord rec : org.kylepitcock.legacyconnector.core.LegacyMods.all()) {
+            String f = org.kylepitcock.legacyconnector.core.LegacyMods.family(rec.version);
+            has1710 |= "1.7.10".equals(f);
+            has1122 |= "1.12.2".equals(f);
+            if (family == null && source != null && rec.mainClass != null
+                    && java.util.Objects.equals(source, rec.mainClass.getProtectionDomain().getCodeSource())) family = f;
+        }
+        if ("1.7.10".equals(family)) return LegacyPrefixes.API_1710;
+        if ("1.12.2".equals(family)) return API_1122;
+        if (family != null) return new String[0];
+        // A library jar without a mod class: the versions of the pack that have such an API.
+        if (has1710 && !has1122) return LegacyPrefixes.API_1710;
+        if (has1122 && !has1710) return API_1122;
+        return new String[0];
     }
 
     /*
@@ -103,6 +176,39 @@ public final class ReflectionCompat {
      * client: DragonAPI's ReikaObfuscationHelper picks "func_..." names by it). Literal SRG ids were renamed by the loader;
      * names built at run time are mapped here when the plain lookup fails, then looked up again the same way.
      */
+
+    /**
+     * Libraries of the 1.4.7-1.6.4 coremod era (CodeChickenLib's ObfMapping, which ForgeMultipart reads {@code TileEntity.classToNameMap} with) ask for
+     * game members by their notch names, as the obfuscated game they were written for has them. Not a mapping the layer can pretend away: the shim has
+     * MCP names, so a failed short name is translated with the loader's notch tables ({@link NotchNames}).
+     */
+    private static boolean maybeNotch(String name) {
+        return name.length() <= 3 && !name.isEmpty();
+    }
+
+    private static Field notchField(Class<?> owner, String name, boolean declared) {
+        if (!maybeNotch(name)) return null;
+        String mcp = NotchNames.field(owner, name);
+        if (mcp == null) return null;
+        try {
+            if (declared) return owner.getDeclaredField(mcp);
+            return owner.getField(mcp);
+        } catch (NoSuchFieldException e) {
+            return null;
+        }
+    }
+
+    private static java.lang.reflect.Method notchMethod(Class<?> owner, String name, boolean declared, Class<?>[] types) {
+        if (!maybeNotch(name)) return null;
+        for (String mcp : NotchNames.methods(owner, name)) {
+            try {
+                return declared ? owner.getDeclaredMethod(mcp, types) : owner.getMethod(mcp, types);
+            } catch (NoSuchMethodException next) {
+                // another overload
+            }
+        }
+        return null;
+    }
 
     public static Field getDeclaredField(Class<?> owner, String name) throws NoSuchFieldException {
         if (owner == Field.class && name.equals("modifiers")) return MODIFIERS_PLACEHOLDER;
@@ -117,6 +223,8 @@ public final class ReflectionCompat {
                     // report the name the mod asked for
                 }
             }
+            Field notch = notchField(owner, name, true);
+            if (notch != null) return notch;
             throw e;
         }
     }
@@ -133,6 +241,8 @@ public final class ReflectionCompat {
                     // report the name the mod asked for
                 }
             }
+            Field notch = notchField(owner, name, false);
+            if (notch != null) return notch;
             throw e;
         }
     }
@@ -166,6 +276,8 @@ public final class ReflectionCompat {
                     // report the name the mod asked for
                 }
             }
+            java.lang.reflect.Method notch = notchMethod(owner, name, false, types);
+            if (notch != null) return notch;
             throw e;
         }
     }

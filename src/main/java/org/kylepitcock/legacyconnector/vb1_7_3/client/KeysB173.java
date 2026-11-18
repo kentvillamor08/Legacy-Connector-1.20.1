@@ -11,6 +11,7 @@ final class KeysB173 {
     private static final int[] LETTERS = {30, 48, 46, 32, 18, 33, 34, 35, 23, 36, 37, 38, 50, 49, 24, 25, 16, 19, 31, 20, 22, 47, 17, 45, 21, 44};
 
     private KeysB173() {}
+    static int glfw(int key){return org.kylepitcock.legacyconnector.v1_7_10.client.KeyCodes.toGlfw(key);}
 
     static int lwjgl(int key) {
         if (key >= GLFW.GLFW_KEY_A && key <= GLFW.GLFW_KEY_Z) return LETTERS[key - GLFW.GLFW_KEY_A];
@@ -68,6 +69,12 @@ final class KeysB173 {
             case GLFW.GLFW_KEY_TAB -> '\t';
             default -> (char) 0;
         };
+    }
+
+    static char character(int key,int modifiers){
+        if((modifiers&GLFW.GLFW_MOD_CONTROL)!=0&&(modifiers&GLFW.GLFW_MOD_ALT)==0&&key>=GLFW.GLFW_KEY_A&&key<=GLFW.GLFW_KEY_Z)
+            return (char)(key-GLFW.GLFW_KEY_A+1);
+        return character(key);
     }
 
     /** True if the key will also send a character event (printable, no Control or Alt held). */

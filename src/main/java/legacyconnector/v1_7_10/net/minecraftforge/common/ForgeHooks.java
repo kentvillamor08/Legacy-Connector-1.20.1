@@ -17,6 +17,12 @@ public class ForgeHooks {
     }
 
     /** The armour points a player wears (the value the armour bar shows). */
+    /** A player throws a stack out of their inventory: the dropped entity, or null when a listener of the toss event cancelled it. */
+    public static legacyconnector.v1_7_10.net.minecraft.entity.item.EntityItem onPlayerTossEvent(
+            legacyconnector.v1_7_10.net.minecraft.entity.player.EntityPlayer player, ItemStack item, boolean includeName) {
+        return player.func_146097_a(item, false, includeName);
+    }
+
     public static int getTotalArmorValue(legacyconnector.v1_7_10.net.minecraft.entity.player.EntityPlayer player) {
         return player.getTotalArmorValue();
     }
@@ -105,11 +111,20 @@ public class ForgeHooks {
         return player.getBreakSpeed(block, false, metadata, x, y, z) / hardness / 30.0F;
     }
 
+    /** Posts {@code LivingFallEvent} for a mod that implements its own fall: the (possibly changed) distance, 0 when a handler cancelled it. */
     public static float onLivingFall(legacyconnector.v1_7_10.net.minecraft.entity.EntityLivingBase entity, float distance) {
-        return distance;
+        var event = new legacyconnector.v1_7_10.net.minecraftforge.event.entity.living.LivingFallEvent(entity, distance);
+        return MinecraftForge.EVENT_BUS.post(event) ? 0.0F : event.distance;
     }
 
+    /** Posts {@code LivingJumpEvent} for a mod that implements its own jump. */
     public static void onLivingJump(legacyconnector.v1_7_10.net.minecraft.entity.EntityLivingBase entity) {
+        MinecraftForge.EVENT_BUS.post(new legacyconnector.v1_7_10.net.minecraftforge.event.entity.living.LivingEvent.LivingJumpEvent(entity));
+    }
+
+    /** Posts {@code LivingUpdateEvent} for a mod that runs its own living update: true when a handler cancelled the tick. */
+    public static boolean onLivingUpdate(legacyconnector.v1_7_10.net.minecraft.entity.EntityLivingBase entity) {
+        return MinecraftForge.EVENT_BUS.post(new legacyconnector.v1_7_10.net.minecraftforge.event.entity.living.LivingEvent.LivingUpdateEvent(entity));
     }
 
     public static float getEnchantPower(legacyconnector.v1_7_10.net.minecraft.world.World world, int x, int y, int z) {
@@ -178,16 +193,28 @@ public class ForgeHooks {
         return event;
     }
 
-    /** Posts the attack event; false when a handler cancelled the attack. */
+    /**
+     * Posts the attack event; true when a handler cancelled the attack. 1.7.10's {@code EntityLivingBase.attackEntityFrom} starts with
+     * {@code if (ForgeHooks.onLivingAttack(this, source, amount)) return false;}, and mods that re-implement that method (HBM's
+     * {@code EntityDamageUtil}) copy the test. The result was inverted before, so such a mod saw every attack as cancelled.
+     */
     public static boolean onLivingAttack(legacyconnector.v1_7_10.net.minecraft.entity.EntityLivingBase entity,
             legacyconnector.v1_7_10.net.minecraft.util.DamageSource source, float amount) {
-        return !MinecraftForge.EVENT_BUS.post(new legacyconnector.v1_7_10.net.minecraftforge.event.entity.living.LivingAttackEvent(entity, source, amount));
+        return MinecraftForge.EVENT_BUS.post(new legacyconnector.v1_7_10.net.minecraftforge.event.entity.living.LivingAttackEvent(entity, source, amount));
     }
 
     /** Posts the death event; true when a handler cancelled the death (the entity stays alive). */
     public static boolean onLivingDeath(legacyconnector.v1_7_10.net.minecraft.entity.EntityLivingBase entity,
             legacyconnector.v1_7_10.net.minecraft.util.DamageSource source) {
         return MinecraftForge.EVENT_BUS.post(new legacyconnector.v1_7_10.net.minecraftforge.event.entity.living.LivingDeathEvent(entity, source));
+    }
+
+    /** Posts the drops event for a mod that kills and drops by hand; true when a handler cancelled the drops (the list is left as handlers edited it). */
+    public static boolean onLivingDrops(legacyconnector.v1_7_10.net.minecraft.entity.EntityLivingBase entity,
+            legacyconnector.v1_7_10.net.minecraft.util.DamageSource source, java.util.ArrayList<legacyconnector.v1_7_10.net.minecraft.entity.item.EntityItem> drops,
+            int lootingLevel, boolean recentlyHit, int specialDropValue) {
+        return MinecraftForge.EVENT_BUS.post(new legacyconnector.v1_7_10.net.minecraftforge.event.entity.living.LivingDropsEvent(entity, source, drops,
+                lootingLevel, recentlyHit, specialDropValue));
     }
 
     /** Posts the hurt event; the damage to apply (0 when cancelled). */
@@ -202,6 +229,27 @@ public class ForgeHooks {
      * Whether the player may keep the container open: {@code PlayerOpenContainerEvent} decides (ALLOW keeps it, DENY
      * closes it), by default the container's own {@code canInteractWith}.
      */
+    /**
+     * A player's chat line reaches the server: posts {@code ServerChatEvent}; the (possibly rewritten) component to broadcast, or null when a
+     * handler cancelled the message.
+     */
+    public static legacyconnector.v1_7_10.net.minecraft.util.ChatComponentTranslation onServerChatEvent(
+            legacyconnector.v1_7_10.net.minecraft.network.NetHandlerPlayServer net, String raw,
+            legacyconnector.v1_7_10.net.minecraft.util.ChatComponentTranslation comp) {
+        var event = new legacyconnector.v1_7_10.net.minecraftforge.event.ServerChatEvent(net.playerEntity, raw, comp);
+        if (MinecraftForge.EVENT_BUS.post(event)) return null;
+        return event.component;
+    }
+
+    /**
+     * Forge's wrapper around an item's use on a block. The block placement events of the use (the snapshots Forge recorded, and
+     * {@code BlockEvent.PlaceEvent}) are posted by the modern game around the use itself, so this runs the item's own use.
+     */
+    public static boolean onPlaceItemIntoWorld(ItemStack stack, legacyconnector.v1_7_10.net.minecraft.entity.player.EntityPlayer player,
+            legacyconnector.v1_7_10.net.minecraft.world.World world, int x, int y, int z, int side, float hitX, float hitY, float hitZ) {
+        return stack.tryPlaceItemIntoWorld(player, world, x, y, z, side, hitX, hitY, hitZ);
+    }
+
     /** A note block was retuned: posts {@code NoteBlockEvent.Change}; false (and the old note restored) when cancelled. */
     public static boolean onNoteChange(legacyconnector.v1_7_10.net.minecraft.tileentity.TileEntityNote te, byte old) {
         var event = new legacyconnector.v1_7_10.net.minecraftforge.event.world.NoteBlockEvent.Change(te.getWorldObj(), te.xCoord, te.yCoord,

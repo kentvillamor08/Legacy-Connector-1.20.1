@@ -36,6 +36,7 @@ public final class SoundBridge {
         SOUNDS.put("random.fizz", SoundEvents.FIRE_EXTINGUISH);
         SOUNDS.put("random.bow", SoundEvents.ARROW_SHOOT);
         SOUNDS.put("random.bowhit", SoundEvents.ARROW_HIT);
+        SOUNDS.put("random.drr", SoundEvents.ARROW_HIT); // Beta arrow impact name, before random.bowhit.
         SOUNDS.put("random.break", SoundEvents.ITEM_BREAK);
         SOUNDS.put("random.burp", SoundEvents.PLAYER_BURP);
         SOUNDS.put("random.eat", SoundEvents.GENERIC_EAT);
@@ -350,6 +351,7 @@ public final class SoundBridge {
     }
 
     static ParticleOptions particle(String name, double vx, double vy, double vz) {
+        if (name == null) return null; // a mod's particle name getter may answer null: no particle, as an unknown name
         if (name.startsWith("iconcrack_") || name.startsWith("blockcrack_") || name.startsWith("blockdust_")) {
             String[] parts = name.split("_");
             int id = parts.length > 1 ? parseInt(parts[1]) : 0;

@@ -19,11 +19,61 @@ public class WorldInfo {
         this.world = world;
     }
 
+    /** The level.dat data of a detached view (see {@link #WorldInfo(legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound)}); null for a view of a world. */
+    private legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound mcc$nbt;
+
+    /** A standalone info read from level.dat style data (seed, name, times, spawn, flags): what mods build to inspect a saved world. */
+    public WorldInfo(legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound nbt) {
+        this.world = null;
+        this.mcc$nbt = nbt;
+    }
+
+    /** A standalone info for new world settings (what a mod's own save handler builds before the first save). */
+    public WorldInfo(legacyconnector.v1_7_10.net.minecraft.world.WorldSettings settings, String name) {
+        this.world = null;
+        legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound tag = new legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound();
+        tag.setLong("RandomSeed", settings.getSeed());
+        tag.setString("LevelName", name);
+        tag.setInteger("GameType", settings.getGameType() == null ? 0 : settings.getGameType().getID());
+        tag.setBoolean("MapFeatures", settings.isMapFeaturesEnabled());
+        tag.setBoolean("hardcore", settings.getHardcoreEnabled());
+        tag.setBoolean("allowCommands", settings.areCommandsAllowed());
+        if (settings.getTerrainType() != null) tag.setString("generatorName", settings.getTerrainType().getWorldTypeName());
+        tag.setString("generatorOptions", settings.field_82751_h == null ? "" : settings.field_82751_h);
+        tag.setInteger("SpawnY", 64);
+        this.mcc$nbt = tag;
+    }
+
+    /** Changes the game mode: on a live world the server's default mode, on a detached info its saved data. */
+    public void setGameType(legacyconnector.v1_7_10.net.minecraft.world.WorldSettings.GameType type) {
+        if (type == null || type.getID() < 0) return;
+        if (saved() != null) {
+            saved().setInteger("GameType", type.getID());
+            return;
+        }
+        var current = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
+        if (current != null) current.setDefaultGameType(net.minecraft.world.level.GameType.byId(type.getID()));
+    }
+
+    private int mcc$saveVersion = 19133;
+
+    /** Records the save format version (a detached info keeps it in its data; a live world is always saved in the host's format). */
+    public void setSaveVersion(int version) {
+        mcc$saveVersion = version;
+        if (saved() != null) saved().setInteger("version", version);
+    }
+
+    /** The detached data when this is not a view of a world, else null. */
+    private legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound saved() {
+        return world == null ? mcc$nbt : null;
+    }
+
     private Level level() {
-        return world == null ? null : world.mcc$fullLevel();
+        return world == null ? null : world.mcc$levelObject();
     }
 
     public long getSeed() {
+        if (saved() != null) return saved().getLong("RandomSeed");
         return world == null ? 0L : world.getSeed();
     }
 
@@ -46,19 +96,35 @@ public class WorldInfo {
         return 0;
     }
 
+    private String mcc$worldNameOverride;
+
+    /** Renames the world as legacy code sees it ({@link #getWorldName} and the saved {@code LevelName}); the modern level settings keep their own. */
+    public void setWorldName(String name) {
+        this.mcc$worldNameOverride = name;
+    }
+
     public String getWorldName() {
+        if (mcc$worldNameOverride != null) return mcc$worldNameOverride;
+        if (saved() != null) return saved().hasKey("LevelName") ? saved().getString("LevelName") : "world";
         Level level = level();
         return level != null && level.getServer() != null ? level.getServer().getWorldData().getLevelName() : "world";
     }
 
     public long getWorldTime() {
+        if (saved() != null) return saved().getLong("DayTime");
         Level level = level();
         return level == null ? 0L : level.getDayTime();
     }
 
     public long getWorldTotalTime() {
+        if (saved() != null) return saved().getLong("Time");
         Level level = level();
         return level == null ? 0L : level.getGameTime();
+    }
+
+    /** Sets the world's total tick count (1.7.10's {@code incrementTotalWorldTime}; the game time of the level). */
+    public void incrementTotalWorldTime(long time) {
+        data(d -> d.setGameTime(time));
     }
 
     public boolean isRaining() {
@@ -118,35 +184,42 @@ public class WorldInfo {
     }
 
     public boolean isHardcoreModeEnabled() {
+        if (saved() != null) return saved().getBoolean("hardcore");
         Level level = level();
         return level != null && level.getLevelData().isHardcore();
     }
 
     public boolean areCommandsAllowed() {
+        if (saved() != null) return !saved().hasKey("allowCommands") || saved().getBoolean("allowCommands");
         return true;
     }
 
     public boolean isMapFeaturesEnabled() {
+        if (saved() != null) return !saved().hasKey("MapFeatures") || saved().getBoolean("MapFeatures");
         Level level = level();
         return level == null || level.getServer() == null || level.getServer().getWorldData().worldGenOptions().generateStructures();
     }
 
     public int getSpawnX() {
+        if (saved() != null) return saved().getInteger("SpawnX");
         Level level = level();
         return level == null ? 0 : level.getSharedSpawnPos().getX();
     }
 
     public int getSpawnY() {
+        if (saved() != null) return saved().hasKey("SpawnY") ? saved().getInteger("SpawnY") : 64;
         Level level = level();
         return level == null ? 64 : level.getSharedSpawnPos().getY();
     }
 
     public int getSpawnZ() {
+        if (saved() != null) return saved().getInteger("SpawnZ");
         Level level = level();
         return level == null ? 0 : level.getSharedSpawnPos().getZ();
     }
 
     public legacyconnector.v1_7_10.net.minecraft.world.WorldSettings.GameType getGameType() {
+        if (saved() != null) return legacyconnector.v1_7_10.net.minecraft.world.WorldSettings.GameType.getByID(saved().getInteger("GameType"));
         var current = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
         if (current != null) return legacyconnector.v1_7_10.net.minecraft.world.WorldSettings.GameType.getByID(current.getDefaultGameType().getId());
         return legacyconnector.v1_7_10.net.minecraft.world.WorldSettings.GameType.SURVIVAL;
@@ -154,13 +227,15 @@ public class WorldInfo {
 
     /** The save format version of level.dat: 19133, the Anvil format every 1.7.10 world was saved in. */
     public int getSaveVersion() {
-        return 19133;
+        if (saved() != null && saved().hasKey("version")) return saved().getInteger("version");
+        return mcc$saveVersion;
     }
 
     private boolean mcc$initialized;
 
     /** Whether the world finished its first setup (spawn chosen): a loaded level always has; a mod's own world once it says so. */
     public boolean isInitialized() {
+        if (saved() != null) return saved().getBoolean("initialized");
         return level() != null || mcc$initialized;
     }
 
@@ -198,5 +273,64 @@ public class WorldInfo {
 
     public legacyconnector.v1_7_10.net.minecraft.nbt.NBTBase getAdditionalProperty(String name) {
         return mcc$additional == null ? null : mcc$additional.get(name);
+    }
+
+    private long mcc$sizeAt;
+    private long mcc$size;
+
+    /** The bytes the world's save folder takes on disk (counted at most every ten seconds); a detached info reports its saved {@code SizeOnDisk}. */
+    public long getSizeOnDisk() {
+        if (saved() != null) return saved().getLong("SizeOnDisk");
+        var server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
+        if (server == null) return 0L;
+        long now = System.currentTimeMillis();
+        if (now - mcc$sizeAt < 10_000L) return mcc$size;
+        long total = 0L;
+        try (var files = java.nio.file.Files.walk(server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT))) {
+            for (var path : (Iterable<java.nio.file.Path>) files::iterator) {
+                if (java.nio.file.Files.isRegularFile(path)) total += java.nio.file.Files.size(path);
+            }
+        } catch (java.io.IOException | RuntimeException e) {
+            return mcc$size;
+        }
+        mcc$sizeAt = now;
+        mcc$size = total;
+        return total;
+    }
+
+    /** The level data with the given player compound under {@code Player} (1.7.10's {@code cloneNBTCompound}); left out when null. */
+    public legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound cloneNBTCompound(legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound player) {
+        legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound tag = getNBTTagCompound();
+        if (player != null) tag.setTag("Player", player);
+        return tag;
+    }
+
+    /** The level data as 1.7.10 saved it ({@code level.dat}'s Data compound): a copy of the detached data, or the live world's values. */
+    public legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound getNBTTagCompound() {
+        if (saved() != null) return (legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound) saved().copy();
+        legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound tag = new legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound();
+        tag.setLong("RandomSeed", getSeed());
+        tag.setString("LevelName", getWorldName());
+        tag.setLong("Time", getWorldTotalTime());
+        tag.setLong("DayTime", getWorldTime());
+        tag.setInteger("SpawnX", getSpawnX());
+        tag.setInteger("SpawnY", getSpawnY());
+        tag.setInteger("SpawnZ", getSpawnZ());
+        tag.setBoolean("raining", isRaining());
+        tag.setInteger("rainTime", getRainTime());
+        tag.setBoolean("thundering", isThundering());
+        tag.setInteger("thunderTime", getThunderTime());
+        tag.setBoolean("hardcore", isHardcoreModeEnabled());
+        tag.setBoolean("allowCommands", areCommandsAllowed());
+        tag.setBoolean("MapFeatures", isMapFeaturesEnabled());
+        tag.setBoolean("initialized", isInitialized());
+        return tag;
+    }
+
+    // Members125 batch 1
+
+    /** 1.2.5 {@code WorldData.getDefaultGamemode()}: the game type (0 survival, 1 creative) newly joined players start in. */
+    public int mcc125$getDefaultGamemode() {
+        return getGameType().getID();
     }
 }

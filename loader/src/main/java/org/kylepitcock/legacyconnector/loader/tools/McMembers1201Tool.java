@@ -13,7 +13,8 @@ import org.objectweb.asm.tree.ClassNode;
 /**
  * Writes {@code legacyconnector/forward/1.20.1/mc-members.index.gz}: the declared members of every Minecraft 1.21.1 and NeoForge class (the same
  * classes as {@code mc-hierarchy.tsv.gz}), one line per class: {@code owner TAB name+desc SPACE name+desc... TAB name:desc SPACE name:desc...}.
- * {@link org.kylepitcock.legacyconnector.loader.transform.SoftLink1201} uses it to tell which references of a mod cannot link.
+ * {@link org.kylepitcock.legacyconnector.loader.transform.SoftLink1201} uses it to tell which references of a mod cannot link. Next to it {@code mc-static.index.gz}
+ * lists the static methods only ({@code owner TAB name+desc SPACE name+desc...}), which the mixin repair needs (a handler must be static exactly when its target is).
  *
  * <p>usage: {@code java -cp asm.jar:asm-tree.jar McMembers1201Tool.java <neoforge-merged.jar> [out.gz]}
  */
@@ -25,6 +26,8 @@ public final class McMembers1201Tool {
     public static void main(String[] args) throws Exception {
         Path out = Path.of(args.length > 1 ? args[1] : "loader/src/main/resources/legacyconnector/forward/1.20.1/mc-members.index.gz");
         TreeMap<String, String> lines = new TreeMap<>();
+        TreeMap<String, String> statics = new TreeMap<>();
+        TreeMap<String, String> hidden = new TreeMap<>();
         try (ZipFile zip = new ZipFile(args[0])) {
             for (var en = zip.entries(); en.hasMoreElements(); ) {
                 var e = en.nextElement();
@@ -40,10 +43,30 @@ public final class McMembers1201Tool {
                 StringBuilder fs = new StringBuilder();
                 for (var f : n.fields) fs.append(fs.length() > 0 ? " " : "").append(f.name).append(':').append(f.desc);
                 lines.put(n.name, n.name + "\t" + ms + "\t" + fs);
+                StringBuilder ss = new StringBuilder();
+                for (var m : n.methods) if ((m.access & org.objectweb.asm.Opcodes.ACC_STATIC) != 0) ss.append(ss.length() > 0 ? " " : "").append(m.name).append(m.desc);
+                if (ss.length() > 0) statics.put(n.name, n.name + "\t" + ss);
+                // private and package-private members (not synthetic), and protected FIELDS: PrivateAccess1201 opens the ones a mod's code uses. A field that 1.20.1 had
+                // public can be protected in a 1.21.1 superclass (ServerGamePacketListenerImpl.connection moved to ServerCommonPacketListenerImpl); opening a field has
+                // no override consequences, unlike a protected method (a mod's protected override of it would then have weaker access).
+                if (n.name.startsWith("net/minecraft/")) {
+                    int open = org.objectweb.asm.Opcodes.ACC_PUBLIC | org.objectweb.asm.Opcodes.ACC_PROTECTED | org.objectweb.asm.Opcodes.ACC_SYNTHETIC;
+                    StringBuilder hm = new StringBuilder();
+                    for (var m : n.methods) if ((m.access & org.objectweb.asm.Opcodes.ACC_PRIVATE) != 0 && (m.access & org.objectweb.asm.Opcodes.ACC_SYNTHETIC) == 0 && !m.name.equals("<clinit>") && !m.name.startsWith("lambda$")) hm.append(hm.length() > 0 ? " " : "").append(m.name).append(m.desc);
+                    StringBuilder hf = new StringBuilder();
+                    for (var f : n.fields) if ((f.access & (org.objectweb.asm.Opcodes.ACC_PUBLIC | org.objectweb.asm.Opcodes.ACC_SYNTHETIC)) == 0) hf.append(hf.length() > 0 ? " " : "").append(f.name).append(':').append(f.desc).append((f.access & org.objectweb.asm.Opcodes.ACC_FINAL) != 0 ? "#f" : "");
+                    if (hm.length() > 0 || hf.length() > 0) hidden.put(n.name, n.name + "\t" + hm + "\t" + hf);
+                }
             }
         }
         try (OutputStream o = new GZIPOutputStream(Files.newOutputStream(out))) {
             o.write(String.join("\n", lines.values()).getBytes(StandardCharsets.UTF_8));
+        }
+        try (OutputStream o = new GZIPOutputStream(Files.newOutputStream(out.resolveSibling("mc-static.index.gz")))) {
+            o.write(String.join("\n", statics.values()).getBytes(StandardCharsets.UTF_8));
+        }
+        try (OutputStream o = new GZIPOutputStream(Files.newOutputStream(out.resolveSibling("mc-private.index.gz")))) {
+            o.write(String.join("\n", hidden.values()).getBytes(StandardCharsets.UTF_8));
         }
         System.out.println(lines.size() + " classes -> " + out + " (" + Files.size(out) + " bytes)");
     }

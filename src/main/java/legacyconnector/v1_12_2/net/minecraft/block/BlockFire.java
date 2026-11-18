@@ -52,6 +52,11 @@ public class BlockFire extends Block {
         }
     }
 
+    /** The chance (out of 300) that fire next to this block spreads (1.12.2 {@code getEncouragement}, as {@link #setFireInfo} recorded it). */
+    public int getEncouragement(Block blockIn) {
+        return mcc$encouragement(blockIn);
+    }
+
     /** The fire spread chance recorded for a block (0 when none). */
     public int mcc$encouragement(Block block) {
         Integer i = encouragements.get(block);
@@ -166,5 +171,15 @@ public class BlockFire extends Block {
     @Override
     public BlockFaceShape getBlockFaceShape(IBlockAccess worldIn, IBlockState state, BlockPos pos, EnumFacing face) {
         return BlockFaceShape.UNDEFINED;
+    }
+
+    /** The burn chance recorded for a block ({@link #setFireInfo}), 0 when none. */
+    public int getFlammability(Block blockIn) {
+        return mcc$flammability(blockIn);
+    }
+
+    /** Whether the block at a position can burn (any face). */
+    public boolean canCatchFire(IBlockAccess world, BlockPos pos) {
+        return canCatchFire(world, pos, EnumFacing.UP);
     }
 }

@@ -50,7 +50,56 @@ public final class RoundCompat {
 
     /** {@code BuiltInRegistries.POTION} / {@code PAINTING_VARIANT} were typed {@code DefaultedRegistry}; 1.21.1 types them {@code Registry} (the object still is one). */
     public static net.minecraft.core.DefaultedRegistry<?> defaulted(net.minecraft.core.Registry<?> registry) {
-        return (net.minecraft.core.DefaultedRegistry<?>) registry;
+        if (registry instanceof net.minecraft.core.DefaultedRegistry<?> d) return d;
+        // 1.21.1's potion and painting variant registries are plain registries (not "the object still is one"): the old defaulted type is a view that
+        // delegates to the registry and knows the old default key
+        return defaultedView(() -> registry, registry.key(), registry.key().location().getPath().equals("painting_variant") ? "kebab" : "empty");
+    }
+
+    /**
+     * {@code IEnvironment.Keys.NAMING} (a supplier of the launcher key that names the mappings, "srg" or "mcp"): gone in the newer ModLauncher. A key nobody ever
+     * sets is handed out, so a lookup finds no value (the mod then takes its non-development path), which is what a production game gives.
+     */
+    public static java.util.function.Supplier<?> launcherNamingKey() {
+        return () -> {
+            try {
+                Class<?> launcher = Class.forName("cpw.mods.modlauncher.Launcher");
+                Object board = launcher.getMethod("blackboard").invoke(launcher.getField("INSTANCE").get(null));
+                Class<?> map = Class.forName("cpw.mods.modlauncher.api.TypesafeMap");
+                return Class.forName("cpw.mods.modlauncher.api.TypesafeMap$Key").getMethod("getOrCreate", map, String.class, Class.class).invoke(null, board, "legacyconnector.naming", String.class);
+            } catch (ReflectiveOperationException e) {
+                throw new IllegalStateException(e);
+            }
+        };
+    }
+
+    /** {@code BuiltInRegistries.PAINTING_VARIANT}: a data registry in 1.21.1 (no static field); read before a world exists, the view asks the registry on each call. */
+    public static net.minecraft.core.DefaultedRegistry<?> paintingVariants() {
+        return defaultedView(() -> MigrateContext.registries().registryOrThrow(net.minecraft.core.registries.Registries.PAINTING_VARIANT),
+                net.minecraft.core.registries.Registries.PAINTING_VARIANT, "kebab");
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    private static net.minecraft.core.DefaultedRegistry<?> defaultedView(java.util.function.Supplier<net.minecraft.core.Registry<?>> registry,
+            net.minecraft.resources.ResourceKey<?> key, String defaultName) {
+        net.minecraft.resources.ResourceLocation def = net.minecraft.resources.ResourceLocation.withDefaultNamespace(defaultName);
+        return (net.minecraft.core.DefaultedRegistry<?>) java.lang.reflect.Proxy.newProxyInstance(net.minecraft.core.DefaultedRegistry.class.getClassLoader(),
+                new Class<?>[] {net.minecraft.core.DefaultedRegistry.class}, (proxy, method, args) -> {
+                    if (method.getName().equals("getDefaultKey") && method.getParameterCount() == 0) return def;
+                    if (method.getName().equals("key") && method.getParameterCount() == 0) return key;
+                    if (method.getDeclaringClass() == Object.class) {
+                        return switch (method.getName()) {
+                            case "hashCode" -> System.identityHashCode(proxy);
+                            case "equals" -> proxy == args[0];
+                            default -> "registry view " + key.location();
+                        };
+                    }
+                    try {
+                        return method.invoke(registry.get(), args);
+                    } catch (java.lang.reflect.InvocationTargetException e) {
+                        throw e.getCause();
+                    }
+                });
     }
 
     /** A crafting grid in the 1.21.1 shape ({@code CraftingInput}) for the methods of {@code ShapedRecipe}/{@code ShapelessRecipe} that take one. */
@@ -61,6 +110,11 @@ public final class RoundCompat {
         java.util.List<ItemStack> items = new java.util.ArrayList<>(n);
         for (int i = 0; i < n; i++) items.add(in.getItem(i));
         return net.minecraft.world.item.crafting.CraftingInput.of(n, 1, items);
+    }
+
+    /** Same, for a call whose argument is typed {@code CraftingContainer} (the descriptor of the rewritten call names that type). */
+    public static net.minecraft.world.item.crafting.CraftingInput craftInput(net.minecraft.world.inventory.CraftingContainer container) {
+        return craftInput((net.minecraft.world.Container) container);
     }
 
     /** The {@code CraftingContainer} a 1.20.1 recipe override expects, from the 1.21.1 grid. */
@@ -141,7 +195,7 @@ public final class RoundCompat {
 
     // ------------------------------------------------------------------ recipe holders (1.21.1 hands out RecipeHolder: id plus recipe)
 
-    private static final ResourceLocation UNKNOWN_RECIPE = ResourceLocation.fromNamespaceAndPath("legacyconnector", "unknown");
+    static final ResourceLocation UNKNOWN_RECIPE = ResourceLocation.fromNamespaceAndPath("legacyconnector", "unknown");
 
     @SuppressWarnings({"rawtypes", "unchecked"})
     private static net.minecraft.world.item.crafting.RecipeHolder holderOf(net.minecraft.world.item.crafting.Recipe recipe) {
@@ -261,6 +315,18 @@ public final class RoundCompat {
     @SuppressWarnings({"rawtypes", "unchecked"})
     public static com.mojang.serialization.MapCodec mapCodec(com.mojang.serialization.Codec codec) {
         return com.mojang.serialization.MapCodec.assumeMapUnsafe(codec);
+    }
+
+    /** {@code Codec.dispatch*}'s subtype codec function: 1.20.1 returned a {@code Codec}, 1.21.1 wants the {@code MapCodec} (same erased descriptor). */
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    public static java.util.function.Function mapCodecs(java.util.function.Function codecs) {
+        return k -> {
+            Object c = codecs.apply(k);
+            if (c instanceof com.mojang.serialization.MapCodec) return c;
+            if (c instanceof com.mojang.serialization.MapCodec.MapCodecCodec<?> m) return m.codec();
+            if (c instanceof com.mojang.serialization.Codec cc) return com.mojang.serialization.MapCodec.assumeMapUnsafe(cc);
+            return c;
+        };
     }
 
     /** {@code new SmithingTemplateItem(5 components, 2 icon lists)}: 1.21.1 only adds the (empty) feature flag varargs. */
@@ -407,21 +473,9 @@ public final class RoundCompat {
         return false;
     }
 
-    private static final java.util.List<Object[]> PENDING_MIXES = new java.util.concurrent.CopyOnWriteArrayList<>();
-    private static volatile boolean brewingHooked;
-
-    /** {@code PotionBrewing.addMix(from, ingredient, to)} (static in 1.20.1): queued, and added when NeoForge asks for brewing recipes. */
+    /** {@code PotionBrewing.addMix(from, ingredient, to)} (static in 1.20.1): kept by {@link LegacyBrewing} and replayed when NeoForge asks for brewing recipes. */
     public static void addPotionMix(net.minecraft.world.item.alchemy.Potion from, net.minecraft.world.item.Item ingredient, net.minecraft.world.item.alchemy.Potion to) {
-        PENDING_MIXES.add(new Object[] {from, ingredient, to});
-        if (!brewingHooked) {
-            brewingHooked = true;
-            net.neoforged.neoforge.common.NeoForge.EVENT_BUS.addListener(net.neoforged.neoforge.event.brewing.RegisterBrewingRecipesEvent.class, event -> {
-                for (Object[] m : PENDING_MIXES) {
-                    event.getBuilder().addMix(net.minecraft.core.registries.BuiltInRegistries.POTION.wrapAsHolder((net.minecraft.world.item.alchemy.Potion) m[0]), (net.minecraft.world.item.Item) m[1],
-                            net.minecraft.core.registries.BuiltInRegistries.POTION.wrapAsHolder((net.minecraft.world.item.alchemy.Potion) m[2]));
-                }
-            });
-        }
+        LegacyBrewing.addPotionMix(from, ingredient, to);
     }
 
     // ---- argument producers for in-place constructor rewrites (=args rows; usable in super(...) calls) ----
@@ -488,8 +542,13 @@ public final class RoundCompat {
     /** {@code SpawnPlacements.Type}-style custom placement: a placement type that asks the predicate. */
     public static net.minecraft.world.entity.SpawnPlacementType createSpawnPlacementType(String name,
             net.neoforged.neoforge.common.util.TriPredicate<net.minecraft.world.level.LevelReader, net.minecraft.core.BlockPos, net.minecraft.world.entity.EntityType<?>> predicate) {
-        return predicate::test;
+        net.minecraft.world.entity.SpawnPlacementType type = predicate::test;
+        CUSTOM_PLACEMENTS.put(name, type);
+        return type;
     }
+
+    /** Placement types made with {@code SpawnPlacements.Type.create(name, ...)}: {@code Type.valueOf(name)} finds them again. */
+    static final java.util.Map<String, net.minecraft.world.entity.SpawnPlacementType> CUSTOM_PLACEMENTS = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static net.minecraft.world.entity.raid.Raid.RaiderType createRaiderType(String name, net.minecraft.world.entity.EntityType<?> type, int[] counts) {
         return net.minecraft.world.entity.raid.Raid.RaiderType.VINDICATOR;
@@ -501,6 +560,11 @@ public final class RoundCompat {
 
     public static net.minecraft.world.item.ItemDisplayContext createDisplayContext(String name, ResourceLocation id, net.minecraft.world.item.ItemDisplayContext parent) {
         return parent != null ? parent : net.minecraft.world.item.ItemDisplayContext.NONE;
+    }
+
+    /** The (empty) feature flag varargs of a constructor 1.21.1 gave one (the constructor call keeps its other arguments). */
+    public static net.minecraft.world.flag.FeatureFlag[] noFlagsOf(net.minecraft.network.chat.Component ignored) {
+        return new net.minecraft.world.flag.FeatureFlag[0];
     }
 
     /** The (empty) feature flag varargs 1.21.1 added to {@code SmithingTemplateItem.createArmorTrimTemplate}. */
@@ -790,6 +854,21 @@ public final class RoundCompat {
             net.minecraft.server.packs.repository.PackSource source) {
         return net.minecraft.server.packs.repository.Pack.readMetaAndCreate(packInfo(id, title, source), packSupplier(supplier), type,
                 new net.minecraft.server.packs.PackSelectionConfig(required, position, false));
+    }
+
+    /** {@code Pack.create(id, title, required, supplier, info, type, position, fixedPosition, source)} of 1.20.1: a pack with an already read description. */
+    public static net.minecraft.server.packs.repository.Pack createPack(String id, net.minecraft.network.chat.Component title, boolean required,
+            LegacyResourcesSupplier supplier, net.minecraft.server.packs.repository.Pack.Metadata metadata, net.minecraft.server.packs.PackType type,
+            net.minecraft.server.packs.repository.Pack.Position position, boolean fixedPosition, net.minecraft.server.packs.repository.PackSource source) {
+        return new net.minecraft.server.packs.repository.Pack(packInfo(id, title, source), packSupplier(supplier), metadata,
+                new net.minecraft.server.packs.PackSelectionConfig(required, position, fixedPosition));
+    }
+
+    /** {@code Pack.readPackInfo(id, supplier)} of 1.20.1: the pack.mcmeta description (null when the pack has none) for the current pack format of data packs. */
+    public static net.minecraft.server.packs.repository.Pack.Metadata readPackInfo(String id, LegacyResourcesSupplier supplier) {
+        return net.minecraft.server.packs.repository.Pack.readPackMetadata(packInfo(id, net.minecraft.network.chat.Component.literal(id),
+                net.minecraft.server.packs.repository.PackSource.DEFAULT), packSupplier(supplier),
+                net.minecraft.SharedConstants.getCurrentVersion().getPackVersion(net.minecraft.server.packs.PackType.SERVER_DATA));
     }
 
     /** {@code new PathPackResources(String name, Path root, boolean isBuiltin)}. */

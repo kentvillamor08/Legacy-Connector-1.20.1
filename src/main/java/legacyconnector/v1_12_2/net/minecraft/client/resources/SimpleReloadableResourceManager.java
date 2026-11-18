@@ -26,7 +26,11 @@ public class SimpleReloadableResourceManager implements IReloadableResourceManag
 
     public SimpleReloadableResourceManager(legacyconnector.v1_12_2.net.minecraft.client.resources.data.MetadataSerializer serializer) {
         this.rmMetadataSerializer = serializer;
+        SERIALIZER = serializer;
     }
+
+    /** The serializer of the game's resource manager (sections mods registered); the lookups of {@link #find} answer metadata with it. */
+    private static volatile legacyconnector.v1_12_2.net.minecraft.client.resources.data.MetadataSerializer SERIALIZER;
 
     /** Whether a pack was added for one of its domains (not a 1.12 method). */
     public boolean mcc$has(IResourcePack pack) {
@@ -136,16 +140,18 @@ public class SimpleReloadableResourceManager implements IReloadableResourceManag
         String raw = location.getPath();
         String lower = org.kylepitcock.legacyconnector.core.Ids.normalizePath(raw);
         for (var file : net.neoforged.fml.ModList.get().getModFiles()) {
-            Path p = file.getFile().findResource("assets", ns, raw);
-            if (p == null || !Files.isRegularFile(p)) p = file.getFile().findResource("assets", ns, lower);
-            if ((p == null || !Files.isRegularFile(p)) && raw.startsWith("models/")) {
-                // data files under models/ that are not models were moved out of the pack (the loader's resource converter)
+            Path p = null;
+            if (raw.startsWith("models/")) {
+                // data files under models/ that are not models were moved out of the pack, and models whose overrides only the mod's own loader reads
+                // (Tinkers' .tcon.json) keep their original here while the pack has a cleaned copy (the loader's resource converter)
                 p = file.getFile().findResource("legacyconnector_raw", "assets", ns, raw);
                 if (p == null || !Files.isRegularFile(p)) p = file.getFile().findResource("legacyconnector_raw", "assets", ns, lower);
             }
+            if (p == null || !Files.isRegularFile(p)) p = file.getFile().findResource("assets", ns, raw);
+            if (p == null || !Files.isRegularFile(p)) p = file.getFile().findResource("assets", ns, lower);
             if (p != null && Files.isRegularFile(p)) {
                 Path meta = p.resolveSibling(p.getFileName() + ".mcmeta");
-                out.add(new Resource(location, Files.readAllBytes(p), Files.isRegularFile(meta), file.getFile().getFileName()));
+                out.add(new Resource(location, Files.readAllBytes(p), Files.isRegularFile(meta) ? Files.readAllBytes(meta) : null, file.getFile().getFileName()));
                 if (first) return out;
             }
         }
@@ -169,11 +175,12 @@ public class SimpleReloadableResourceManager implements IReloadableResourceManag
                 try (var in = r.open()) {
                     bytes = in.readAllBytes();
                 }
-                boolean meta;
-                try {
-                    meta = r.metadata() != net.minecraft.server.packs.resources.ResourceMetadata.EMPTY;
-                } catch (IOException e) {
-                    meta = false;
+                byte[] meta = null;
+                var metaResource = manager.getResource(id.withPath(id.getPath() + ".mcmeta"));
+                if (metaResource.isPresent()) {
+                    try (var in = metaResource.get().open()) {
+                        meta = in.readAllBytes();
+                    }
                 }
                 out.add(new Resource(location, bytes, meta, r.sourcePackId()));
                 if (first) return;
@@ -184,14 +191,15 @@ public class SimpleReloadableResourceManager implements IReloadableResourceManag
                         .getResource(net.minecraft.server.packs.PackType.CLIENT_RESOURCES, id) : null;
                 if (supplier != null) {
                     try (var in = supplier.get()) {
-                        out.add(new Resource(location, in.readAllBytes(), false, "vanilla"));
+                        out.add(new Resource(location, in.readAllBytes(), null, "vanilla"));
                     }
                 }
             }
         }
     }
 
-    private record Resource(ResourceLocation location, byte[] bytes, boolean meta, String pack) implements IResource {
+    /** {@code mcmeta} holds the resource's .mcmeta file, or null; sections are read on request (mods read the "animation" section of their own textures). */
+    private record Resource(ResourceLocation location, byte[] bytes, byte[] mcmeta, String pack) implements IResource {
         @Override
         public ResourceLocation getResourceLocation() {
             return location;
@@ -204,7 +212,13 @@ public class SimpleReloadableResourceManager implements IReloadableResourceManag
 
         @Override
         public boolean hasMetadata() {
-            return meta;
+            return mcmeta != null;
+        }
+
+        @Override
+        @SuppressWarnings("unchecked")
+        public <T extends legacyconnector.v1_12_2.net.minecraft.client.resources.data.IMetadataSection> T getMetadata(String sectionName) {
+            return mcmeta == null ? null : (T) legacyconnector.v1_12_2.net.minecraft.client.resources.data.MetadataSerializer.mcc$parse(SERIALIZER, mcmeta, sectionName);
         }
 
         @Override

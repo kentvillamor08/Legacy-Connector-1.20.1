@@ -92,7 +92,7 @@ public class ItemBlock extends Item {
 
     public boolean canPlaceBlockOnSide(legacyconnector.v1_12_2.net.minecraft.world.World world, legacyconnector.v1_12_2.net.minecraft.util.math.BlockPos pos,
             legacyconnector.v1_12_2.net.minecraft.util.EnumFacing side, legacyconnector.v1_12_2.net.minecraft.entity.player.EntityPlayer player, ItemStack stack) {
-        var level = world.mcc$level();
+        var level = world.mcc$access();
         if (!level.getBlockState(pos.mcc$modern()).canBeReplaced()) pos = pos.offset(side);
         return level.getBlockState(pos.mcc$modern()).canBeReplaced() && block.canPlaceBlockOnSide(world, pos, side);
     }
@@ -106,6 +106,13 @@ public class ItemBlock extends Item {
     public legacyconnector.v1_12_2.net.minecraft.creativetab.CreativeTabs getCreativeTab() {
         var own = super.getCreativeTab();
         return own != null ? own : block.getCreativeTabToDisplayOn();
+    }
+
+    /** 1.12: a block item lists what its block lists (Block.getSubBlocks: one stack per subtype of a block like Candy World's gummy blocks). */
+    @Override
+    public void getSubItems(legacyconnector.v1_12_2.net.minecraft.creativetab.CreativeTabs tab,
+            legacyconnector.v1_12_2.net.minecraft.util.NonNullList<ItemStack> items) {
+        if (isInCreativeTab(tab)) block.getSubBlocks(tab, items);
     }
 
     /** A block item's tooltip is its block's. */

@@ -46,11 +46,7 @@ public final class CustomModels1122 {
             if (model == null) continue;
             models++;
             try {
-                for (ResourceLocation texture : model.getTextures()) Sprites1122.register(texture.toString());
-                for (ResourceLocation dependency : model.getDependencies()) {
-                    IModel dep = ModelLoaderRegistry.getModelOrMissing(dependency);
-                    for (ResourceLocation texture : dep.getTextures()) Sprites1122.register(texture.toString());
-                }
+                registerTextures(model, new java.util.HashSet<>());
             } catch (RuntimeException | LinkageError e) {
                 RenderErrors1122.report("listing the textures of the model " + key, e);
             }
@@ -61,13 +57,20 @@ public final class CustomModels1122 {
             if (model == null) continue;
             variants++;
             try {
-                for (ResourceLocation texture : model.getTextures()) Sprites1122.register(texture.toString());
+                registerTextures(model, new java.util.HashSet<>());
             } catch (RuntimeException | LinkageError e) {
                 RenderErrors1122.report("listing the textures of the model " + variant.ns() + ":" + variant.path(), e);
             }
         }
         if (models > 0) LOG.info("{} 1.12.2 model location(s) come from custom model loaders", models);
         if (variants > 0) LOG.info("{} 1.12.2 block variant(s) are models of custom model loaders", variants);
+    }
+
+    /** The textures of a model and of all its dependencies (asked of the registry, so plain ones are baked as standalone models). */
+    private static void registerTextures(IModel model, java.util.Set<IModel> seen) {
+        if (!seen.add(model)) return;
+        for (ResourceLocation texture : model.getTextures()) Sprites1122.register(texture.toString());
+        for (ResourceLocation dependency : model.getDependencies()) registerTextures(ModelLoaderRegistry.getModelOrMissing(dependency), seen);
     }
 
     /**
@@ -114,7 +117,7 @@ public final class CustomModels1122 {
                 models.put(net.minecraft.client.renderer.block.BlockModelShaper.stateToModelLocation(state), Models1122.modern(baked));
             } catch (RuntimeException | LinkageError ex) {
                 LOG.warn("Could not bake the loader model {}:{} of {} meta {} ({}): {}", variant.ns(), variant.path(), variant.block(), variant.meta(),
-                        variant.source(), ex.toString());
+                        variant.source(), ex.toString(), ex);
             }
         }
     }
@@ -137,9 +140,72 @@ public final class CustomModels1122 {
         }
     }
 
+    /**
+     * The original parent of a plain json model (the loader keeps a parent no valid id can hold under {@code legacyconnector:legacy_parent}) when
+     * a custom loader accepts it, or null.
+     */
+    private static ResourceLocation loaderParent(ResourceLocation location) {
+        if (location instanceof ModelResourceLocation) return null;
+        String path = location.getPath();
+        if (!path.startsWith("models/")) return null;
+        try {
+            var resource = legacyconnector.v1_12_2.net.minecraft.client.Minecraft.getMinecraft().getResourceManager()
+                    .getResource(new ResourceLocation(location.getNamespace(), path.endsWith(".json") ? path : path + ".json"));
+            String raw;
+            try (java.io.Reader reader = new java.io.InputStreamReader(resource.getInputStream(), java.nio.charset.StandardCharsets.UTF_8)) {
+                var json = com.google.gson.JsonParser.parseReader(reader).getAsJsonObject();
+                var value = json.get("legacyconnector:legacy_parent");
+                if (value == null || !value.isJsonPrimitive()) return null;
+                raw = value.getAsString();
+            }
+            ResourceLocation parent = new ResourceLocation(raw);
+            String parentPath = parent.getPath();
+            ResourceLocation actual = parentPath.startsWith("models/") ? parent : new ResourceLocation(parent.getNamespace(), "models/" + parentPath);
+            return ModelLoaderRegistry.mcc$loaderFor(actual) != null ? parent : null;
+        } catch (java.io.IOException | RuntimeException | LinkageError e) {
+            return null;
+        }
+    }
+
+    /**
+     * The loader model of a block's {@code inventory} blockstate variant ({@code "inventory": [{}]} with {@code defaults.model} a loader file such as
+     * Mekanism's glow_panel.obj.mek) for an item registered at {@code mod:block#inventory} that has no item json: Forge loaded that variant for the
+     * item. Without it the item drew the plain converted model and lost the loader model's own item transforms (Mekanism's glow panels).
+     */
+    private static ResourceLocation inventoryVariantModel(String key) {
+        try {
+            ModelResourceLocation mrl = new ModelResourceLocation(key);
+            if (!"inventory".equals(mrl.getVariant())) return null;
+            var resource = legacyconnector.v1_12_2.net.minecraft.client.Minecraft.getMinecraft().getResourceManager()
+                    .getResource(new ResourceLocation(mrl.getNamespace(), "blockstates/" + mrl.getPath() + ".json"));
+            try (java.io.Reader reader = new java.io.InputStreamReader(resource.getInputStream(), java.nio.charset.StandardCharsets.UTF_8)) {
+                var json = com.google.gson.JsonParser.parseReader(reader).getAsJsonObject();
+                var variants = json.has("variants") && json.get("variants").isJsonObject() ? json.getAsJsonObject("variants") : null;
+                if (variants == null || !variants.has("inventory")) return null;
+                String model = null;
+                var inv = variants.get("inventory");
+                if (inv.isJsonArray() && inv.getAsJsonArray().size() > 0) inv = inv.getAsJsonArray().get(0);
+                if (inv.isJsonObject() && inv.getAsJsonObject().has("model")) model = inv.getAsJsonObject().get("model").getAsString();
+                if (model == null && json.has("defaults") && json.get("defaults").isJsonObject() && json.getAsJsonObject("defaults").has("model")) {
+                    model = json.getAsJsonObject("defaults").get("model").getAsString();
+                }
+                if (model == null) return null;
+                ResourceLocation parsed = new ResourceLocation(model);
+                // a blockstate's models live under models/block/ (the variant loader's folder), unless the name already gives a folder
+                String path = parsed.getPath();
+                if (!path.startsWith("block/") && !path.startsWith("item/")) path = "block/" + path;
+                ResourceLocation actual = new ResourceLocation(parsed.getNamespace(), "models/" + path);
+                return ModelLoaderRegistry.mcc$loaderFor(actual) != null ? actual : null;
+            }
+        } catch (java.io.IOException | RuntimeException | LinkageError e) {
+            return null;
+        }
+    }
+
     /** The loader model of a legacy location string ({@code domain:path#variant}), or null when no loader takes it. */
     private static IModel load(String key) {
         ResourceLocation location;
+        ResourceLocation fallback = null;
         try {
             ModelResourceLocation mrl = new ModelResourceLocation(key);
             location = mrl;
@@ -147,18 +213,39 @@ public final class CustomModels1122 {
                 // an item's model: Forge loaded the file models/item/<path> (ModelLoader.getItemLocation, then ModelLoaderRegistry's actual location)
                 // and gave that plain location to the custom loaders (Tinkers' Construct reads its .tmat/.tcon json from it)
                 String path = mrl.getPath();
-                location = new ResourceLocation(mrl.getNamespace(), path.startsWith("models/") ? path : "models/item/" + path);
+                ResourceLocation itemLocation = new ResourceLocation(mrl.getNamespace(), path.startsWith("models/") ? path : "models/item/" + path);
+                if (ModelLoaderRegistry.mcc$loaderFor(mrl) == null) {
+                    location = itemLocation;
+                } else if (ModelLoaderRegistry.mcc$loaderFor(itemLocation) != null) {
+                    // a loader that accepts by file extension takes both (Tinkers' .tmat: the MRL has no json to read): the item json first, then
+                    // the MRL itself, which a loader that accepts "mod:name" by its plain path (Lycanites' equipment parts) is given
+                    location = itemLocation;
+                    fallback = mrl;
+                }
             }
         } catch (RuntimeException e) {
             return null;
         }
         if (ModelLoaderRegistry.mcc$loaderFor(location) == null) {
-            // 1.12 asked the loaders for the model file a variant points at as well (domain:block/name, domain:item/name)
-            return null;
+            // a json model whose parent a loader makes ("parent": "mod:item/internal/x$from_item(mod:x)"): Forge loaded parents through the
+            // loaders too, so the item draws the loader's model (the modern bakery cannot, the name is no valid id)
+            ResourceLocation parent = loaderParent(location);
+            if (parent == null) parent = inventoryVariantModel(key);
+            if (parent == null) return null;
+            location = parent;
         }
         try {
-            return ModelLoaderRegistry.getModel(location);
+            IModel model = ModelLoaderRegistry.getModel(location);
+            if (fallback != null && model == ModelLoaderRegistry.getMissingModel()) return ModelLoaderRegistry.getModel(fallback);
+            return model;
         } catch (Exception | LinkageError e) {
+            if (fallback != null) {
+                try {
+                    return ModelLoaderRegistry.getModel(fallback);
+                } catch (Exception | LinkageError e2) {
+                    // reported below with the first failure
+                }
+            }
             RenderErrors1122.report("loading the model " + key, e);
             return null;
         }

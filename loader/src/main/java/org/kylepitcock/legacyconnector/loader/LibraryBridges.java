@@ -67,7 +67,14 @@ public final class LibraryBridges {
             java.util.Map.entry("coretweaks", "1.7.10 bug-fix/performance patches; not applicable to 1.21.1"),
             java.util.Map.entry("lwjgl3ify", "runs 1.7.10 on LWJGL 3 / modern Java; 1.21.1 already does"),
             java.util.Map.entry("angelica", "1.7.10 renderer replacement; use a modern renderer mod (e.g. Sodium/Embeddium)"),
-            java.util.Map.entry("notfine", "1.7.10 graphics options; use a modern renderer/options mod"),
+            java.util.Map.entry("mcpatcherforge", "1.7.10 MCPatcher port patching the old renderer (bundled in Angelica); the layer converts connected textures itself"),
+            java.util.Map.entry("beddium", "1.7.10 renderer replacement (Sodium port); use a modern renderer mod (e.g. Sodium/Embeddium)"),
+            java.util.Map.entry("falsetweaks", "1.7.10 renderer performance patches; not applicable to 1.21.1"),
+            java.util.Map.entry("infiview", "1.7.10 render distance patch; 1.21.1 has no such limit"),
+            java.util.Map.entry("angellib", "library of the 1.7.10 renderer replacement Angelica; not applicable to 1.21.1"),
+            java.util.Map.entry("euphoriacompanion", "companion of the 1.7.10 shader renderer Angelica; use a modern shader mod (Iris)"),
+            java.util.Map.entry("crash_assistant", "1.7.10 JVM crash window (AWT); not applicable to 1.21.1"),
+            java.util.Map.entry("notfine","1.7.10 graphics options; use a modern renderer/options mod"),
             java.util.Map.entry("neid", "1.7.10 ID limit extender; 1.21.1 has no ID limits"),
             java.util.Map.entry("fastleafdecay", "use a modern fast leaf decay mod"),
             java.util.Map.entry("betterloadingscreen", "1.7.10 loading screen; NeoForge has its own"),
@@ -89,6 +96,7 @@ public final class LibraryBridges {
             java.util.Map.entry("mixinextras", "1.7.10 mixin loader component; NeoForge 1.21.1 ships its own Mixin"),
             java.util.Map.entry("opis", "1.7.10 profiler; use Spark"),
             // 1.12.2
+            java.util.Map.entry("cubicchunks", "1.12.2 world-height mod that replaces vanilla chunk storage, world generation and lighting with 3D cubes; cannot be translated onto 1.21.1 (use a native height/datapack approach)"),
             java.util.Map.entry("betterfps", "1.12.2 performance patches; not applicable to 1.21.1"),
             java.util.Map.entry("foamfix", "1.12.2 performance/memory patches; not applicable to 1.21.1"),
             java.util.Map.entry("phosphor-lighting", "1.12.2 lighting engine rewrite; 1.21.1 has its own"),
@@ -126,6 +134,13 @@ public final class LibraryBridges {
         return !"false".equalsIgnoreCase(readConfig(modsDir).getProperty("experimental.forge1201.softlink", "true").trim());
     }
 
+    private static volatile Set<String> lastModern = Set.of();
+
+    /** Modern mod ids of the mods folder seen by the last {@link #active} call, whatever the 1.20.1 setting. */
+    public static Set<String> seenModernIds() {
+        return lastModern;
+    }
+
     /** Modern mod ids of the mods folder seen by the last {@link #active} call. */
     public static Set<String> installedModernIds() {
         return installedModern;
@@ -155,6 +170,11 @@ public final class LibraryBridges {
         return other != null ? other : legacyId;
     }
 
+    /** Lower-case ids of the engine-only mods that are never loaded: a dependency on one of them counts as satisfied. */
+    public static Set<String> obsoleteIds() {
+        return OBSOLETE.keySet();
+    }
+
     /** Why a legacy jar is obsolete on 1.21.1 (all its mods are on the list) or switched off by the pack maker, or null. */
     public static String obsoleteReason(LegacyJar jar) {
         if (!jar.hasMods()) return null;
@@ -182,13 +202,17 @@ public final class LibraryBridges {
     public static List<Bridge> active(Path modsDir) {
         Set<String> modern = modernModIds(modsDir);
         installedModern = forge1201On(modsDir) ? modern : Set.of();
+        lastModern = modern;
         Properties config = readConfig(modsDir);
         applyUserConfig(config);
         String forced = System.getProperty("legacyconnector.bridges", "").toLowerCase(Locale.ROOT);
         List<Bridge> out = new ArrayList<>();
         boolean realBaubles = hasJarNamed(modsDir, "baubles");
-        // only a 1.7.10 CodeChickenLib counts: packs like ATM10 ship the modern one (CodeChickenLib-1.21.1-...), which legacy code cannot use
+        // only a legacy CodeChickenLib counts: packs like ATM10 ship the modern one (CodeChickenLib-1.21.1-...), which legacy code cannot
+        // use. A 1.12.2 one counts too (CodeChickenLib-1.12.2-3.2.3.358-universal.jar): without it, mods built on the real library
+        // (a BakingVertexBuffer passed where a BufferBuilder is expected) linked against the synthesized stand-in and failed to verify
         boolean realCcl = hasLegacyJarNamed(modsDir, "codechickenlib") || hasJarNamed(modsDir.resolve("1.7.10"), "codechickenlib")
+                || hasJarNamed(modsDir.resolve("1.12.2"), "codechickenlib")
                 // 1.6.4 / 1.5.2: CodeChickenCore's DepLoader downloaded CodeChickenLib into mods/<minecraft version>/
                 || hasJarNamed(modsDir.resolve("1.6.4"), "codechickenlib") || hasJarNamed(modsDir.resolve("1.5.2"), "codechickenlib");
         for (Bridge b : KNOWN) {
@@ -206,12 +230,13 @@ public final class LibraryBridges {
         return out;
     }
 
-    /** True if a jar in the mods folder starts with {@code prefix} and names 1.7.10 (case-insensitive). */
+    /** True if a jar in the mods folder starts with {@code prefix} and names a legacy Minecraft version (case-insensitive). */
     private static boolean hasLegacyJarNamed(Path modsDir, String prefix) {
         if (!Files.isDirectory(modsDir)) return false;
         try (Stream<Path> files = Files.list(modsDir)) {
             return files.map(f -> f.getFileName().toString().toLowerCase(Locale.ROOT))
-                    .anyMatch(n -> n.startsWith(prefix) && n.contains("1.7.10") && n.endsWith(".jar"));
+                    .anyMatch(n -> n.startsWith(prefix) && (n.contains("1.7.10") || n.contains("1.12.2") || n.contains("1.6.4")
+                            || n.contains("1.5.2") || n.contains("1.4.7")) && n.endsWith(".jar"));
         } catch (IOException e) {
             return false;
         }
@@ -247,12 +272,14 @@ public final class LibraryBridges {
 
     static Set<String> modernModIds(Path modsDir) {
         Set<String> ids = new HashSet<>();
+        java.util.List<Path> nativeJars = new java.util.ArrayList<>();
         if (!Files.isDirectory(modsDir)) return ids;
         try (Stream<Path> files = Files.list(modsDir)) {
             for (Path p : files.filter(f -> f.toString().endsWith(".jar")).toList()) {
                 try (ZipFile zip = new ZipFile(p.toFile())) {
                     ZipEntry e = zip.getEntry("META-INF/neoforge.mods.toml");
                     if (e == null) continue;
+                    nativeJars.add(p);
                     try (InputStream in = zip.getInputStream(e)) {
                         Matcher m = MOD_ID.matcher(new String(in.readAllBytes(), StandardCharsets.UTF_8));
                         while (m.find()) ids.add(m.group(1));
@@ -264,6 +291,7 @@ public final class LibraryBridges {
         } catch (IOException ignored) {
             // no mods folder access
         }
+        org.kylepitcock.legacyconnector.loader.transform.NativeClasses1201.setJars(nativeJars);
         return ids;
     }
 

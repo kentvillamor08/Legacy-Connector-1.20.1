@@ -58,6 +58,10 @@ public final class LegacyJarInspector {
         return DERIVATIVES.remove(path);
     }
 
+    /** Classes a ModLoader mod's class chain ends in: BaseMod, ModLoaderMP's BaseModMp (an SMP mod) and Forge 3.x's NetworkMod (which extends BaseMod). */
+    private static final java.util.Set<String> MODLOADER_BASES = java.util.Set.of("BaseMod", "net/minecraft/src/BaseMod", "BaseModMp", "net/minecraft/src/BaseModMp",
+            "forge/NetworkMod", "net/minecraft/src/forge/NetworkMod");
+
     /**
      * Returns null if the jar is not a legacy Forge mod (e.g. it is a modern NeoForge/Forge/Fabric mod).
      */
@@ -73,13 +77,23 @@ public final class LegacyJarInspector {
             }
             // A Forge 1.20.1 mod speaks mods.toml: it is ours (in-place remap), unlike a NeoForge or later Forge mod.
             // (multi-loader jars also carry fabric.mod.json / quilt.mod.json: those are dropped when the jar is translated)
-            if (zip.getEntry("META-INF/neoforge.mods.toml") == null && zip.getEntry("META-INF/mods.toml") != null) {
+            // (not when mods.toml is a template left in a 1.7.x jar: mcmod.info, no minecraft dependency, cpw.mods.fml code and no net.minecraftforge.fml code)
+            boolean templateToml = strayTemplateModsToml(zip);
+            // A 1.20.x jar that ships neoforge.mods.toml too (Terralith: both files, the same text, Minecraft pinned to [1.20,1.21)) is no NeoForge 1.21.1 mod:
+            // NeoForge would reject it or ignore its data. Decided by the Minecraft range the neoforge file declares.
+            if (!templateToml && zip.getEntry("META-INF/neoforge.mods.toml") != null) {
+                LegacyJar pinned = inspectPinnedNeoForgeToml(zip, path);
+                if (pinned != null) return pinned;
+            }
+            if (zip.getEntry("META-INF/neoforge.mods.toml") == null && zip.getEntry("META-INF/mods.toml") != null && !templateToml) {
                 LegacyJar forge = inspectForge1201(zip, path);
                 if (forge != null) return forge;
             }
             // A 1.12.2 library jar built from a 1.15 template keeps a stray mods.toml next to its FML coremod plugin (Obfuscate 0.4.2 for 1.12.2).
-            boolean strayModsToml = zip.getEntry("META-INF/neoforge.mods.toml") == null && zip.getEntry("fabric.mod.json") == null
-                    && zip.getEntry("META-INF/MANIFEST.MF") != null && legacyCorePlugin(zip);
+            boolean strayModsToml = (zip.getEntry("META-INF/neoforge.mods.toml") == null && zip.getEntry("fabric.mod.json") == null
+                    && zip.getEntry("META-INF/MANIFEST.MF") != null && legacyCorePlugin(zip)) || templateToml;
+            // A pre-1.13 jar with a decoy mods.toml (made so that a modern Forge stops with a message; it pins minecraft to [1.4.7] and ships an mcmod.info).
+            strayModsToml |= decoyModsToml(zip);
             // Anything that already speaks a modern metadata format is not ours to touch.
             if (zip.getEntry("META-INF/neoforge.mods.toml") != null
                     || (zip.getEntry("META-INF/mods.toml") != null && !strayModsToml)
@@ -96,6 +110,9 @@ public final class LegacyJarInspector {
             Markers markers = new Markers();
             List<LegacyModDecl> found = new ArrayList<>();
             List<String> modLoaderMods = new ArrayList<>();
+            Map<String, String> supers = new java.util.HashMap<>();
+            List<String> modClassCandidates = new ArrayList<>();
+            String mc125Evidence = null;
 
             Enumeration<? extends ZipEntry> entries = zip.entries();
             while (entries.hasMoreElements()) {
@@ -120,9 +137,10 @@ public final class LegacyJarInspector {
                 // ModLoader (1.4.x): a mod is a class extending BaseMod (net.minecraft.src.BaseMod, or the bare name in a reobfuscated jar)
                 String superName = reader.getSuperName();
                 // (ModLoader only loads classes named mod_*; the others of a jar, such as MCreator's per-element mcreator_*, are helpers the mod_ class constructs)
-                if (("BaseMod".equals(superName) || "net/minecraft/src/BaseMod".equals(superName))
-                        && reader.getClassName().substring(reader.getClassName().lastIndexOf('/') + 1).startsWith("mod_")) {
-                    modLoaderMods.add(reader.getClassName());
+                // (also through classes of the jar and the API bases that extend BaseMod: BaseModMp, Forge's NetworkMod, a mod's own SdkBaseModMp / Ic2 platform class)
+                supers.put(reader.getClassName(), superName);
+                if (reader.getClassName().substring(reader.getClassName().lastIndexOf('/') + 1).startsWith("mod_") && reader.getClassName().indexOf('$') < 0) {
+                    modClassCandidates.add(reader.getClassName());
                 }
 
                 if (pool.contains(MOD_1_7) || pool.contains(MOD_1_12)) {
@@ -138,11 +156,63 @@ public final class LegacyJarInspector {
                 }
             }
 
-            if (found.isEmpty() && refs17 == 0 && refs112 == 0 && infoById.isEmpty() && jar.coreModClass == null) {
+            for (String cand : modClassCandidates) {
+                String c = cand;
+                for (int hop = 0; hop < 12 && c != null; hop++) {
+                    if (MODLOADER_BASES.contains(c)) {
+                        modLoaderMods.add(cand);
+                        break;
+                    }
+                    c = supers.get(c);
+                }
+            }
+            // 1.2.5 mods that touch FML's optional classes (IC2, Forestry, PortalGun, LogisticsPipes) have cpw/mods/fml references but no @Mod: ModLoader mods of 1.2.5 all the same
+            boolean bare = found.isEmpty() && refs17 == 0 && refs112 == 0 && infoById.isEmpty() && jar.coreModClass == null;
+            boolean fml125Candidate = !bare && found.isEmpty() && refs112 == 0 && jar.coreModClass == null && !modLoaderMods.isEmpty();
+            if (bare || fml125Candidate) {
                 // no FML at all: a Beta 1.7.3 ModLoader / Forge 1.0 mod (in mods/b1.7.3/, or linking to b1.7.3's names), else a 1.4.7
                 // ModLoader mod (BaseMod subclasses: decided below) or not a legacy mod; mods/1.4.7/ never holds b1.7.3 jars
                 Path folder = path.getParent() == null ? null : path.getParent().getFileName();
-                if (folder == null || !folder.toString().equals("1.4.7")) {
+                // Minecraft 1.2.5 (names of its own obfuscation): recognised and reported as not supported yet, never hosted as 1.4.7 or Beta
+                String ev125 = null;
+                if (folder != null && folder.toString().equals(Mc125Jars.FOLDER)) {
+                    ev125 = "in mods/" + Mc125Jars.FOLDER;
+                } else if (folder == null || !folder.toString().equals(BetaJars.FOLDER)) {
+                    // by content, also in mods/1.4.7/ (an older build sorted 1.2.5 jars into that folder: the folder says nothing about the Minecraft version)
+                    ev125 = Mc125Jars.detect(zip, () -> NotchFingerprint.scores(zip));
+                }
+                if (ev125 == null && Mc125Jars.enabled() && !modLoaderMods.isEmpty() && !(folder != null && folder.toString().equals(BetaJars.FOLDER))) {
+                    String near = Mc125Jars.detectNear(zip, () -> NotchFingerprint.scores(zip));
+                    if (near != null) {
+                        Mc125Jars.record(path, near);
+                        return null;
+                    }
+                }
+                if ((ev125 != null || (Mc125Jars.enabled() && !modLoaderMods.isEmpty())) && Mc125Jars.isMcpNamedServerBuild(zip)) {
+                    // a CraftBukkit / MCPC build of a 1.2.x mod: MCP names, neither 1.2.5's obfuscation nor a version this layer has names for
+                    Mc125Jars.record(path, "CraftBukkit/MCPC build (game classes named by MCP names in net/minecraft/server); use the client or server build of the mod");
+                    return null;
+                }
+                if (ev125 != null) {
+                    String apiDist = Mc125Jars.apiDistribution(zip);
+                    if (apiDist != null) {
+                        Mc125Jars.recordApiDistribution(path, apiDist + " for Minecraft 1.2.5");
+                        return null;
+                    }
+                    if (!Mc125Jars.enabled()) {
+                        Mc125Jars.record(path, ev125);
+                        return null;
+                    }
+                    if (!org.kylepitcock.legacyconnector.loader.transform.Notch125To147.available()) {
+                        Mc125Jars.record(path, ev125 + "; this build has no 1.2.5 name table");
+                        return null;
+                    }
+                    // opted in: hosted through the 1.4.7 chain after Notch125To147 (decided with the version below)
+                    mc125Evidence = ev125;
+                    Mc125Jars.markHosting();
+                    jar.notchSide = Mc125Jars.sideOf(zip);
+                }
+                if (bare && mc125Evidence == null && (folder == null || !folder.toString().equals("1.4.7"))) {
                     LegacyJar beta = BetaJars.inspect(zip, path, jar);
                     if (beta != null) return beta;
                 }
@@ -175,8 +245,62 @@ public final class LegacyJarInspector {
             }
 
             if (unique.isEmpty() && jar.coreModClass != null && !jar.coreModClass.isBlank()) jar.containerModIds.addAll(infoById.keySet());
+            if (jar.coreModClass != null && !jar.coreModClass.isBlank()) addCoreModContainerIds(zip, jar);
+            if (mc125Evidence != null) {
+                // Minecraft 1.2.5 (opt-in): hosted as 1.4.7 once Notch125To147 has renamed it
+                jar.version = LegacyVersion.V1_4_7;
+                jar.sourceVersion = LegacyVersion.V1_2_5;
+                jar.versionEvidence = "Minecraft 1.2.5, " + mc125Evidence + " (hosted as 1.4.7 after the 1.2.5 to 1.4.7 name rewrite; " + (jar.notchSide == 's' ? "server" : "client") + " names)";
+                return jar.mods.isEmpty() ? null : jar;
+            }
             jar.version = chooseVersion(zip, jar, infoById, refs17, refs112, markers, !modLoaderMods.isEmpty());
             return jar.version == null ? null : jar;
+        }
+    }
+
+    /**
+     * A coremod jar may ship a {@code DummyModContainer} that FML registers as a mod of its own (OpenModsLib's {@code OpenModsCore}); other
+     * mods then depend on it with {@code required-after}. Its id is the string stored into {@code ModMetadata.modId} by the container's
+     * constructor, and counts as installed since the container lives in this jar.
+     */
+    private static void addCoreModContainerIds(ZipFile zip, LegacyJar jar) {
+        try {
+            Enumeration<? extends ZipEntry> entries = zip.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry e = entries.nextElement();
+                if (!e.getName().endsWith(".class") || e.getName().indexOf('$') >= 0) continue;
+                byte[] bytes;
+                try (InputStream in = zip.getInputStream(e)) {
+                    bytes = in.readAllBytes();
+                }
+                ClassReader cr = new ClassReader(bytes);
+                String sup = cr.getSuperName();
+                if (sup == null || !sup.endsWith("/DummyModContainer")) continue;
+                cr.accept(new ClassVisitor(Opcodes.ASM9) {
+                    @Override
+                    public org.objectweb.asm.MethodVisitor visitMethod(int access, String name, String desc, String sig, String[] ex) {
+                        if (!name.equals("<init>")) return null;
+                        return new org.objectweb.asm.MethodVisitor(Opcodes.ASM9) {
+                            String lastString;
+
+                            @Override
+                            public void visitLdcInsn(Object value) {
+                                lastString = value instanceof String str ? str : null;
+                            }
+
+                            @Override
+                            public void visitFieldInsn(int opcode, String owner, String fname, String fdesc) {
+                                if (opcode == Opcodes.PUTFIELD && fname.equals("modId") && lastString != null && !jar.containerModIds.contains(lastString)) {
+                                    jar.containerModIds.add(lastString);
+                                }
+                                lastString = null;
+                            }
+                        };
+                    }
+                }, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+            }
+        } catch (IOException | RuntimeException ignored) {
+            // best effort: the dependency check only loses an id
         }
     }
 
@@ -187,8 +311,52 @@ public final class LegacyJarInspector {
      * Returns null for everything else (Forge mods of other versions, NeoForge 1.20.1 mods, Kotlin/Scala loaders).
      */
     static LegacyJar inspectForge1201(ZipFile zip, Path path) throws IOException {
+        return inspectForge1201(zip, path, "META-INF/mods.toml");
+    }
+
+    /** Native jars (neoforge.mods.toml) whose Minecraft range excludes 1.21.1 and that were left alone: listed in the report (the game rejects them). */
+    private static final java.util.List<String> PINNED_NATIVE = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    static java.util.List<String> pinnedNativeNotes() {
+        return PINNED_NATIVE;
+    }
+
+    /**
+     * A jar with {@code neoforge.mods.toml} whose {@code minecraft} dependency excludes 1.21.1 but names 1.20.x. With a {@code mods.toml} next to it, or without
+     * any code (a data pack), it is a 1.20.1 jar for this layer; a NeoForge 1.20.2+ jar with code is left to the game and reported. A range that accepts
+     * 1.21.1, or none, is a native mod.
+     */
+    private static LegacyJar inspectPinnedNeoForgeToml(ZipFile zip, Path path) throws IOException {
+        String neo;
+        try (InputStream in = zip.getInputStream(zip.getEntry("META-INF/neoforge.mods.toml"))) {
+            neo = new String(in.readAllBytes(), StandardCharsets.UTF_8).replaceAll("(?s)'''.*?'''|\"\"\".*?\"\"\"", "\"\"");
+        }
+        String mc = dependencyRange(neo, "minecraft");
+        if (mc == null || mc.isBlank() || rangeContains(mc, new int[] {1, 21, 1})) return null;
+        if (!rangeContains(mc, new int[] {1, 20, 1}) && !rangeContains(mc, new int[] {1, 20})) return null;
+        boolean forgeToml = zip.getEntry("META-INF/mods.toml") != null;
+        boolean hasCode = false;
+        for (var en = zip.entries(); en.hasMoreElements(); ) {
+            String n = en.nextElement().getName();
+            if (n.endsWith(".class") && !n.startsWith("META-INF/")) {
+                hasCode = true;
+                break;
+            }
+        }
+        if (forgeToml || !hasCode) {
+            LegacyJar jar = inspectForge1201(zip, path, forgeToml ? "META-INF/mods.toml" : "META-INF/neoforge.mods.toml");
+            if (jar != null) {
+                jar.versionEvidence = "neoforge.mods.toml pins minecraft " + mc + (forgeToml ? " (mods.toml present too)" : " (data pack)") + "; " + jar.versionEvidence;
+                return jar;
+            }
+        }
+        PINNED_NATIVE.add(path.getFileName() + ": neoforge.mods.toml pins minecraft " + mc + ", which excludes 1.21.1; NeoForge rejects or ignores it");
+        return null;
+    }
+
+    static LegacyJar inspectForge1201(ZipFile zip, Path path, String tomlEntry) throws IOException {
         String text;
-        try (InputStream in = zip.getInputStream(zip.getEntry("META-INF/mods.toml"))) {
+        try (InputStream in = zip.getInputStream(zip.getEntry(tomlEntry))) {
             text = new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
         // multi-line strings (descriptions) can contain anything, including lines that look like tables or keys
@@ -688,7 +856,56 @@ public final class LegacyJarInspector {
             jar.versionEvidence = "mixed FML references, majority wins";
             return refs17 >= refs112 ? LegacyVersion.V1_7_10 : LegacyVersion.V1_12_2;
         }
+        if (modLoader && refs17 == 0 && refs112 == 0) {
+            // a bare ModLoader mod (BaseMod subclass, no FML, no mcmod.info) that choose147 rejected because another version's notch names fit better
+            double[] fp = NotchFingerprint.scores(zip);
+            if (fp != null && fp[1] >= 0.6 && fp[1] > fp[2] + 0.15) {
+                jar.versionEvidence = "ModLoader mod, obfuscated names match Minecraft 1.5.2 (" + Math.round(fp[1] * 100) + "% of the member references)";
+                return LegacyVersion.V1_5_2;
+            }
+            if (fp != null && fp[2] >= 0.6 && fp[2] > fp[1] + 0.15) {
+                jar.versionEvidence = "ModLoader mod, obfuscated names match Minecraft 1.6.4 (" + Math.round(fp[2] * 100) + "% of the member references)";
+                return LegacyVersion.V1_6_4;
+            }
+        }
         return null;
+    }
+
+    private static final java.util.regex.Pattern DECOY_MC_RANGE = java.util.regex.Pattern.compile(
+            "modId\\s*=\\s*[\"']minecraft[\"'][^\\[]*?versionRange\\s*=\\s*[\"']\\[1\\.([0-9]|1[0-2])(\\.[0-9]+)?\\][\"']", java.util.regex.Pattern.DOTALL);
+
+    /** A mods.toml that only exists to stop modern loaders: it pins {@code minecraft} to one pre-1.13 version and the jar also carries an {@code mcmod.info}. */
+    static boolean decoyModsToml(ZipFile zip) throws IOException {
+        ZipEntry toml = zip.getEntry("META-INF/mods.toml");
+        if (toml == null || zip.getEntry("mcmod.info") == null || zip.getEntry("META-INF/neoforge.mods.toml") != null || zip.getEntry("fabric.mod.json") != null) return false;
+        try (InputStream in = zip.getInputStream(toml)) {
+            return DECOY_MC_RANGE.matcher(new String(in.readAllBytes(), StandardCharsets.UTF_8)).find();
+        }
+    }
+
+    /**
+     * A 1.7.x jar built from a 1.14+ template keeps the example {@code mods.toml} next to its {@code mcmod.info} (Overloaded Armor Bar 1.7.10): no
+     * {@code minecraft} dependency in it, FML code of the 1.7 package and none of the 1.12+ one. Such a jar is a legacy mod, not a Forge 1.20.1 one.
+     */
+    static boolean strayTemplateModsToml(ZipFile zip) throws IOException {
+        ZipEntry toml = zip.getEntry("META-INF/mods.toml");
+        if (toml == null || zip.getEntry("mcmod.info") == null || zip.getEntry("META-INF/neoforge.mods.toml") != null || zip.getEntry("fabric.mod.json") != null) return false;
+        try (InputStream in = zip.getInputStream(toml)) {
+            if (dependencyRange(new String(in.readAllBytes(), StandardCharsets.UTF_8), "minecraft") != null) return false;
+        }
+        boolean fml17 = false;
+        byte[] a = "cpw/mods/fml/".getBytes(StandardCharsets.ISO_8859_1), b = "net/minecraftforge/fml/".getBytes(StandardCharsets.ISO_8859_1);
+        for (var en = zip.entries(); en.hasMoreElements(); ) {
+            ZipEntry e = en.nextElement();
+            if (e.isDirectory() || !e.getName().endsWith(".class")) continue;
+            String text;
+            try (InputStream in = zip.getInputStream(e)) {
+                text = new String(in.readAllBytes(), StandardCharsets.ISO_8859_1);
+            }
+            if (text.contains(new String(b, StandardCharsets.ISO_8859_1))) return false;
+            if (text.contains(new String(a, StandardCharsets.ISO_8859_1))) fml17 = true;
+        }
+        return fml17;
     }
 
     private static boolean legacyCorePlugin(ZipFile zip) throws IOException {
@@ -758,7 +975,7 @@ public final class LegacyJarInspector {
                 if (list == null || !list.isJsonArray()) continue;
                 for (JsonElement id : list.getAsJsonArray()) {
                     if (!id.isJsonPrimitive()) continue;
-                    extra.append(key.equals("dependants") ? ";before:" : ";after:").append(id.getAsString());
+                    extra.append(key.equals("dependants") ? ";before:" : key.equals("requiredMods") ? ";required-after:" : ";after:").append(id.getAsString());
                 }
             }
             if (!extra.isEmpty()) decl.dependencies = (decl.dependencies == null ? "" : decl.dependencies) + extra;
@@ -785,8 +1002,11 @@ public final class LegacyJarInspector {
                 return new org.objectweb.asm.FieldVisitor(Opcodes.ASM9) {
                     @Override
                     public AnnotationVisitor visitAnnotation(String descriptor, boolean visible) {
+                        // FML 2.x's ModLoader-era mods (Minecraft 1.2.x) wrote the annotation as the default-package class SidedProxy of net.minecraft.src
                         if (descriptor.equals("Lcpw/mods/fml/common/SidedProxy;")
-                                || descriptor.equals("Lnet/minecraftforge/fml/common/SidedProxy;")) {
+                                || descriptor.equals("Lnet/minecraftforge/fml/common/SidedProxy;")
+                                || descriptor.equals("LSidedProxy;")
+                                || descriptor.equals("Lnet/minecraft/src/SidedProxy;")) {
                             jar.sidedProxies.add(new String[] {className.replace('/', '.'), name});
                         }
                         return null;

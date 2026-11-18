@@ -19,10 +19,12 @@ public final class AnimalsB173 {
     public record Info(ContentB173.Registration registration,EntityType<LegacyB173Animal> type){}
     private static final Map<Class<?>,Info> BY_CLASS=new LinkedHashMap<>();
     private static final Map<EntityType<?>,Info> BY_TYPE=new LinkedHashMap<>();
-    private static final Set<String> SUPPORTED=Set.of("tick","tickMovement","tickLiving","interact","damage","attack","getTargetInRange","getPathfindingFavor","applyKnockback","onLanding","markDead","writeNbt","readNbt","canSpawn","canDespawn","getStandingEyeHeight","getPassengerRidingHeight","updatePassengerPosition","getRandomSound","getHurtSound","getDeathSound","onKilledBy","getLimitPerChunk","travel","move","checkWaterCollisions","isOnLadder","isMovementBlocked","isImmobile","isPushable","onCollision","isCollidable","dropItems","getDroppedItemId","getSoundVolume","getTexture","getShadowRadius","canBreatheInWater","processServerEntityStatus","onPlayerInteraction","initDataTracker","canSee","pathingUpdate","resetAttack","getHeldItem","isInsideWall","fall","applyDamage","setOnFire","scheduleVelocityUpdate","getEyeHeight","setPositionAndAngles","setPositionAndAnglesAvoidEntities","setRotation","onStruckByLightning","animateSpawn");
+    private static final Set<String> SUPPORTED=Set.of("isTouchingLava","isSubmergedInWater","setFuseSpeed","getFuseSpeed","isCharged","getScale","lookAt","onKilledOther","tick","tickMovement","tickLiving","interact","damage","attack","getTargetInRange","getPathfindingFavor","applyKnockback","onLanding","markDead","writeNbt","readNbt","canSpawn","canDespawn","getStandingEyeHeight","getPassengerRidingHeight","updatePassengerPosition","getRandomSound","getHurtSound","getDeathSound","onKilledBy","getLimitPerChunk","travel","move","checkWaterCollisions","isOnLadder","isMovementBlocked","isImmobile","isPushable","onCollision","isCollidable","dropItems","getDroppedItemId","getSoundVolume","getTexture","getShadowRadius","canBreatheInWater","processServerEntityStatus","onPlayerInteraction","initDataTracker","canSee","pathingUpdate","resetAttack","getHeldItem","isInsideWall","fall","applyDamage","setOnFire","scheduleVelocityUpdate","getEyeHeight","setPosition","setPositionAndAngles","setPositionAndAnglesAvoidEntities","setRotation","onStruckByLightning","animateSpawn","jump","getMinAmbientSoundDelay","bypassesSteppingEffects","toNbtList","tickRiding","addVelocity","shouldRender");
     private AnimalsB173(){}
     private static boolean api(Class<?> c){return c.getName().startsWith("legacyconnector.")||c.getName().startsWith("legacyconnector_synth.");}
-    public static boolean supports(Class<?> c){return LivingEntity.class.isAssignableFrom(c)&&!MobsB173.cowFamily(c)&&unsupportedBehaviour(c)==null;}
+    public static boolean supports(Class<?> c){return LivingEntity.class.isAssignableFrom(c)&&!nativeCow(c)&&unsupportedBehaviour(c)==null;}
+    /** A cow family member the native cow host can carry (no override its native AI would ignore); every other one runs its original AI here. */
+    private static boolean nativeCow(Class<?> c){return MobsB173.cowFamily(c)&&MobsB173.unsupportedBehaviour(c)==null;}
     public static String unsupportedBehaviour(Class<?> type){
         return unsupportedBehaviour(type,Set.of());
     }
@@ -86,7 +88,7 @@ public final class AnimalsB173 {
     }
     public static void registerAll(){
         for(var r:ContentB173.entities()){
-            Class<?> c=r.type();if(BY_CLASS.containsKey(c)||!LivingEntity.class.isAssignableFrom(c)||MobsB173.cowFamily(c))continue;
+            Class<?> c=r.type();if(BY_CLASS.containsKey(c)||!LivingEntity.class.isAssignableFrom(c)||nativeCow(c))continue;
             if(r.mod()==null||LegacyLifecycle.isFailed(r.mod().modernId))continue;
             String why=unsupportedBehaviour(c);if(why!=null){LOG.warn("Beta animal {} not hosted: {}",c.getName(),why);continue;}
             why=AnimalRenderStateB173.unsupportedReason(c);
@@ -95,7 +97,7 @@ public final class AnimalsB173 {
             String path=r.name().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9/._-]+","_");if(path.isEmpty())path="entity_"+r.id();
             var id=ResourceLocation.fromNamespaceAndPath(r.mod().modernId,path);if(BuiltInRegistries.ENTITY_TYPE.containsKey(id))continue;
             EntityType<LegacyB173Animal> type=EntityType.Builder.<LegacyB173Animal>of((t,l)->new LegacyB173Animal(t,l,null),category(c)).sized(.6F,1.8F).clientTrackingRange(10).build(id.toString());
-            LegacyRegistrar.register(BuiltInRegistries.ENTITY_TYPE,id,type);Info info=new Info(r,type);BY_CLASS.put(c,info);BY_TYPE.put(type,info);
+            LegacyRegistrar.register(BuiltInRegistries.ENTITY_TYPE,id,type);BridgeB173.entityName(id,r.name());Info info=new Info(r,type);BY_CLASS.put(c,info);BY_TYPE.put(type,info);
             LOG.info("Hosted original Beta animal {} as {} with its original renderer",c.getName(),id);
         }
     }
@@ -110,7 +112,7 @@ public final class AnimalsB173 {
     public static boolean spawn(Level level,LivingEntity legacy){
         Info i=BY_CLASS.get(legacy.getClass());if(level.isClientSide||i==null||legacy.mcc$modern!=null)return false;
         LegacyB173Animal host=null;boolean added=false;
-        try{host=new LegacyB173Animal(i.type(),level,legacy);added=level.addFreshEntity(host);if(added)EntityViewsB173.spawned(host,legacy);return added;}
+        try{host=new LegacyB173Animal(i.type(),level,legacy);added=legacyconnector.vb1_7_3.net.minecraft.world.World.mcc$wrap(level).mcc$spawnNative(host);if(added)EntityViewsB173.spawned(host,legacy);return added;}
         catch(RuntimeException|LinkageError e){LOG.error("Cannot spawn original Beta animal {}",legacy.getClass().getName(),e);return false;}
         finally{if(!added){legacy.mcc$modern=null;if(host!=null)host.discard();}}
     }

@@ -27,6 +27,20 @@ public final class LibraryCompat {
         return profile;
     }
 
+    /**
+     * authlib 1.5's {@code joinServer(profile, accessToken, serverId)}: authlib 6 takes the profile id. The checked
+     * {@code AuthenticationException} of both versions is the same type, so it propagates as it did.
+     */
+    public static void joinServer(MinecraftSessionService service, GameProfile profile, String authenticationToken, String serverId) throws Exception {
+        service.joinServer(profile.getId(), authenticationToken, serverId);
+    }
+
+    /** authlib 1.5's {@code hasJoinedServer(user, serverId, address)}: authlib 6 takes the name and returns a result record (null when not joined). */
+    public static GameProfile hasJoinedServer(MinecraftSessionService service, GameProfile user, String serverId, java.net.InetAddress address) throws Exception {
+        var result = service.hasJoinedServer(user.getName(), serverId, address);
+        return result == null ? null : result.profile();
+    }
+
     // ASM 5 never validated descriptors (anything unknown parsed as a method type); ASM 9 throws. Legacy mods that
     // pass class names or field descriptors to these keep working with the old leniency.
     public static org.objectweb.asm.Type asmGetType(String descriptor) {
@@ -134,6 +148,30 @@ public final class LibraryCompat {
     /** fastutil 7's {@code ByteArrayList.rem(Object)}: removes the first occurrence (fastutil 8 spells it remove(Object)). */
     public static boolean rem(it.unimi.dsi.fastutil.bytes.ByteArrayList list, Object o) {
         return list.remove(o);
+    }
+
+    /** ASM 5's {@code RemappingMethodAdapter(access, desc, mv, remapper)}: ASM 9's {@code MethodRemapper} takes just the visitor and the remapper. */
+    public static org.objectweb.asm.commons.MethodRemapper methodRemapper(int access, String desc, org.objectweb.asm.MethodVisitor mv,
+            org.objectweb.asm.commons.Remapper remapper) {
+        return new org.objectweb.asm.commons.MethodRemapper(mv, remapper);
+    }
+
+    /** The same with an explicit ASM api level first (5-argument form). */
+    public static org.objectweb.asm.commons.MethodRemapper methodRemapper(int api, int access, String desc, org.objectweb.asm.MethodVisitor mv,
+            org.objectweb.asm.commons.Remapper remapper) {
+        return new org.objectweb.asm.commons.MethodRemapper(mv, remapper);
+    }
+
+    /** jopt-simple 4's {@code internal.Strings.join(List, String)} (5 takes an Iterable). */
+    public static String joinStrings(java.util.List<String> pieces, String separator) {
+        return String.join(separator, pieces);
+    }
+
+    /** Netty 4.0's {@code ChannelPromiseAggregator.add(ChannelPromise...)}, which returned the aggregator (4.1 inherits the generic one and returns the base type). */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static io.netty.channel.ChannelPromiseAggregator add(io.netty.channel.ChannelPromiseAggregator aggregator, io.netty.channel.ChannelPromise[] promises) {
+        aggregator.add((io.netty.util.concurrent.Promise[]) promises);
+        return aggregator;
     }
 
     /** jopt-simple 4's {@code acceptsAll(Collection, String)} (5 takes a List). */

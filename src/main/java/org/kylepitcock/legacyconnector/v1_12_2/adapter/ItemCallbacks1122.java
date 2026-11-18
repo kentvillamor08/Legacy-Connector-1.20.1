@@ -40,6 +40,7 @@ final class ItemCallbacks1122 {
     final boolean useDuration;
     final boolean useAction;
     final boolean hit;
+    final boolean swing;
     final boolean destroyed;
     final boolean destroySpeed;
     final boolean interact;
@@ -72,6 +73,7 @@ final class ItemCallbacks1122 {
         useDuration = o("getMaxItemUseDuration", S);
         useAction = o("getItemUseAction", S);
         hit = o("hitEntity", S, L, L);
+        swing = o("onEntitySwing", L, S);
         destroyed = o("onBlockDestroyed", S, W, IBlockState.class, B, L);
         destroySpeed = o("getDestroySpeed", S, IBlockState.class);
         interact = o("itemInteractionForEntity", S, P, L, H);
@@ -182,6 +184,9 @@ final class ItemCallbacks1122 {
         if (p == null) return InteractionResult.PASS;
         var pos = context.getClickedPos();
         var hit = context.getClickLocation();
+        var heldBefore = context.getPlayer().getItemInHand(context.getHand());
+        int countBefore = heldBefore.getCount();
+        var snapshot = heldBefore.copy();
         try {
             return result(call.call(p, world(level), BlockPos.mcc$of(pos), hand(context.getHand()), EnumFacing.mcc$of(context.getClickedFace()),
                     (float) (hit.x - pos.getX()), (float) (hit.y - pos.getY()), (float) (hit.z - pos.getZ())), level);
@@ -193,6 +198,15 @@ final class ItemCallbacks1122 {
             // the held stack the legacy code shrank or replaced goes back to its slot now: left until the end of the tick, it was applied to
             // whatever stack the slot held by then (two placements in one tick lost the second one's held item)
             org.kylepitcock.legacyconnector.v1_12_2.entity.LiveStacks1122.flushAll();
+            // 1.12's PlayerInteractionManager gave a creative player's stack its old size back after the item's onItemUse (ItemBlock shrinks it itself)
+            var player = context.getPlayer();
+            if (player != null && player.isCreative()) {
+                var now = player.getItemInHand(context.getHand());
+                if (!snapshot.isEmpty() && now.getCount() < countBefore) {
+                    if (now.getItem() == snapshot.getItem()) now.setCount(countBefore);
+                    else if (now.isEmpty()) player.setItemInHand(context.getHand(), snapshot);
+                }
+            }
         }
     }
 
@@ -275,6 +289,18 @@ final class ItemCallbacks1122 {
         }
     }
 
+    /** Forge's {@code Item.onEntitySwing(entity, stack)}: a living entity swings the item (left click in the air, attack); true cancels the swing. */
+    boolean entitySwing(net.minecraft.world.item.ItemStack stack, LivingEntity entity) {
+        try {
+            return legacy.onEntitySwing(living(entity), Stacks1122.view(stack));
+        } catch (RuntimeException | LinkageError e) {
+            failure("onEntitySwing", e);
+            return false;
+        } finally {
+            Stacks1122.flushViews();
+        }
+    }
+
     boolean hit(net.minecraft.world.item.ItemStack stack, LivingEntity target, LivingEntity attacker) {
         try {
             return legacy.hitEntity(Stacks1122.view(stack), living(target), living(attacker));
@@ -305,6 +331,22 @@ final class ItemCallbacks1122 {
             return legacy.getDestroySpeed(Stacks1122.view(stack), legacyState);
         } catch (RuntimeException | LinkageError e) {
             return fallback;
+        }
+    }
+
+    /**
+     * Whether the item harvests the block (gets its drops), as Forge 1.12's ForgeHooks.canHarvestBlock decided: the item's own
+     * canHarvestBlock (vanilla pickaxes, mods' overrides), else a declared tool class that mines the block at a high enough level.
+     */
+    boolean correctTool(net.minecraft.world.item.ItemStack stack, net.minecraft.world.level.block.state.BlockState state) {
+        IBlockState legacyState = StatesBridge1122.toLegacy(state);
+        if (legacyState == null) return false;
+        try {
+            var view = Stacks1122.view(stack);
+            return legacy.canHarvestBlock(legacyState, view)
+                    || legacyconnector.v1_12_2.net.minecraft.item.ItemTool.mcc$canHarvest(legacy, view, legacyState);
+        } catch (RuntimeException | LinkageError e) {
+            return false;
         }
     }
 

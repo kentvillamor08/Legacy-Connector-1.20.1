@@ -35,6 +35,15 @@ final class IsbrhQuads {
             String sheet = capture.sheet(q);
             if (sheet != null) {
                 if (UNMAPPED.add("sheet:" + sheet)) org.slf4j.LoggerFactory.getLogger("LegacyConnector/ISBRH").info("A renderer draws quads with the 1.4.7 sheet {}", sheet);
+                var whole = wholeSprite(sheet);
+                if (whole != null) {
+                    // a model texture (non-square image): UVs are fractions of the whole image, which the pack added to the atlas as one sprite
+                    quadSprite = whole;
+                    tile = new float[] {0, 0, whole.getU0(), whole.getU1(), whole.getV0(), whole.getV1(), 1};
+                    sheet = null;
+                }
+            }
+            if (sheet != null) {
                 double cu = 0, cv = 0;
                 for (int i = 0; i < 4; i++) {
                     cu += capture.get(q, i, 3) / 4;
@@ -80,7 +89,8 @@ final class IsbrhQuads {
                 data[o + 3] = coloured ? abgr(unshade == 1.0F ? argb : scale((int) argb, unshade)) : 0xFFFFFFFF;
                 float tu = (float) capture.get(q, i, 3), tv = (float) capture.get(q, i, 4);
                 if (tile != null) {
-                    float lu = Mth.clamp(tu * 16.0F - tile[0], 0.0F, 1.0F), lv = Mth.clamp(tv * 16.0F - tile[1], 0.0F, 1.0F);
+                    boolean whole = tile.length > 6; // a model texture: the UVs are fractions of the whole sprite
+                    float lu = Mth.clamp(whole ? tu : tu * 16.0F - tile[0], 0.0F, 1.0F), lv = Mth.clamp(whole ? tv : tv * 16.0F - tile[1], 0.0F, 1.0F);
                     tu = tile[2] + lu * (tile[3] - tile[2]);
                     tv = tile[4] + lv * (tile[5] - tile[4]);
                 }
@@ -100,6 +110,21 @@ final class IsbrhQuads {
         }
         return out;
     }
+
+    /** The block atlas sprite of a non-square 1.4.7 image (a model texture) the pack added whole; null for a tile sheet. */
+    static TextureAtlasSprite wholeSprite(String sheet) {
+        net.minecraft.resources.ResourceLocation rl = WHOLE.computeIfAbsent(sheet, s -> net.minecraft.resources.ResourceLocation.parse(
+                "legacy147:blocks/whole/" + org.kylepitcock.legacyconnector.v1_6_4.bridge.SpriteSheets147.slug(org.kylepitcock.legacyconnector.v1_6_4.bridge.SpriteSheets147.normalize(s))));
+        try {
+            var atlas = net.minecraft.client.Minecraft.getInstance().getModelManager().getAtlas(net.minecraft.client.renderer.texture.TextureAtlas.LOCATION_BLOCKS);
+            TextureAtlasSprite found = atlas.getSprite(rl);
+            return found.contents().name().equals(net.minecraft.client.renderer.texture.MissingTextureAtlasSprite.getLocation()) ? null : found;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static final java.util.concurrent.ConcurrentHashMap<String, net.minecraft.resources.ResourceLocation> WHOLE = new java.util.concurrent.ConcurrentHashMap<>();
 
     /** The block atlas sprite of tile {@code index} of a 1.4.7 sprite sheet; null when the pack has no such tile. */
     static TextureAtlasSprite sheetTile(String sheet, int index) {
@@ -141,6 +166,9 @@ final class IsbrhQuads {
     private static int emissive(RenderContext.Capture capture, int q, int i) {
         if (capture.get(q, i, 8) == 0.0D) return 0;
         int light = (int) capture.get(q, i, 6);
+        // the world's own light passed through (getMixedBrightnessForBlock beside a torch) is no glow: the modern pipeline lights the
+        // face itself, smoothly; baked, it flattened the faces of blocks near light into patches
+        if (org.kylepitcock.legacyconnector.v1_7_10.bridge.BlockAccessView.mcc$isWorldLight(light)) return 0;
         if ((light & 0xFFFF) >= 0xF0) return light;
         // a glow short of full (Thaumcraft's ore shards: setBrightness(max(world, 160))): its block light only, never the sky's (the time of day is the world's)
         return (light & 0xFFFF) >= 0xA0 ? light & 0xFFFF : 0;

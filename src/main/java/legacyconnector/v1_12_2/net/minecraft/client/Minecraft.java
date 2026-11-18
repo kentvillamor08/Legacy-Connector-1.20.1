@@ -120,6 +120,11 @@ public class Minecraft implements legacyconnector.v1_12_2.net.minecraft.util.ITh
     // ------------------------------------------------------------------ screens and focus
 
     /** Shows a legacy screen in a modern one (null closes the screen). */
+    /** Opens the pause menu. */
+    public void displayInGameMenu() {
+        net.minecraft.client.Minecraft.getInstance().pauseGame(false);
+    }
+
     public void displayGuiScreen(GuiScreen screen) {
         org.kylepitcock.legacyconnector.v1_12_2.client.ClientGui1122.display(screen);
     }
@@ -565,6 +570,16 @@ public class Minecraft implements legacyconnector.v1_12_2.net.minecraft.util.ITh
     /** The ticks the last frame advanced. */
     public float getTickLength() {
         return client() ? org.kylepitcock.legacyconnector.v1_12_2.client.Minecraft1122.tickLength() : 1.0F;
+    }
+
+    /** Whether the game runs on a 64-bit Java. */
+    public static boolean isJava64bit() {
+        String[] keys = {"sun.arch.data.model", "com.ibm.vm.bitmode", "os.arch"};
+        for (String key : keys) {
+            String value = System.getProperty(key);
+            if (value != null && value.contains("64")) return true;
+        }
+        return false;
     }
 
     public String getVersion() {

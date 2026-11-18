@@ -19,56 +19,14 @@ import org.slf4j.LoggerFactory;
  * {@code config/<mod class>.cfg} before the mod is constructed; missing keys get the field's default and the file is written back.
  * Values outside {@code min..max} keep the default, as ModLoader did.
  */
-final class MLPropsB173 {
+public final class MLPropsB173 {
     private static final Logger LOG = LoggerFactory.getLogger("LegacyConnector/b1.7.3");
 
     private MLPropsB173() {}
 
     static void load(Class<?> modClass, Path configDir) {
-        Path file = configDir.resolve(modClass.getSimpleName() + ".cfg");
-        Properties props = new Properties();
-        if (Files.isRegularFile(file)) {
-            try (Reader r = Files.newBufferedReader(file, StandardCharsets.ISO_8859_1)) {
-                props.load(r);
-            } catch (IOException e) {
-                LOG.warn("Cannot read {}: {}", file, e.toString());
-            }
-        }
-        StringBuilder comments = new StringBuilder();
-        boolean changed = false;
-        for (Field f : modClass.getDeclaredFields()) {
-            MLProp prop = f.getAnnotation(MLProp.class);
-            if (prop == null || !Modifier.isStatic(f.getModifiers())) continue;
-            try {
-                f.setAccessible(true);
-                String key = prop.name().isEmpty() ? f.getName() : prop.name();
-                Object current = f.get(null);
-                String raw = props.getProperty(key);
-                if (raw == null) {
-                    if (current != null) {
-                        props.setProperty(key, current.toString());
-                        changed = true;
-                    }
-                } else {
-                    Object value = parse(f.getType(), raw.trim());
-                    if (value != null && inRange(value, prop)) f.set(null, value);
-                    else LOG.warn("{} in {}: {} is not a valid value, keeping {}", key, file.getFileName(), raw, current);
-                }
-                if (!prop.info().isEmpty()) comments.append(key).append(" - ").append(prop.info()).append('\n');
-            } catch (ReflectiveOperationException | RuntimeException e) {
-                LOG.warn("Cannot apply the MLProp {} of {}: {}", f.getName(), modClass.getSimpleName(), e.toString());
-            }
-        }
-        if (changed) {
-            try {
-                Files.createDirectories(configDir);
-                try (Writer w = Files.newBufferedWriter(file, StandardCharsets.ISO_8859_1)) {
-                    props.store(w, comments.length() == 0 ? null : comments.toString().trim());
-                }
-            } catch (IOException e) {
-                LOG.warn("Cannot write {}: {}", file, e.toString());
-            }
-        }
+        earlyDir = configDir;
+        org.kylepitcock.legacyconnector.core.MLPropConfig.load(modClass, configDir, MLProp.class);
     }
 
     /**
@@ -104,7 +62,7 @@ final class MLPropsB173 {
                     continue;
                 }
                 int free = -1;
-                for (int id = blocks.length - 1; id > 0 && free < 0; id--) {
+                for (int id = Math.min(blocks.length, legacyconnector.vb1_7_3.net.minecraft.block.Block.BETA_LIMIT) - 1; id > 0 && free < 0; id--) {
                     if (blocks[id] == null && !claimed.containsKey(id) && !usedBy(fields, id)) free = id;
                 }
                 if (free < 0) continue;
@@ -155,7 +113,7 @@ final class MLPropsB173 {
         if (target == null) return false;
         MLProp prop = target.getAnnotation(MLProp.class);
         var blocks = legacyconnector.vb1_7_3.net.minecraft.block.Block.BLOCKS;
-        for (int id = blocks.length - 1; id > 0; id--) {
+        for (int id = Math.min(blocks.length, legacyconnector.vb1_7_3.net.minecraft.block.Block.BETA_LIMIT) - 1; id > 0; id--) {
             if (blocks[id] != null || own.contains(id) || id < prop.min() || id > prop.max()) continue;
             try {
                 target.setInt(null, id);
@@ -187,25 +145,36 @@ final class MLPropsB173 {
         }
     }
 
-    private static Object parse(Class<?> type, String raw) {
+    private static volatile Path earlyDir;
+    private static final java.util.Map<Class<?>, Properties> EARLY = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** A static initializer's assignment of an {@code @MLProp} field (the loader routes it here): the config file's value when it has a valid one. */
+    public static int early(int value, Class<?> owner, String field) {
+        return earlyValue(owner, field, int.class) instanceof Integer configured ? configured : value;
+    }
+    public static boolean early(boolean value, Class<?> owner, String field) {
+        return earlyValue(owner, field, boolean.class) instanceof Boolean configured ? configured : value;
+    }
+    public static String early(String value, Class<?> owner, String field) {
+        return earlyValue(owner, field, String.class) instanceof String configured ? configured : value;
+    }
+    private static Object earlyValue(Class<?> owner, String fieldName, Class<?> type) {
         try {
-            if (type == int.class || type == Integer.class) return Integer.parseInt(raw);
-            if (type == boolean.class || type == Boolean.class) return Boolean.parseBoolean(raw);
-            if (type == float.class || type == Float.class) return Float.parseFloat(raw);
-            if (type == double.class || type == Double.class) return Double.parseDouble(raw);
-            if (type == long.class || type == Long.class) return Long.parseLong(raw);
-            if (type == short.class || type == Short.class) return Short.parseShort(raw);
-            if (type == byte.class || type == Byte.class) return Byte.parseByte(raw);
-            if (type == String.class) return raw;
-        } catch (NumberFormatException e) {
+            MLProp prop = owner.getDeclaredField(fieldName).getAnnotation(MLProp.class);
+            if (prop == null) return null;
+            Properties props = EARLY.computeIfAbsent(owner, c -> {
+                Properties p = new Properties();
+                Path dir = earlyDir != null ? earlyDir : net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get();
+                Path file = dir.resolve(c.getSimpleName() + ".cfg");
+                if (Files.isRegularFile(file)) try (Reader r = Files.newBufferedReader(file, StandardCharsets.ISO_8859_1)) { p.load(r); } catch (IOException ignored) {}
+                return p;
+            });
+            String raw = props.getProperty(prop.name().isEmpty() ? fieldName : prop.name());
+            if (raw == null) return null;
+            Object value = org.kylepitcock.legacyconnector.core.MLPropConfig.parse(type, raw.trim());
+            return value != null && org.kylepitcock.legacyconnector.core.MLPropConfig.inRange(value, prop) ? value : null;
+        } catch (ReflectiveOperationException | RuntimeException e) {
             return null;
         }
-        return null;
-    }
-
-    private static boolean inRange(Object value, MLProp prop) {
-        if (!(value instanceof Number n)) return true;
-        double d = n.doubleValue();
-        return d >= prop.min() && d <= prop.max();
     }
 }

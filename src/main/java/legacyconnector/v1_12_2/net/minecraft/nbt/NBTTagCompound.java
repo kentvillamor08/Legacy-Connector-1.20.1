@@ -9,6 +9,7 @@ import net.minecraft.nbt.IntArrayTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 
+@com.google.gson.annotations.JsonAdapter(org.kylepitcock.legacyconnector.v1_12_2.bridge.LegacyGson1122.CompoundAdapter.class)
 public class NBTTagCompound extends NBTBase {
     private final CompoundTag mcc$tag;
     /** Child views handed out, so repeated getCompoundTag(key) calls return the same object like in 1.12.2. */
@@ -30,6 +31,14 @@ public class NBTTagCompound extends NBTBase {
     @Override
     public byte getId() {
         return 10;
+    }
+
+    /** 1.12's private tag reader: the payload of a tag of type {@code id} (the key and depth are only for the legacy size tracker). */
+    public static NBTBase readNBT(byte id, String key, java.io.DataInput input, int depth, NBTSizeTracker sizeTracker) throws java.io.IOException {
+        if (id == 0) return new NBTTagEnd();
+        var type = net.minecraft.nbt.TagTypes.getType(id);
+        var accounter = sizeTracker == null ? net.minecraft.nbt.NbtAccounter.unlimitedHeap() : sizeTracker.mcc$accounter();
+        return NBTBase.mcc$wrap(type.load(input, accounter), null);
     }
 
     public Set<String> getKeySet() {

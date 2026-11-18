@@ -149,6 +149,7 @@ public class ModelLoaderRegistry {
     /** Forgets loaded models (resources were reloaded). */
     public static void clearModelCache(legacyconnector.v1_12_2.net.minecraft.client.resources.IResourceManager manager) {
         CACHE.clear();
+        org.kylepitcock.legacyconnector.v1_12_2.client.OrphanVariants1122.clear();
     }
 
     /** Plain model locations mods asked for, to be baked by the game as standalone models. */
@@ -179,6 +180,40 @@ public class ModelLoaderRegistry {
             java.util.Set<ResourceLocation> out = new java.util.LinkedHashSet<>();
             String path = location.getPath();
             readTextures(location.getNamespace(), path.startsWith("models/") ? path : "models/" + path, out, 0);
+            return com.google.common.collect.ImmutableList.copyOf(out);
+        }
+
+        /**
+         * The models a json model depends on, as Forge's wrapper of a vanilla model listed them: the models of its item overrides, then its
+         * parent (not builtin/ ones). Mods walk these to find every texture an item can show (The Betweenlands registers its generated
+         * corrosion sprites for the textures of the override models).
+         */
+        @Override
+        public java.util.Collection<ResourceLocation> getDependencies() {
+            if (location == null || location instanceof ModelResourceLocation) return com.google.common.collect.ImmutableList.of();
+            String path = location.getPath();
+            if (!path.startsWith("models/")) path = "models/" + path;
+            java.util.Set<ResourceLocation> out = new java.util.LinkedHashSet<>();
+            try {
+                var resource = legacyconnector.v1_12_2.net.minecraft.client.Minecraft.getMinecraft().getResourceManager()
+                        .getResource(new ResourceLocation(location.getNamespace(), path.endsWith(".json") ? path : path + ".json"));
+                try (java.io.Reader reader = new java.io.InputStreamReader(resource.getInputStream(), java.nio.charset.StandardCharsets.UTF_8)) {
+                    var json = com.google.gson.JsonParser.parseReader(reader).getAsJsonObject();
+                    if (json.has("overrides") && json.get("overrides").isJsonArray()) {
+                        for (var o : json.getAsJsonArray("overrides")) {
+                            if (!o.isJsonObject() || !o.getAsJsonObject().has("model") || !o.getAsJsonObject().get("model").isJsonPrimitive()) continue;
+                            ResourceLocation dep = new ResourceLocation(o.getAsJsonObject().get("model").getAsString());
+                            if (!dep.equals(location)) out.add(dep);
+                        }
+                    }
+                    if (json.has("parent") && json.get("parent").isJsonPrimitive()) {
+                        String parent = json.get("parent").getAsString();
+                        if (!parent.startsWith("builtin/") && !parent.startsWith("minecraft:builtin/")) out.add(new ResourceLocation(parent));
+                    }
+                }
+            } catch (java.io.IOException | RuntimeException e) {
+                // a missing or unreadable model has no dependencies
+            }
             return com.google.common.collect.ImmutableList.copyOf(out);
         }
 
@@ -214,6 +249,12 @@ public class ModelLoaderRegistry {
             // a mod asking for a model in init (Dawn of Time bakes its custom models there): the game's model manager does not exist yet
             var mc = net.minecraft.client.Minecraft.getInstance();
             if (mc == null || mc.getModelManager() == null) return new LazyBaked(this::bakeNow);
+            // a texture getter of the mod's own (EnderIO's paint registry gives every texture of a wall model the paint block's sprite): the game's
+            // baked model has the textures of its json, so the json is baked again with the getter's sprites
+            if (location != null && !(location instanceof ModelResourceLocation) && bakedTextureGetter != null && !(bakedTextureGetter instanceof ModelLoader.DefaultTextureGetter)) {
+                IBakedModel own = org.kylepitcock.legacyconnector.v1_12_2.client.JsonBake1122.bake(location.mcc$modern(), bakedTextureGetter);
+                if (own != null) return own;
+            }
             return bakeNow();
         }
 
@@ -227,12 +268,19 @@ public class ModelLoaderRegistry {
                         if (found != null) return org.kylepitcock.legacyconnector.v1_12_2.client.Models1122.legacy(found);
                     }
                 }
-                return org.kylepitcock.legacyconnector.v1_12_2.client.Models1122.legacyModel(mrl);
+                var game = org.kylepitcock.legacyconnector.v1_12_2.client.Models1122.legacyModel(mrl);
+                if (game == org.kylepitcock.legacyconnector.v1_12_2.client.Models1122.legacy(org.kylepitcock.legacyconnector.v1_12_2.client.Models1122.missingModern())) {
+                    // no game model under that name: a blockstate file no block owns (Botania's special flowers), baked from the mod's own json
+                    var own = org.kylepitcock.legacyconnector.v1_12_2.client.OrphanVariants1122.bake(mrl);
+                    if (own != null) return own;
+                }
+                return game;
             }
             var key = net.minecraft.client.resources.model.ModelResourceLocation.standalone(location.mcc$modern());
             var baking = org.kylepitcock.legacyconnector.v1_12_2.client.CustomModels1122.baking();
             var modern = baking != null ? baking.get(key) : null;
             if (modern == null) modern = net.minecraft.client.Minecraft.getInstance().getModelManager().getModel(key);
+            if (modern == null) modern = org.kylepitcock.legacyconnector.v1_12_2.client.Models1122.missingModern();
             return org.kylepitcock.legacyconnector.v1_12_2.client.Models1122.legacy(modern);
         }
     }

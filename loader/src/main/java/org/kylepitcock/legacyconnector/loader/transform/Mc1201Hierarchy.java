@@ -31,6 +31,17 @@ public final class Mc1201Hierarchy {
     private static volatile Map<String, McClass> mc;
 
     private final Map<String, ClassNode> mod = new HashMap<>();
+    /**
+     * Classes of the other 1.20.1 jars of the mod set (names after the Forge renames; only the methods the migration tables name are kept, see
+     * {@code Forge1201Transformer.scan}). A mod class often extends a library class of another jar ({@code BaseItem}, {@code ItemBlockNBT}): without it the
+     * chain above such a class ends in "unknown" and calls through it ({@code super.appendHoverText(...)}) never reach the rules of Minecraft's classes.
+     */
+    private Map<String, org.kylepitcock.legacyconnector.loader.shim.ClassInfo> peers = Map.of();
+
+    public Mc1201Hierarchy peers(Map<String, org.kylepitcock.legacyconnector.loader.shim.ClassInfo> peers) {
+        this.peers = peers == null ? Map.of() : peers;
+        return this;
+    }
 
     /** Adds the classes of the jar being translated. */
     public Mc1201Hierarchy add(ClassNode node) {
@@ -76,7 +87,7 @@ public final class Mc1201Hierarchy {
     }
 
     /** Direct supertypes (super class first). */
-    List<String> supers(String name) {
+    public List<String> supers(String name) {
         List<String> out = new ArrayList<>(3);
         ClassNode n = mod.get(name);
         if (n != null) {
@@ -88,8 +99,38 @@ public final class Mc1201Hierarchy {
         if (c != null) {
             if (c.superName() != null) out.add(c.superName());
             out.addAll(List.of(c.interfaces()));
+            return out;
         }
+        var p = peers.get(name);
+        if (p != null) {
+            if (p.superName != null) out.add(p.superName);
+            out.addAll(p.interfaces);
+        }
+        String standIn = STAND_IN_SUPERS.get(name);
+        if (standIn != null) out.add(standIn);
         return out;
+    }
+
+    /**
+     * Stand-in classes of the migrate package that replace a Minecraft/NeoForge class under a new name, with the type whose call rules still apply to them
+     * (the quad baking consumer is a {@code VertexConsumer}: {@code vertex(...)}, {@code uv(...)}, {@code endVertex()} are rewritten through it).
+     */
+    private static final String MIG = "org/kylepitcock/legacyconnector/v1_20_1/migrate/";
+    private static final Map<String, String> STAND_IN_SUPERS = Map.ofEntries(
+            Map.entry(MIG + "LegacyQuadBakingVertexConsumer", "com/mojang/blaze3d/vertex/VertexConsumer"),
+            Map.entry(MIG + "LegacyQuadBakingVertexConsumer$Buffered", MIG + "LegacyQuadBakingVertexConsumer"),
+            Map.entry(MIG + "LegacyMeleeAttackGoal", "net/minecraft/world/entity/ai/goal/MeleeAttackGoal"),
+            // item and block stand-ins: calls on a mod subclass (this.isEdible()) must reach the rules of Item/Block
+            Map.entry(MIG + "LegacyBowlFoodItem", "net/minecraft/world/item/Item"),
+            Map.entry(MIG + "LegacyRecordItem", "net/minecraft/world/item/Item"),
+            Map.entry(MIG + "LegacyDyeableArmorItem", "net/minecraft/world/item/ArmorItem"),
+            Map.entry(MIG + "LegacyHorseArmorItem", "net/minecraft/world/item/AnimalArmorItem"),
+            Map.entry(MIG + "LegacyDyeableHorseArmorItem", MIG + "LegacyHorseArmorItem"),
+            Map.entry(MIG + "LegacyStemGrownBlock", "net/minecraft/world/level/block/Block"));
+
+    /** True for a class of the jar being translated, of another translated jar of the set, or of Minecraft/NeoForge. */
+    public boolean knows(String name) {
+        return mod.containsKey(name) || mc().containsKey(name) || peers.containsKey(name);
     }
 
     /** True when {@code name} is {@code ancestor} or inherits from it through any mix of mod and Minecraft classes. */
@@ -107,7 +148,7 @@ public final class Mc1201Hierarchy {
         if (name == null || !seen.add(name)) return 0;
         if (name.equals(ancestor)) return 1;
         if (name.equals("java/lang/Object")) return 0;
-        if (!mod.containsKey(name) && !mc().containsKey(name)) return name.startsWith("java/") ? 0 : 2;
+        if (!mod.containsKey(name) && !mc().containsKey(name) && !peers.containsKey(name)) return name.startsWith("java/") ? 0 : 2;
         int unknown = 0;
         for (String s : supers(name)) {
             int r = walk(s, ancestor, seen);
@@ -129,6 +170,17 @@ public final class Mc1201Hierarchy {
     private Origin declaredIn(String owner, String name, String desc, Set<String> seen) {
         if (owner == null || !seen.add(owner)) return Origin.MINECRAFT;
         ClassNode n = mod.get(owner);
+        if (n == null && peers.containsKey(owner) && !mc().containsKey(owner)) {
+            // a class of another jar of the set: its own translation keeps the methods it declares as written, so a declaration counts like the mod's own
+            if (peers.get(owner).methods.containsKey(name + desc)) return Origin.MOD;
+            Origin result = Origin.MINECRAFT;
+            for (String s : supers(owner)) {
+                Origin o = declaredIn(s, name, desc, seen);
+                if (o == Origin.MOD) return Origin.MOD;
+                if (o == Origin.UNKNOWN) result = Origin.UNKNOWN;
+            }
+            return result;
+        }
         if (n == null) return mc().containsKey(owner) ? Origin.MINECRAFT : (owner.startsWith("java/") ? Origin.MINECRAFT : Origin.UNKNOWN);
         for (MethodNode m : n.methods) if (m.name.equals(name) && m.desc.equals(desc) && (m.access & Opcodes.ACC_ABSTRACT) == 0) return Origin.MOD;
         Origin result = Origin.MINECRAFT;
@@ -155,7 +207,9 @@ public final class Mc1201Hierarchy {
 
     String commonSuperClass(String a, String b, java.util.function.Supplier<String> fallback) {
         if (a.equals(b)) return a;
-        boolean known = (mod.containsKey(a) || mc().containsKey(a)) && (mod.containsKey(b) || mc().containsKey(b));
+        // classes of the other jars of the set count as known: a mod method that merges two types of a library jar (ProjectRed: two CodeChickenLib
+        // Transformation subclasses at a branch target) otherwise got a frame typed Object, which the JVM rejects at the next call on it (VerifyError)
+        boolean known = (mod.containsKey(a) || mc().containsKey(a) || peers.containsKey(a)) && (mod.containsKey(b) || mc().containsKey(b) || peers.containsKey(b));
         if (!known) {
             try {
                 return fallback.get();
@@ -168,7 +222,7 @@ public final class Mc1201Hierarchy {
         String c = a;
         for (int guard = 0; guard < 64 && c != null; guard++) {
             ClassNode n = mod.get(c);
-            String sup = n != null ? n.superName : (mc().containsKey(c) ? mc().get(c).superName() : null);
+            String sup = n != null ? n.superName : (mc().containsKey(c) ? mc().get(c).superName() : (peers.containsKey(c) ? peers.get(c).superName : null));
             if (sup == null) break;
             if (isSubclassOf(b, sup)) return sup;
             c = sup;
@@ -185,7 +239,7 @@ public final class Mc1201Hierarchy {
 
     private void collect(String name, List<String> out, Set<String> seen) {
         if (name == null || !seen.add(name)) return;
-        if (!mod.containsKey(name)) out.add(name);
+        if (!mod.containsKey(name) && !peers.containsKey(name)) out.add(name);
         for (String s : supers(name)) collect(s, out, seen);
     }
 }

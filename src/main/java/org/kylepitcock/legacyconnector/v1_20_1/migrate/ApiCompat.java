@@ -101,9 +101,8 @@ public final class ApiCompat {
         return MiscCompat.writeItem(buf, stack);
     }
 
-    public static FriendlyByteBuf writeFluidStack(FriendlyByteBuf buf, FluidStack stack) {
+    public static void writeFluidStack(FriendlyByteBuf buf, FluidStack stack) {
         buf.writeNbt((Tag) stack.saveOptional(MigrateContext.provider()));
-        return buf;
     }
 
     public static FluidStack readFluidStack(FriendlyByteBuf buf) {
@@ -147,7 +146,27 @@ public final class ApiCompat {
 
     // ------------------------------------------------------------------ hooks that moved
 
+    /** Return value of a mod's {@code Item.getBurnTime(stack, type)} override: -1 meant "the vanilla value" in 1.20.1, 1.21.1 throws on it; take the furnace fuel data map's. */
+    public static int burnResult(int result, ItemStack stack, RecipeType<?> type) {
+        if (result >= 0) return result;
+        var fuel = stack.getItemHolder().getData(net.neoforged.neoforge.registries.datamaps.builtin.NeoForgeDataMaps.FURNACE_FUELS);
+        return fuel == null ? 0 : fuel.burnTime();
+    }
+
+    /**
+     * A mod's read of the private {@code Ingredient.itemStacks} cache (1.20.1 filled it by {@code getItems()}; "if null, call getItems(), then use the field"). In
+     * 1.21.1 a custom (NeoForge) ingredient answers {@code getItems()} without filling the field, so the read is null and the mod throws; take the answer itself.
+     */
+    public static ItemStack[] ingredientStacks(net.minecraft.world.item.crafting.Ingredient ingredient) {
+        return ingredient.getItems();
+    }
+
     public static int getBurnTime(ItemStack stack, RecipeType<?> type) {
+        // 1.20.1 items answered -1 for "the vanilla value"; 1.21.1 throws on a negative burn time: such an item takes the furnace fuel data map's value
+        if (!stack.isEmpty() && stack.getItem().getBurnTime(stack, type) < 0) {
+            var fuel = stack.getItemHolder().getData(net.neoforged.neoforge.registries.datamaps.builtin.NeoForgeDataMaps.FURNACE_FUELS);
+            return net.neoforged.neoforge.event.EventHooks.getItemBurnTime(stack, fuel == null ? 0 : fuel.burnTime(), type);
+        }
         return stack.getBurnTime(type);
     }
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Downloads the most downloaded Forge mods of one Minecraft version from Modrinth, as input for tools/compat/probe.py.
 
-usage: fetch_probe_mods.py <mc-version> <dest-dir> [--limit 200] [--no-deps] [--content] [--client-extra N]
+usage: fetch_probe_mods.py <mc-version> <dest-dir> [--slug name ...] [--limit 200] [--no-deps] [--content] [--client-extra N]
 
 --content keeps content mods only: no performance/optimization or library mods, and nothing client-only (a realistic corpus for
 the layer, whose job is content mods); --client-extra N then adds the N most downloaded client-side mods (UI/utility), minus optimization.
@@ -11,12 +11,22 @@ required dependency a download declares is fetched too (recursively, up to 3 lev
 Forge file for the Minecraft version): a mod that needs a library or parent mod would otherwise be reported as missing it,
 which is a failure of the corpus, not of the mod. The jars are only for the offline link probe: keep them in a gitignored or
 temporary folder, never commit or redistribute them. Jars already in the folder are skipped, so a re-run only fetches new ones.
+Projects listed in tools/compat/probe-exclude.txt are left out of the ranking download (not of --slug).
 """
 import argparse, hashlib, json, pathlib, sys, time, urllib.parse, urllib.request
 
 API = "https://api.modrinth.com/v2"
 UA = {"User-Agent": "kylepitcock/legacy-connector-linkprobe"}
 MAX_DEPTH = 3
+EXCLUDE_FILE = pathlib.Path(__file__).with_name("probe-exclude.txt")
+
+
+def excluded_slugs():
+    """Project slugs the ranking download leaves out (tools/compat/probe-exclude.txt); --slug still fetches them."""
+    if not EXCLUDE_FILE.exists():
+        return set()
+    lines = (line.split("#", 1)[0].strip().lower() for line in EXCLUDE_FILE.read_text(encoding="utf-8").splitlines())
+    return {line for line in lines if line}
 
 
 def get(url):
@@ -44,6 +54,7 @@ def main():
     ap.add_argument("--no-deps", action="store_true", help="do not download required dependencies")
     ap.add_argument("--content", action="store_true", help="content mods only: exclude optimization and library categories and client-only mods")
     ap.add_argument("--client-extra", type=int, default=0, help="with --content: also fetch this many client-side mods (never optimization)")
+    ap.add_argument("--slug", nargs="+", help="fetch these Modrinth projects (slugs) instead of the most downloaded ones")
     a = ap.parse_args()
     dest = pathlib.Path(a.dest)
     dest.mkdir(parents=True, exist_ok=True)
@@ -100,13 +111,25 @@ def main():
             offset += len(page)
         return found
 
-    if a.content:
+    if a.slug:
+        # named projects (a mod to reproduce an issue with): project slugs, not the download ranking
+        hits = []
+        for s in a.slug:
+            try:
+                p = json.loads(get(f"{API}/project/{s}")); p["project_id"] = p["id"]; hits.append(p)
+            except Exception as e:
+                print(f"{s}: {e}", file=sys.stderr)
+                stats["failed"] += 1
+    elif a.content:
         # "!=" facets: not optimization/library, and the mod does something on a server (content, not client-only UI)
         hits = search([["categories!=optimization"], ["categories!=library"], ["server_side!=unsupported"]], a.limit)
         if a.client_extra:
             hits += search([["categories!=optimization"], ["categories!=library"], ["server_side=unsupported"], ["client_side=required"]], a.client_extra)
     else:
         hits = search([], a.limit)
+    if not a.slug:
+        skip = excluded_slugs()
+        hits = [h for h in hits if h["slug"].lower() not in skip]
     for h in hits:
         try:
             seen_projects.add(h["project_id"])

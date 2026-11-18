@@ -7,7 +7,7 @@ import legacyconnector.vb1_7_3.net.minecraft.sound.BlockSoundGroup;
 import org.kylepitcock.legacyconnector.vb1_7_3.ContentB173;
 
 /**
- * Beta 1.7.3 {@code Block} (obfuscated {@code uu}; MCP {@code Block}). A block is a numeric id (0-255) in {@link #BLOCKS} plus 4 bits of
+ * Beta 1.7.3 {@code Block} (obfuscated {@code uu}; MCP {@code Block}). A block is a numeric id (0-255 in Beta, up to {@link #ID_LIMIT} here) in {@link #BLOCKS} plus 4 bits of
  * metadata in the world; its textures are sprite indices into terrain.png ({@link #textureId}, {@link #getTexture(int, int)}). The
  * constructor claims the id exactly as the original did (an occupied slot throws). Content of ModLoader mods becomes modern blocks after
  * the mods' lifecycle ({@code BridgeB173}); vanilla blocks are views of the modern ones ({@code VanillaB173}). Members that take worlds,
@@ -34,14 +34,19 @@ public class Block {
         }
     };
 
-    public static Block[] BLOCKS = new Block[256];
-    public static boolean[] BLOCKS_RANDOM_TICK = new boolean[256];
-    public static boolean[] BLOCKS_OPAQUE = new boolean[256];
-    public static boolean[] BLOCKS_WITH_ENTITY = new boolean[256];
-    public static int[] BLOCKS_LIGHT_OPACITY = new int[256];
-    public static boolean[] BLOCKS_ALLOW_VISION = new boolean[256];
-    public static int[] BLOCKS_LIGHT_LUMINANCE = new int[256];
-    public static boolean[] BLOCKS_IGNORE_META_UPDATE = new boolean[256];
+    /**
+     * Block ids run to 32000, as with the Block ID Expansion jar mod of the era (Beta itself stopped at 256): blocks and items share one id
+     * space, an id above 255 is a block when nothing else holds that item id. Ids below {@link #BETA_LIMIT} are the ones Beta had.
+     */
+    public static final int ID_LIMIT = 32000, BETA_LIMIT = 256;
+    public static Block[] BLOCKS = new Block[ID_LIMIT];
+    public static boolean[] BLOCKS_RANDOM_TICK = new boolean[ID_LIMIT];
+    public static boolean[] BLOCKS_OPAQUE = new boolean[ID_LIMIT];
+    public static boolean[] BLOCKS_WITH_ENTITY = new boolean[ID_LIMIT];
+    public static int[] BLOCKS_LIGHT_OPACITY = new int[ID_LIMIT];
+    public static boolean[] BLOCKS_ALLOW_VISION = new boolean[ID_LIMIT];
+    public static int[] BLOCKS_LIGHT_LUMINANCE = new int[ID_LIMIT];
+    public static boolean[] BLOCKS_IGNORE_META_UPDATE = new boolean[ID_LIMIT];
 
     public int textureId;
     public int id;
@@ -61,6 +66,14 @@ public class Block {
     }
     public legacyconnector.vb1_7_3.net.minecraft.util.math.Box getBoundingBox(legacyconnector.vb1_7_3.net.minecraft.world.World world,int x,int y,int z) {
         return legacyconnector.vb1_7_3.net.minecraft.util.math.Box.create(x+minX,y+minY,z+minZ,x+maxX,y+maxY,z+maxZ);
+    }
+    /** Selection bounds are independent of the collision box; subclasses may customize this callback. */
+    public legacyconnector.vb1_7_3.net.minecraft.util.hit.HitResult raycast(
+            legacyconnector.vb1_7_3.net.minecraft.world.World world,int x,int y,int z,
+            legacyconnector.vb1_7_3.net.minecraft.util.math.Vec3d from,legacyconnector.vb1_7_3.net.minecraft.util.math.Vec3d to) {
+        updateBoundingBox(world,x,y,z);
+        var hit=legacyconnector.vb1_7_3.net.minecraft.util.math.Box.create(x+minX,y+minY,z+minZ,x+maxX,y+maxY,z+maxZ).raycast(from,to);
+        return hit==null?null:new legacyconnector.vb1_7_3.net.minecraft.util.hit.HitResult(x,y,z,hit.side,hit.pos);
     }
     public void addIntersectingBoundingBox(legacyconnector.vb1_7_3.net.minecraft.world.World world,int x,int y,int z,
             legacyconnector.vb1_7_3.net.minecraft.util.math.Box mask,java.util.ArrayList<legacyconnector.vb1_7_3.net.minecraft.util.math.Box> boxes) {
@@ -128,7 +141,7 @@ public class Block {
     /** The vanilla base hook is empty; original block subclasses override it (for example priming explosives). */
     public void onDestroyedByExplosion(legacyconnector.vb1_7_3.net.minecraft.world.World world,int x,int y,int z){
         if(mcc$owner==null&&mcc$modern instanceof net.minecraft.world.level.block.TntBlock&&world.mcc$level()!=null&&!world.mcc$level().isClientSide){
-            var tnt=new net.minecraft.world.entity.item.PrimedTnt(world.mcc$level(),x+.5,y+.5,z+.5,null);tnt.setFuse(world.random.nextInt(tnt.getFuse()/4)+tnt.getFuse()/8);world.mcc$level().addFreshEntity(tnt);
+            var tnt=new net.minecraft.world.entity.item.PrimedTnt(world.mcc$level(),x+.5,y+.5,z+.5,null);tnt.setFuse(world.random.nextInt(tnt.getFuse()/4)+tnt.getFuse()/8);world.mcc$spawnNative(tnt);
         }
     }
 
@@ -184,6 +197,29 @@ public class Block {
         return hardness;
     }
 
+    /** Beta's {@code blockStrength(player)}: the part of the block one tick of mining breaks. */
+    public float getHardness(legacyconnector.vb1_7_3.net.minecraft.entity.player.PlayerEntity player) {
+        if (hardness < 0.0F) return 0.0F;
+        return !player.canHarvest(this) ? 1.0F / hardness / 100.0F : player.getBlockBreakingSpeed(this) / hardness / 30.0F;
+    }
+
+    /** Forge 1.0: the mining progress per tick at a position (the metadata-aware form with the block's metadata there). */
+    public float blockStrength(legacyconnector.vb1_7_3.net.minecraft.world.World world, legacyconnector.vb1_7_3.net.minecraft.entity.player.PlayerEntity player, int x, int y, int z) {
+        return blockStrength(player, world.getBlockMeta(x, y, z));
+    }
+
+    /** Forge 1.0: the mining progress per tick of this block with that metadata. */
+    public float blockStrength(legacyconnector.vb1_7_3.net.minecraft.entity.player.PlayerEntity player, int meta) {
+        float h = getHardness(meta);
+        if (h < 0.0F) return 0.0F;
+        return !canHarvestBlock(player, meta) ? 1.0F / h / 100.0F : player.getCurrentPlayerStrVsBlock(this, meta) / h / 30.0F;
+    }
+
+    /** Forge 1.0: whether the player's held item harvests this block with that metadata. */
+    public boolean canHarvestBlock(legacyconnector.vb1_7_3.net.minecraft.entity.player.PlayerEntity player, int meta) {
+        return player.canHarvest(this);
+    }
+
     protected Block setTickRandomly(boolean ticks) {
         BLOCKS_RANDOM_TICK[id] = ticks;
         return this;
@@ -207,6 +243,9 @@ public class Block {
     }
 
     public boolean isOpaque() {
+        // a view of a base-game block answers from its opacity (a snow layer is not an opaque cube; Millenaire's pathing walks through it)
+        if (mcc$owner == null && mcc$modern != null && !(mcc$modern instanceof org.kylepitcock.legacyconnector.vb1_7_3.LegacyB173Block)
+                && id > 0 && id < BLOCKS_OPAQUE.length && BLOCKS[id] == this) return BLOCKS_OPAQUE[id];
         return true;
     }
 
@@ -243,7 +282,8 @@ public class Block {
     }
 
     public boolean canEmitRedstonePower() {
-        return false;
+        return mcc$modern != null && !(mcc$modern instanceof org.kylepitcock.legacyconnector.vb1_7_3.LegacyB173Block)
+                && mcc$modern.defaultBlockState().isSignalSource();
     }
 
     public void setupRenderBoundingBox() {}
@@ -254,7 +294,11 @@ public class Block {
     }
 
     public String getTranslatedName() {
-        return ContentB173.translate(getTranslationKey() + ".name");
+        String key = getTranslationKey();
+        String name = key == null ? null : ContentB173.translate(key + ".name");
+        // a base-game view has no Beta language entry here: the native name is the one the player sees
+        if ((name == null || name.equals(key + ".name")) && mcc$modern != null) return mcc$modern.getName().getString();
+        return name == null ? "" : name;
     }
 
     public String getTranslationKey() {
@@ -292,7 +336,9 @@ public class Block {
     public void neighborUpdate(legacyconnector.vb1_7_3.net.minecraft.world.World world, int x, int y, int z, int neighborId) {}
 
     /** MCP {@code updateTick}: scheduled and random ticks. */
-    public void onTick(legacyconnector.vb1_7_3.net.minecraft.world.World world, int x, int y, int z, Random random) {}
+    public void onTick(legacyconnector.vb1_7_3.net.minecraft.world.World world, int x, int y, int z, Random random) {
+        if(mcc$owner==null&&(id==8||id==10))world.mcc$scheduleVanillaFluidTick(x,y,z,id);
+    }
 
     /** MCP {@code randomDisplayTick}: client particles. */
     public void randomDisplayTick(legacyconnector.vb1_7_3.net.minecraft.world.World world, int x, int y, int z, Random random) {}
@@ -328,9 +374,12 @@ public class Block {
     /** MCP {@code playBlock}: note blocks, pistons. */
     public void onBlockAction(legacyconnector.vb1_7_3.net.minecraft.world.World world, int x, int y, int z, int a, int b) {}
 
-    /** MCP {@code harvestBlock}: the drops are the modern block's ({@code getDroppedItemId/Count/Meta}). */
+    /** Original superclass harvest baseline, including subclasses that delegate their ordinary-tool branch here. */
     public void afterBreak(legacyconnector.vb1_7_3.net.minecraft.world.World world, legacyconnector.vb1_7_3.net.minecraft.entity.player.PlayerEntity player,
-            int x, int y, int z, int meta) {}
+            int x, int y, int z, int meta) {
+        player.increaseStat(legacyconnector.vb1_7_3.net.minecraft.stat.Stats.MINE_BLOCK[id],1);
+        dropStacks(world,x,y,z,meta);
+    }
 
     /** MCP {@code canPlaceBlockAt}. */
     public boolean canPlaceAt(legacyconnector.vb1_7_3.net.minecraft.world.World world, int x, int y, int z) {
@@ -343,14 +392,42 @@ public class Block {
         return canPlaceAt(world, x, y, z);
     }
 
+    /** MCP {@code canBlockStay}; despite the mapped name, this is a survival check, not a growth tick. */
+    public boolean canGrow(legacyconnector.vb1_7_3.net.minecraft.world.World world, int x, int y, int z) {
+        return true;
+    }
+
+    /** MCP {@code shouldSideBeRendered}; coordinates identify the neighbour on the queried face. */
+    public boolean isSideVisible(legacyconnector.vb1_7_3.net.minecraft.world.BlockView view, int x, int y, int z, int side) {
+        if (side == 0 && minY > 0 || side == 1 && maxY < 1 || side == 2 && minZ > 0
+                || side == 3 && maxZ < 1 || side == 4 && minX > 0 || side == 5 && maxX < 1) return true;
+        return !view.method_1783(x, y, z);
+    }
+
     /** MCP {@code isPoweringTo}: weak power towards {@code side}. */
     public boolean isEmittingRedstonePowerInDirection(legacyconnector.vb1_7_3.net.minecraft.world.BlockView view, int x, int y, int z, int side) {
-        return false;
+        return vanillaSignal(view, x, y, z, side, false);
     }
 
     /** MCP {@code isIndirectlyPoweringTo}: strong power towards {@code side}. */
     public boolean canTransferPowerInDirection(legacyconnector.vb1_7_3.net.minecraft.world.World world, int x, int y, int z, int side) {
-        return false;
+        return vanillaSignal(world, x, y, z, side, true);
+    }
+
+    /**
+     * A vanilla block (lever, button, torch, dust, repeater) answers a mod's power query (RedPower asks {@code Block.blocksList[id].isPoweringTo})
+     * with the native block's signal there; Beta's {@code side} is the direction the native signal query names.
+     */
+    private boolean vanillaSignal(legacyconnector.vb1_7_3.net.minecraft.world.BlockView view, int x, int y, int z, int side, boolean strong) {
+        if (mcc$owner != null || mcc$modern == null || mcc$modern instanceof org.kylepitcock.legacyconnector.vb1_7_3.LegacyB173Block
+                || side < 0 || side > 5 || !(view instanceof legacyconnector.vb1_7_3.net.minecraft.world.World world)) return false;
+        var access = world.mcc$access();
+        if (access == null) return false;
+        var pos = new net.minecraft.core.BlockPos(x, y, z);
+        var state = access.getBlockState(pos);
+        if (!state.isSignalSource()) return false;
+        var direction = net.minecraft.core.Direction.from3DDataValue(side);
+        return (strong ? state.getDirectSignal(access, pos, direction) : state.getSignal(access, pos, direction)) > 0;
     }
 
     /** MCP {@code setBlockBoundsBasedOnState}. */
@@ -380,6 +457,16 @@ public class Block {
     /** MCP {@code dropBlockAsItemWithChance}. */
     public void dropStacks(legacyconnector.vb1_7_3.net.minecraft.world.World world, int x, int y, int z, int meta, float chance) {
         if (world.isRemote) return;
+        // A vanilla block served to original code carries no drop logic of its own: its drops are the native block's (seeds from grass,
+        // sticks from a dead bush), as Beta's were for the same block.
+        if (mcc$owner == null && mcc$modern != null && world.mcc$level() instanceof net.minecraft.server.level.ServerLevel level) {
+            var pos = new net.minecraft.core.BlockPos(x, y, z);
+            var state = level.getBlockState(pos);
+            if (state.getBlock() == mcc$modern) {
+                net.minecraft.world.level.block.Block.dropResources(state, level, pos);
+                return;
+            }
+        }
         int count = getDroppedItemCount(world.random);
         for (int i = 0; i < count; i++) {
             if (world.random.nextFloat() > chance) continue;

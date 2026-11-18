@@ -38,7 +38,7 @@ import org.objectweb.asm.tree.ClassNode;
  */
 public final class LegacyJarTransformer {
     /** Bump whenever the output of this class changes, to invalidate caches. */
-    public static final int TRANSFORMER_VERSION = 38;
+    public static final int TRANSFORMER_VERSION = 251;
     /** Names the legacy coremod plugin class of a translated jar. */
     public static final String COREMOD_RESOURCE = "META-INF/legacyconnector-coremod.txt";
 
@@ -64,6 +64,25 @@ public final class LegacyJarTransformer {
     private CrossVersionPackages crossVersion = CrossVersionPackages.NONE;
 
     /** Packages that jars of several legacy versions define; each version links to its own copy. */
+    private ModernLibraries modernLibraries = ModernLibraries.NONE;
+
+    /** Modern mods whose ids legacy mods may list as required dependencies (see {@link ModernLibraries}). */
+    public LegacyJarTransformer modernLibraries(ModernLibraries libs) {
+        this.modernLibraries = libs;
+        return this;
+    }
+
+    /** Lower-case ids of the required dependencies ({@code required-after:...}) of the mods of {@code jar}. */
+    private static java.util.Set<String> requiredIds(LegacyJar jar) {
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        for (LegacyModDecl mod : jar.mods) {
+            for (var dep : org.kylepitcock.legacyconnector.loader.LegacyDependencies.parse(mod.dependencies)) {
+                if (dep.required()) ids.add(org.kylepitcock.legacyconnector.loader.LibraryBridges.alias(dep.id()).toLowerCase(java.util.Locale.ROOT));
+            }
+        }
+        return ids;
+    }
+
     public LegacyJarTransformer crossVersion(CrossVersionPackages crossVersion) {
         this.crossVersion = crossVersion;
         return this;
@@ -101,9 +120,22 @@ public final class LegacyJarTransformer {
 
     private Contents readPatched(LegacyJar jar) throws IOException {
         Contents c = read(jar);
-        if (patcher != null) c.classes.replaceAll((name, bytes) -> patcher.patch(jar, name, bytes));
+        if (patcher != null) {
+            c.classes.replaceAll((name, bytes) -> patcher.patch(jar, name, bytes));
+            // what coremods added to Minecraft's classes (interfaces and their accessors) becomes mixins on the shim classes, translated with the jar
+            CoremodAdditionMixins.addTo(jar, c.classes, shim);
+        }
         // Beta 1.7.3 jars are obfuscated: named first, then relocated like the other families
-        if (jar.version == LegacyVersion.VB1_7_3) c.notes.addAll(BetaDeobfuscator.apply(jar, c.classes));
+        if (jar.version == LegacyVersion.VB1_7_3) c.notes.addAll(BetaDeobfuscator.apply(jar, c.classes,shim));
+        // Minecraft 1.2.5 jars (opt-in) are renamed to 1.4.7's obfuscation first and are 1.4.7 jars from here on
+        if (jar.sourceVersion == LegacyVersion.V1_2_5) {
+            if (!jar.droppedClasses.isEmpty()) {
+                int before = c.classes.size();
+                c.classes.keySet().removeAll(jar.droppedClasses);
+                c.notes.add("Left out " + (before - c.classes.size()) + " class(es) another jar of the set owns (the mod that owns a package wins, see Mc125Builds)");
+            }
+            c.notes.addAll(Notch125To147.apply(jar, c.classes));
+        }
         return c;
     }
 
@@ -127,6 +159,8 @@ public final class LegacyJarTransformer {
         public int softLinked;
         /** The stand-ins, one entry per symbol: {@code class owner}, {@code method owner.name(desc)}, {@code field owner.name:desc} (internal names). */
         public final List<String> softSymbols = new ArrayList<>();
+        /** The part of {@link #softSymbols} that mixin handler bodies refer to (same format). */
+        public final List<String> softMixinSymbols = new ArrayList<>();
     }
 
     /** Raw contents of a legacy jar. */
@@ -173,7 +207,33 @@ public final class LegacyJarTransformer {
                 }
             }
         }
+        if (jar.version == LegacyVersion.VB1_7_3) stripInstallRoot(classes, other);
         return new Contents(classes, other, manifest, new ArrayList<>());
+    }
+
+    /**
+     * Beta mod archives keep the files that were copied into minecraft.jar under one folder ({@code jar/mod_X.class}, {@code jar/moon/earth.png}).
+     * The folder is the install root, read from where each class sits against its own package name; the mod asks for its resources
+     * ({@code /moon/earth.png}) as if the root were the jar's root, so the files below it move there.
+     */
+    private static void stripInstallRoot(Map<String, byte[]> classes, Map<String, byte[]> other) {
+        String root = null;
+        for (var c : classes.entrySet()) {
+            String internal;
+            try { internal = new org.objectweb.asm.ClassReader(c.getValue()).getClassName(); }
+            catch (RuntimeException e) { return; }
+            String key = c.getKey();
+            if (key.equals(internal)) return; // a class at its package's own path: the jar root is the install root
+            if (!key.endsWith("/" + internal)) return;
+            String found = key.substring(0, key.length() - internal.length());
+            if (root == null) root = found; else if (!root.equals(found)) return;
+        }
+        if (root == null || root.isEmpty()) return;
+        for (var entry : List.copyOf(other.entrySet())) {
+            if (!entry.getKey().startsWith(root)) continue;
+            other.remove(entry.getKey());
+            other.putIfAbsent(entry.getKey().substring(root.length()), entry.getValue());
+        }
     }
 
     /**
@@ -188,8 +248,8 @@ public final class LegacyJarTransformer {
                 // Instructions are needed to see a class calling an inherited method under its SRG name while declaring the readable one
                 // (Twilight Forest's Naga: getMaximumHomeDistance() { return func_110174_bM(); } would recurse once renamed); only classes
                 // that mention an SRG method name can do that.
-                boolean srgCalls = new String(data, java.nio.charset.StandardCharsets.ISO_8859_1).contains("func_");
-                new ClassReader(data).accept(n, (srgCalls ? 0 : ClassReader.SKIP_CODE) | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+                // (and a notch-named class: its inherited calls collide with its own declarations without any func_ name, The Lion King's quiver)
+                new ClassReader(data).accept(n, ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
                 remapper.preventCollisions(n);
             } catch (RuntimeException ignored) {
                 // unreadable classes are reported later
@@ -228,8 +288,10 @@ public final class LegacyJarTransformer {
         }
     }
 
-    private int relocateBundled(LegacyJar jar, Map<String, byte[]> classes, LegacyRemapper remapper) {
+    int relocateBundled(LegacyJar jar, Map<String, byte[]> classes, LegacyRemapper remapper) {
         String privateRoot = "legacyconnector_extra/" + (jar.hasMods() ? jar.mods.get(0).modernId() : LegacyModDecl.toModernId(stripJar(jar.fileName()))) + "/";
+        boolean bundlesBetaTwl = jar.version == LegacyVersion.VB1_7_3
+                && classes.keySet().stream().anyMatch(name -> name.startsWith("de/matthiasmann/twl/"));
         int dropped = 0;
         // Forge 1.12.2 shipped typesafe config and akka; the runtime bundles them. A mod that overrides a class or two of them (OpenComputers
         // patches one in com.typesafe.config.impl) would split the package with that module: its few classes go, a full shaded copy stays.
@@ -252,13 +314,22 @@ public final class LegacyJarTransformer {
                 dropped++;
                 continue;
             }
+            if (bundlesBetaTwl && name.startsWith("de/matthiasmann/twl/")) {
+                // Beta GuiAPI routes TWL references to the shared synth namespace. Keep that same name for
+                // bundled definitions, but mark their packages as supplied by this translated jar so the
+                // shared synth jar does not export a second copy of those JPMS packages.
+                String synthName = jar.version.synthPrefix()
+                        + org.kylepitcock.legacyconnector.loader.mapping.ForwardRenames.flat(jar.version, name);
+                remapper.provideSynthClass(name, synthName);
+                continue;
+            }
             if (name.indexOf('/') < 0) {
                 // The default package (ModLoader's mod_* classes, reobfuscated helpers): a named module cannot hold classes outside a package.
                 remapper.override(name, privateRoot + "root/" + name);
                 for (LegacyModDecl mod : jar.mods) if (name.equals(mod.mainClass)) mod.mainClass = privateRoot + "root/" + name;
                 continue;
             }
-            if (!LegacyVersion.isRelocatedRoot(name)) continue;
+            if (!LegacyVersion.isRelocatedRoot(name) && !remapper.relocatedForVersion(name)) continue;
             String forwarded = org.kylepitcock.legacyconnector.loader.mapping.ForwardRenames.map(jar.version, name);
             if (shim.contains(jar.version.linkPrefix() + forwarded)
                     || (jar.version.forward() != null && shim.contains(jar.version.shimPrefix() + forwarded))) {
@@ -282,6 +353,13 @@ public final class LegacyJarTransformer {
                 mod.mainClass = privateRoot + mod.mainClass;
             }
         }
+        // A mod class in a package that another version's jar or a modern mod also defines moved with the package (CodeChickenLib's codechicken.lib.CodeChickenLib
+        // exists in the 1.21.1 CodeChickenLib too): the entrypoint must name the moved copy.
+        for (LegacyModDecl mod : jar.mods) {
+            if (mod.mainClass == null || !classes.containsKey(mod.mainClass)) continue;
+            String moved = crossVersion.map(jar.version, mod.mainClass);
+            if (moved != null) mod.mainClass = moved;
+        }
         return dropped;
     }
 
@@ -290,6 +368,7 @@ public final class LegacyJarTransformer {
      * into it. Cheap: method bodies are skipped.
      */
     public List<ClassInfo> scan(LegacyJar jar) throws IOException {
+        if (jar.version == LegacyVersion.V1_20_1) return new Forge1201Transformer(shim).scan(jar);
         Contents c = readPatched(jar);
         LegacyRemapper remapper = remapperFor(jar.version, null);
         notchLocals(c.classes, remapper);
@@ -332,6 +411,7 @@ public final class LegacyJarTransformer {
      * version whose SourceFile is the vanilla class's simple name.
      */
     static int dropBundledVanilla(Map<String, byte[]> classes, LegacyVersion version) {
+        if (!version.numericIds()) return 0; // 1.7.10 has a notch table too (CoremodHookScan), but its mods are in SRG names
         org.kylepitcock.legacyconnector.loader.mapping.NotchNames notch = org.kylepitcock.legacyconnector.loader.mapping.NotchNames.get(version.id());
         if (notch == null || notch.isEmpty()) return 0;
         int dropped = 0;
@@ -361,6 +441,7 @@ public final class LegacyJarTransformer {
         if (!remapper.version().numericIds()) return;
         dropBundledVanilla(classes, remapper.version());
         Map<String, String[]> locals = new java.util.HashMap<>();
+        Map<String, java.util.Set<String>> methods = new java.util.HashMap<>();
         // packaged classes only: a peer jar that carries vanilla classes under their notch names (a jar mod) must not hide them from this jar
         for (ClassInfo peer : peers.values()) if (peer.originalSupers != null && peer.name.indexOf('/') > 0) locals.put(peer.name, peer.originalSupers);
         for (byte[] data : classes.values()) {
@@ -371,11 +452,21 @@ public final class LegacyJarTransformer {
                 all[0] = r.getSuperName();
                 System.arraycopy(ifaces, 0, all, 1, ifaces.length);
                 locals.put(r.getClassName(), all);
+                java.util.Set<String> declared = new java.util.HashSet<>();
+                r.accept(new org.objectweb.asm.ClassVisitor(org.objectweb.asm.Opcodes.ASM9) {
+                    @Override
+                    public org.objectweb.asm.MethodVisitor visitMethod(int access, String name, String desc, String sig, String[] exc) {
+                        if ((access & (org.objectweb.asm.Opcodes.ACC_PRIVATE | org.objectweb.asm.Opcodes.ACC_STATIC)) == 0 && !name.startsWith("<")) declared.add(name + desc);
+                        return null;
+                    }
+                }, ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+                if (!declared.isEmpty()) methods.put(r.getClassName(), declared);
             } catch (RuntimeException ignored) {
                 // reported when the class is translated
             }
         }
         remapper.notchLocals(locals);
+        remapper.localMethods(methods);
     }
 
     public Result transform(LegacyJar jar, Path output) throws IOException {
@@ -384,7 +475,7 @@ public final class LegacyJarTransformer {
 
     /** @param peers classes of the other legacy jars of the same version (see {@link #scan}), by name */
     public Result transform(LegacyJar jar, Path output, Map<String, ClassInfo> peers) throws IOException {
-        if (jar.version == LegacyVersion.V1_20_1) return new Forge1201Transformer(shim).transform(jar, output);
+        if (jar.version == LegacyVersion.V1_20_1) return new Forge1201Transformer(shim).transform(jar, output, peers);
         Result result = new Result();
         LegacyVersion version = jar.version;
         LegacyRemapper remapper = remapperFor(version, result.demand);
@@ -410,6 +501,7 @@ public final class LegacyJarTransformer {
 
         // Pass 1: relocate + rename, build the jar-local half of the class hierarchy.
         Hierarchy hierarchy = new Hierarchy(shim, libraries, peers, version);
+        if (!modernLibraries.isEmpty()) hierarchy.requiredLibraries(modernLibraries.restrictedTo(requiredIds(jar)));
         hierarchy.bundledElsewhere(bundledByOtherVersions.getOrDefault(version, java.util.Set.of()));
         Map<String, ClassNode> nodes = new LinkedHashMap<>();
         java.util.Set<String> serializable = SerialUids.serializable(classes);
@@ -442,13 +534,16 @@ public final class LegacyJarTransformer {
         }
         int optionalStripped = 0;
         for (ClassNode node : nodes.values()) {
-            int n = OptionalStripper.apply(node, version.linkPrefix(), presentMods, hierarchy);
+            int n = OptionalStripper.apply(node, version.linkPrefix(), presentMods, hierarchy, result.links.optionalRemoved);
             if (n > 0) hierarchy.addLocal(ClassInfo.of(node));
             optionalStripped += n;
         }
         if (optionalStripped > 0) result.notes.add("Stripped " + optionalStripped + " @Optional interface(s)/method(s) for absent mods");
         for (ClassNode node : nodes.values()) CustomMainMenuVersionFix.apply(node);
-        for (ClassNode node : nodes.values()) org.kylepitcock.legacyconnector.loader.transform.compat.UpdateCheckFix.apply(node);
+        for (ClassNode node : nodes.values()) {
+            // the fix renames a method: refresh the member index the link check reads
+            if (org.kylepitcock.legacyconnector.loader.transform.compat.UpdateCheckFix.apply(node) > 0) hierarchy.addLocal(ClassInfo.of(node));
+        }
         for (ClassNode node : nodes.values()) CofhWorldProxyFix.apply(node);
         for (ClassNode node : nodes.values()) org.kylepitcock.legacyconnector.loader.transform.compat.FatalErrorScreenFix.apply(node);
         for (ClassNode node : nodes.values()) Am2SpellIconFix.apply(node);
@@ -459,8 +554,9 @@ public final class LegacyJarTransformer {
         for (ClassNode node : nodes.values()) Am2SpellBookFix.apply(node);
         for (ClassNode node : nodes.values()) Am2LecternFix.apply(node);
         int absent = 0;
-        for (ClassNode node : nodes.values()) absent += AbsentDependencyStubber.apply(node, hierarchy);
+        for (ClassNode node : nodes.values()) absent += AbsentDependencyStubber.apply(node, hierarchy, result.links);
         if (absent > 0) result.notes.add(absent + " method(s) use mods that are not installed; they throw NoClassDefFoundError if called");
+        BetaCombatProvenance.apply(nodes,hierarchy,version,result.notes);
         int buildHeightChecks = 0;
         int floorClamps = 0;
         int forwardCalls = 0;
@@ -468,6 +564,7 @@ public final class LegacyJarTransformer {
         int livingCasts = 0;
         for (ClassNode node : nodes.values()) {
             result.compatRedirects += JavaCompatRedirects.apply(node);
+            if (jar.sourceVersion == LegacyVersion.V1_2_5) result.compatRedirects += SingleWorldRemote.apply(node);
             result.compatRedirects += ForwardRedirects.apply(node, version);
             InterfaceFlags.apply(node, hierarchy);
             int bridged = BridgeMethods.apply(node, hierarchy, version);
@@ -481,6 +578,11 @@ public final class LegacyJarTransformer {
             result.virtualFieldRedirects += ShimLinker.apply(node, hierarchy, result.links, shim.size() == 0 ? null : result.demand);
             buildHeightChecks += BuildHeightRewriter.apply(node, hierarchy, version);
             floorClamps += WorldFloorClampRewriter.apply(node, hierarchy, version);
+            EntityHeightAbsRewriter.apply(node, version);
+            BetaActorTargets.apply(node,hierarchy,version);
+            BetaMenuConstructors.apply(node,hierarchy,version);
+            BetaClassForName.apply(node,version);
+            BetaMLPropEarly.apply(node,version);
             ClassWriter writer = new ClassWriter(0);
             node.accept(writer);
             outClasses.put(node.name + ".class", writer.toByteArray());
@@ -531,6 +633,13 @@ public final class LegacyJarTransformer {
         if (version == LegacyVersion.V1_12_2 && jar.hasMods()) {
             jar.mixinConfigResources.clear();
             result.notes.addAll(LegacyMixinConfigs.apply(jar, outResources, nodes, hierarchy));
+        }
+        byte[] additions = CoremodAdditionMixins.config(jar, nodes.keySet());
+        if (additions != null) {
+            String config = CoremodAdditionMixins.configName(jar);
+            outResources.put(config, additions);
+            if (!jar.mixinConfigResources.contains(config)) jar.mixinConfigResources.add(config);
+            result.notes.add("Interfaces and accessors this jar's coremod added to Minecraft classes are applied to the legacy API classes as mixins (" + config + ")");
         }
 
         if (jar.coreModClass != null) {
@@ -698,6 +807,10 @@ public final class LegacyJarTransformer {
     }
 
     static void write(Path output, Manifest manifest, Map<String, byte[]> classes, Map<String, byte[]> resources) throws IOException {
+        // Mixin generates org.spongepowered.asm.synthetic.* itself (module mixin_synthetic); a mod jar that ships a stray Dummy there (Blueprint)
+        // exports the same package from a second module and the module layer fails to resolve with any other mod that has synthetic classes.
+        classes = withoutMixinSynthetic(classes);
+        resources = withoutMixinSynthetic(resources);
         Files.createDirectories(output.getParent());
         Path tmp = output.resolveSibling(output.getFileName() + ".tmp");
         try (OutputStream os = Files.newOutputStream(tmp); JarOutputStream jos = new JarOutputStream(os, manifest)) {
@@ -716,6 +829,15 @@ public final class LegacyJarTransformer {
             for (var e : classes.entrySet()) put(jos, e.getKey(), e.getValue());
         }
         moveIntoPlace(tmp, output);
+    }
+
+    private static Map<String, byte[]> withoutMixinSynthetic(Map<String, byte[]> in) {
+        boolean any = false;
+        for (String n : in.keySet()) if (n.startsWith("org/spongepowered/asm/synthetic/")) { any = true; break; }
+        if (!any) return in;
+        Map<String, byte[]> out = new LinkedHashMap<>(in);
+        out.keySet().removeIf(n -> n.startsWith("org/spongepowered/asm/synthetic/"));
+        return out;
     }
 
     private static void addParents(java.util.Set<String> dirs, String name) {

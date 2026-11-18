@@ -58,7 +58,7 @@ public final class LegacyB173Arrow extends Arrow {
             } catch (ReflectiveOperationException ignored) { }
             host.sync();
             host.entityData.set(SPRITE,ProjectileTexturesB173.sprite(entity.getClass()));
-            added=level.addFreshEntity(host);
+            added=legacyconnector.vb1_7_3.net.minecraft.world.World.mcc$wrap(level).mcc$spawnNative(host);
             if(added)EntityViewsB173.spawned(host,entity);
             return added;
         }finally{if(!added){entity.mcc$modern=null;host.legacy=null;host.discard();}}
@@ -92,6 +92,15 @@ public final class LegacyB173Arrow extends Arrow {
             org.slf4j.LoggerFactory.getLogger("LegacyConnector/b1.7.3").error("Legacy projectile {} failed", legacy.getClass().getName(), e);
             discard();
         } finally { EntityViewsB173.flush(); }
+    }
+    @Override public void thunderHit(net.minecraft.server.level.ServerLevel level,net.minecraft.world.entity.LightningBolt bolt) {
+        if(legacy==null){super.thunderHit(level,bolt);return;}
+        try(var views=EntityViewsB173.callbackScope()){
+            legacy.fireTicks=getRemainingFireTicks();
+            legacy.onStruckByLightning((legacyconnector.vb1_7_3.net.minecraft.entity.LightningEntity)EntityViewsB173.wrap(bolt));
+            sync();
+            if(legacy.dead)discard();
+        }
     }
     @Override public void playerTouch(net.minecraft.world.entity.player.Player player) {
         if (level().isClientSide || legacy == null) return;

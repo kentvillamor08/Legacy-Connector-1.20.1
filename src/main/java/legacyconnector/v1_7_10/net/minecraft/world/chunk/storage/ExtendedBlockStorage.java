@@ -173,11 +173,20 @@ public class ExtendedBlockStorage {
         if (chunk.mcc$clientState(0, yBase, 0) == null) return null;
         int[] ids = new int[4096];
         byte[] metas = new byte[4096];
+        net.minecraft.world.level.block.state.BlockState last = null;
+        int lastId = 0;
+        byte lastMeta = 0;
         for (int i = 0; i < 4096; i++) {
             var state = chunk.mcc$clientState(i & 15, yBase + (i >> 8), i >> 4 & 15);
             if (state == null) return null;
-            ids[i] = Block.getIdFromBlock(org.kylepitcock.legacyconnector.v1_7_10.bridge.BlockBridge.legacyBlock(state));
-            metas[i] = (byte) (org.kylepitcock.legacyconnector.v1_7_10.bridge.BlockBridge.legacyMeta(state) & 15);
+            // runs of the same state (air, stone) are most of a section: translate each distinct state once in a row
+            if (state != last) {
+                last = state;
+                lastId = Block.getIdFromBlock(org.kylepitcock.legacyconnector.v1_7_10.bridge.BlockBridge.legacyBlock(state));
+                lastMeta = (byte) (org.kylepitcock.legacyconnector.v1_7_10.bridge.BlockBridge.legacyMeta(state) & 15);
+            }
+            ids[i] = lastId;
+            metas[i] = lastMeta;
         }
         mcc$idCache = ids;
         mcc$metaCache = metas;
@@ -194,6 +203,15 @@ public class ExtendedBlockStorage {
             out.set(x, y, z, cached ? mcc$metaCache[i] : getExtBlockMetadata(x, y, z) & 15);
         }
         return out;
+    }
+
+    /**
+     * 1.7.10's {@code createBlockMSBArray}: gives the section an array for the high bits of its block ids and returns it.
+     * The view derives the bits from the real blocks, so the array it hands out is a copy of that (zeroes when no id passes 255).
+     */
+    public legacyconnector.v1_7_10.net.minecraft.world.chunk.NibbleArray createBlockMSBArray() {
+        legacyconnector.v1_7_10.net.minecraft.world.chunk.NibbleArray out = getBlockMSBArray();
+        return out != null ? out : new legacyconnector.v1_7_10.net.minecraft.world.chunk.NibbleArray(4096, 4);
     }
 
     /** The high four bits of the legacy ids above 255 (null when every id fits in eight bits, as 1.7.10 left it); a copy. */

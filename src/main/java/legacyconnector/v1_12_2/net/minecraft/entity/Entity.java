@@ -197,11 +197,16 @@ public abstract class Entity implements legacyconnector.v1_12_2.net.minecraft.co
 
     /** The modern entity this one stands for. */
     public net.minecraft.world.entity.Entity mcc$entity;
+    /** This constructor is a view of an entity that already owns its native attributes and state. */
+    private boolean mcc$existingNativeView;
+    protected final boolean mcc$existingNativeView(){return mcc$existingNativeView;}
     /**
      * The level accessor to answer {@code world} with instead of the entity's own level: spawn checks during chunk generation run
      * against the generation region (asking the real level for a chunk under generation deadlocks).
      */
     public net.minecraft.world.level.LevelAccessor mcc$worldOverride;
+
+    private static final java.util.concurrent.atomic.AtomicInteger MCC_INIT_FAILS = new java.util.concurrent.atomic.AtomicInteger();
 
     protected legacyconnector.v1_12_2.net.minecraft.network.datasync.EntityDataManager dataManager;
 
@@ -217,6 +222,7 @@ public abstract class Entity implements legacyconnector.v1_12_2.net.minecraft.co
         var viewed = EntityBridge1122.takeViewBinding();
         if (viewed != null) {
             this.mcc$entity = viewed;
+            this.mcc$existingNativeView = true;
             try {
                 entityInit();
             } catch (RuntimeException | LinkageError e) {
@@ -238,7 +244,7 @@ public abstract class Entity implements legacyconnector.v1_12_2.net.minecraft.co
             entityInit();
         } catch (RuntimeException | LinkageError e) {
             // a mod's data registration reaching an API the layer lacks must not stop the entity from being made
-            org.slf4j.LoggerFactory.getLogger("LegacyConnector/Entity").debug("entityInit of {} failed: {}", getClass().getName(), e.toString());
+            if (MCC_INIT_FAILS.incrementAndGet() <= 5) org.slf4j.LoggerFactory.getLogger("LegacyConnector/Entity").warn("entityInit of {} failed", getClass().getName(), e);
         }
         mcc$fireConstructing();
     }
@@ -247,6 +253,7 @@ public abstract class Entity implements legacyconnector.v1_12_2.net.minecraft.co
     protected Entity(net.minecraft.world.entity.Entity modern) {
         var viewed = EntityBridge1122.takeViewBinding();
         this.mcc$entity = modern != null ? modern : viewed;
+        this.mcc$existingNativeView = this.mcc$entity != null;
         this.dataManager = new legacyconnector.v1_12_2.net.minecraft.network.datasync.EntityDataManager(this);
     }
 
@@ -1514,6 +1521,19 @@ public abstract class Entity implements legacyconnector.v1_12_2.net.minecraft.co
         else if (mcc$entity != null) mcc$entity.handleEntityEvent(id);
     }
 
+    /** Burns the entity for {@code amount} damage unless it is immune to fire. */
+    protected void dealFireDamage(int amount) {
+        if (!mcc$get$isImmuneToFire(this)) attackEntityFrom(legacyconnector.v1_12_2.net.minecraft.util.DamageSource.IN_FIRE, amount);
+    }
+
+    /** Lava burns: 4 damage and 15 seconds of fire unless the entity is immune to fire (1.12.2 protected hook, called by entities that walk through lava themselves). */
+    protected void setOnFireFromLava() {
+        if (!mcc$get$isImmuneToFire(this)) {
+            attackEntityFrom(legacyconnector.v1_12_2.net.minecraft.util.DamageSource.LAVA, 4.0F);
+            setFire(15);
+        }
+    }
+
     public void setFire(int seconds) {
         if (mcc$entity != null) mcc$entity.igniteForSeconds(seconds);
     }
@@ -1788,7 +1808,31 @@ public abstract class Entity implements legacyconnector.v1_12_2.net.minecraft.co
         return true;
     }
 
+    /** The entry position and facing the last portal use recorded (vanilla keeps them for the next teleport; modern portals do not expose them). */
+    protected Vec3d lastPortalVec;
+    protected EnumFacing teleportDirection;
+
+    public Vec3d getLastPortalVec() {
+        return lastPortalVec;
+    }
+
+    public EnumFacing getTeleportDirection() {
+        return teleportDirection;
+    }
+
     public void setPortal(BlockPos pos) {
+        if (pos == null) return;
+        lastPortalVec = new Vec3d(pos.getX() + 0.5D, pos.getY(), pos.getZ() + 0.5D);
+        teleportDirection = getHorizontalFacing();
+    }
+
+    /** Whether a rider is thrown off when this mount enters water (living mounts only). */
+    protected boolean shouldDismountInWater(Entity rider) {
+        return this instanceof EntityLivingBase;
+    }
+
+    /** Called while the entity overlaps a block (vanilla: nothing). */
+    protected void onInsideBlock(legacyconnector.v1_12_2.net.minecraft.block.state.IBlockState state) {
     }
 
     public int getPortalCooldown() {
@@ -1858,6 +1902,21 @@ public abstract class Entity implements legacyconnector.v1_12_2.net.minecraft.co
     public Entity getRidingEntity() {
         var m = mcc$entity;
         return m == null ? null : EntityBridge1122.wrap(m.getVehicle());
+    }
+
+    /** Phantom: the vehicle ({@link #mcc$get$ridingEntity}; the 1.8-1.12 field mods read and write directly). */
+    @Deprecated
+    public Entity ridingEntity;
+
+    public static Entity mcc$get$ridingEntity(Entity e) {
+        return e.getRidingEntity();
+    }
+
+    public static void mcc$set$ridingEntity(Entity e, Entity vehicle) {
+        var m = e.mcc$entity;
+        if (m == null) return;
+        if (vehicle == null) m.stopRiding();
+        else if (vehicle.mcc$entity != null && m.getVehicle() != vehicle.mcc$entity) m.startRiding(vehicle.mcc$entity, true);
     }
 
     public Entity getLowestRidingEntity() {
@@ -2342,5 +2401,45 @@ public abstract class Entity implements legacyconnector.v1_12_2.net.minecraft.co
         } catch (ReflectiveOperationException e) {
             // not added
         }
+    }
+
+    /** Moves the position to the bottom centre of the bounding box without marking the entity as teleported; true when it moved. */
+    public boolean setPositionNonDirty() {
+        AxisAlignedBB box = getEntityBoundingBox();
+        double x = (box.minX + box.maxX) / 2.0D;
+        double z = (box.minZ + box.maxZ) / 2.0D;
+        boolean moved = x != mcc$local_posX || box.minY != mcc$local_posY || z != mcc$local_posZ;
+        if (moved) setPosition(x, box.minY, z);
+        return moved;
+    }
+
+    private legacyconnector.v1_12_2.net.minecraft.command.CommandResultStats mcc$cmdResultStats;
+
+    /** The scoreboard targets commands run by or on this entity write their results to (1.12's {@code /stats}). */
+    public legacyconnector.v1_12_2.net.minecraft.command.CommandResultStats getCommandStats() {
+        if (mcc$cmdResultStats == null) mcc$cmdResultStats = new legacyconnector.v1_12_2.net.minecraft.command.CommandResultStats();
+        return mcc$cmdResultStats;
+    }
+
+    /** Takes over the {@code /stats} targets of another entity (used when an entity is copied or recreated). */
+    public void setCommandStats(Entity entityIn) {
+        if (entityIn == null) return;
+        getCommandStats().addAllStats(entityIn.getCommandStats());
+    }
+
+    /** The entity's rotation as (pitch, yaw). */
+    public legacyconnector.v1_12_2.net.minecraft.util.math.Vec2f getPitchYaw() {
+        return new legacyconnector.v1_12_2.net.minecraft.util.math.Vec2f(mcc$get$rotationPitch(this), mcc$get$rotationYaw(this));
+    }
+
+    /** Whether a player riding this entity turns to face its heading (boats do, everything else keeps looking where the player looks). */
+    public boolean shouldRiderFaceForward(legacyconnector.v1_12_2.net.minecraft.entity.player.EntityPlayer player) {
+        return this instanceof legacyconnector.v1_12_2.net.minecraft.entity.item.EntityBoat;
+    }
+
+    /** Whether the entity is on this scoreboard team. */
+    public boolean isOnScoreboardTeam(legacyconnector.v1_12_2.net.minecraft.scoreboard.Team team) {
+        var own = getTeam();
+        return own != null && own.isSameTeam(team);
     }
 }

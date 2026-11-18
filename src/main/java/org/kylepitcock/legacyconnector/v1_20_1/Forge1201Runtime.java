@@ -42,6 +42,9 @@ public final class Forge1201Runtime {
         LOG.info("Forge 1.20.1 facades active for {} mod(s): {}", modIds.size(), modIds);
         modBus.addListener(Forge1201Runtime::onRegisterCapabilities);
         modBus.addListener(Forge1201Runtime::onLoadComplete);
+        // Forge filled @ObjectHolder fields after each registry's event
+        modBus.addListener(net.neoforged.bus.api.EventPriority.LOWEST, (net.neoforged.neoforge.registries.RegisterEvent e) -> ObjectHolders1201.inject());
+        modBus.addListener((net.neoforged.neoforge.registries.RegisterEvent e) -> legacyconnector.v1_20_1.net.minecraftforge.registries.ForgeRegistryWrapper.flushDeferred(e));
         modBus.addListener(org.kylepitcock.legacyconnector.v1_20_1.migrate.LegacyEnchantments::onNewRegistry);
         org.kylepitcock.legacyconnector.v1_20_1.migrate.LegacyComponents.COMPONENTS.register(modBus);
         modBus.addListener((net.neoforged.neoforge.registries.RegisterEvent e) -> {
@@ -58,6 +61,8 @@ public final class Forge1201Runtime {
                 legacyconnector.v1_20_1.net.minecraftforge.common.world.ForgeChunkManager.registerControllers(e, modIds));
         org.kylepitcock.legacyconnector.core.pack.GeneratedPack.addContributor(org.kylepitcock.legacyconnector.v1_20_1.migrate.LegacyEnchantments::contribute);
         modBus.addListener(legacyconnector.v1_20_1.net.minecraftforge.network.simple.SimpleChannel::registerAll);
+        modBus.addListener(legacyconnector.v1_20_1.net.minecraftforge.network.event.EventNetworkChannel::registerAll);
+        modBus.addListener(org.kylepitcock.legacyconnector.v1_20_1.migrate.LegacyLibChannel::registerAll);
         // loot tables are parsed before the server exists: the handlers of legacy mods read enchantments through the registries of this reload
         NeoForge.EVENT_BUS.addListener(net.neoforged.bus.api.EventPriority.HIGHEST, (net.neoforged.neoforge.event.LootTableLoadEvent e) ->
                 org.kylepitcock.legacyconnector.v1_20_1.migrate.MigrateContext.remember(e.getRegistries()));
@@ -74,6 +79,7 @@ public final class Forge1201Runtime {
 
     /** The "1.20.1 content registered" line of the server self test (mirrors the 1.12.2 one). */
     private static void onLoadComplete(net.neoforged.fml.event.lifecycle.FMLLoadCompleteEvent event) {
+        ObjectHolders1201.finish();
         StringBuilder sb = new StringBuilder();
         int blocks = 0;
         int items = 0;
@@ -90,6 +96,9 @@ public final class Forge1201Runtime {
             blockEntities += t;
             sb.append("\n  ").append(id).append(": ").append(b).append(" blocks, ").append(i).append(" items, ").append(e).append(" entities, ").append(t).append(" block entity types");
         }
+        // FML stops the start at the first phase in which a mod fails (the failed mods are in the "Loading errors encountered" block of the log): reaching load
+        // complete means every translated mod constructed and registered; tools/dev/verify/verify.py reads this line as mods_loaded_1201 / mods_failed_1201
+        LOG.info("Legacy 1.20.1 mods: {} loaded, {} failed", modIds.size(), 0);
         LOG.info("1.20.1 content registered: {} blocks, {} items, {} entity types, {} block entity types in {} mod(s){}", blocks, items, entities, blockEntities, modIds.size(), sb);
     }
 

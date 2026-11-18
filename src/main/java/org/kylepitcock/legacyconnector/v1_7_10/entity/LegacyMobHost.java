@@ -162,6 +162,7 @@ public class LegacyMobHost extends PathfinderMob implements LegacyLivingHost, IE
     @Override
     public void remove(net.minecraft.world.entity.Entity.RemovalReason reason) {
         clearBossBar();
+        legacyconnector.v1_7_10.net.minecraft.entity.EntityTracker.mcc$noteRemoved(legacy, level());
         super.remove(reason);
     }
 
@@ -266,6 +267,45 @@ public class LegacyMobHost extends PathfinderMob implements LegacyLivingHost, IE
     @Override
     public boolean mcc$superHurt(DamageSource source, float amount) {
         return super.hurt(source, amount);
+    }
+
+    private static final java.util.concurrent.ConcurrentHashMap<Class<?>, Boolean> ARMOR_OVERRIDES = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** True when the legacy class (or a legacy superclass) overrides getTotalArmorValue (func_70658_aO), 1.7.10's defence hook. */
+    private boolean overridesTotalArmor() {
+        if (!(legacy instanceof EntityLivingBase)) return false;
+        return ARMOR_OVERRIDES.computeIfAbsent(legacy.getClass(), c -> {
+            try {
+                return c.getMethod("getTotalArmorValue").getDeclaringClass() != EntityLivingBase.class;
+            } catch (ReflectiveOperationException | LinkageError e) {
+                return false;
+            }
+        });
+    }
+
+    @Override
+    public int getArmorValue() {
+        return overridesTotalArmor() ? ((EntityLivingBase) legacy).getTotalArmorValue() : super.getArmorValue();
+    }
+
+    @Override
+    public int mcc$superArmorValue() {
+        return super.getArmorValue();
+    }
+
+    /** 1.7.10 applyArmorCalculations: damage * (25 - armour) / 25, replacing the 1.21 armour/toughness formula for overriding classes. */
+    @Override
+    protected float getDamageAfterArmorAbsorb(DamageSource source, float amount) {
+        EntityLivingBase l = living();
+        if (l != null && LegacyHosts.overrides(legacy.getClass(), "applyArmorCalculations", DAMAGE_PARAMS)) {
+            return l.mcc$applyArmorCalculations(legacyconnector.v1_7_10.net.minecraft.util.DamageSource.mcc$wrap(source), amount);
+        }
+        if (!overridesTotalArmor()) return super.getDamageAfterArmorAbsorb(source, amount);
+        if (!source.is(net.minecraft.tags.DamageTypeTags.BYPASSES_ARMOR)) {
+            int armor = Math.min(25, Math.max(0, getArmorValue()));
+            amount = amount * (25 - armor) / 25.0F;
+        }
+        return amount;
     }
 
     @Override
@@ -670,14 +710,16 @@ public class LegacyMobHost extends PathfinderMob implements LegacyLivingHost, IE
     public void addAdditionalSaveData(CompoundTag tag) {
         super.addAdditionalSaveData(tag);
         if (legacy != null) {
-            try {
+            // a throwing writeEntityToNBT must not fail the chunk save: the last good legacy keys are saved instead
+            lastGoodNbt = org.kylepitcock.legacyconnector.core.NbtSaveGuard.guardInPlace(tag, lastGoodNbt, () -> {
                 legacy.mcc$writeEntityToNBT(new NBTTagCompound(tag));
                 legacy.mcc$saveExtended(new NBTTagCompound(tag));
-            } catch (RuntimeException | LinkageError e) {
-                LegacyHosts.nbtFailure(this, "writing", e);
-            }
+            }, legacy, net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(getType()), blockPosition().toShortString());
         }
     }
+
+    /** The legacy keys of this entity's last successful save (see NbtSaveGuard). */
+    private CompoundTag lastGoodNbt;
 
     @Override
     public void readAdditionalSaveData(CompoundTag tag) {

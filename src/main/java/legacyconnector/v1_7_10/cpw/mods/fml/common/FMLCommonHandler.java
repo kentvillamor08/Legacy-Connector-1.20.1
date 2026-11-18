@@ -28,6 +28,8 @@ public class FMLCommonHandler {
     }
 
     public Side getSide() {
+        // No game side yet in the offline coremod probe: the side the coremod phase was started for
+        if (FMLEnvironment.dist == null) return "SERVER".equals(System.getProperty("legacyconnector.side")) ? Side.SERVER : Side.CLIENT;
         return FMLEnvironment.dist.isClient() ? Side.CLIENT : Side.SERVER;
     }
 
@@ -75,6 +77,11 @@ public class FMLCommonHandler {
 
     public void addModToResourcePack(ModContainer container) {
         if (FMLEnvironment.dist.isClient()) org.kylepitcock.legacyconnector.v1_7_10.LegacyModPacks.mcc$addContainer(container);
+    }
+
+    /** FML 2.x {@code getMinecraftRootDirectory()}: the game directory the mods keep their config and data in (the layer's run directory). */
+    public java.io.File getMinecraftRootDirectory() {
+        return net.neoforged.fml.loading.FMLPaths.GAMEDIR.get().toFile();
     }
 
     public java.io.File getSavesDirectory() {

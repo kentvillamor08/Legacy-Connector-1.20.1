@@ -4,6 +4,11 @@ import legacyconnector.v1_7_10.net.minecraft.util.MovementInput;
 import net.minecraft.world.entity.player.Player;
 
 public class EntityPlayerSP extends AbstractClientPlayer {
+    /** The field-of-view multiplier of the player's speed and effects (1 when standing still). */
+    public float getFOVMultiplier() {
+        return mcc$entity instanceof net.minecraft.client.player.LocalPlayer p ? p.getFieldOfViewModifier() : 1.0F;
+    }
+
     public MovementInput movementInput = new MovementInput();
 
     public EntityPlayerSP(Player modern) {
@@ -85,5 +90,15 @@ public class EntityPlayerSP extends AbstractClientPlayer {
             movementInput.jump = in.jumping;
             movementInput.sneak = in.shiftKeyDown;
         }
+    }
+
+    // Members125 batch 1
+
+    /** 1.2.5 {@code ClientPlayerEntity.sendChat(text)}: sends a chat line (or, starting with a slash, a command) to the server. */
+    public void mcc125$sendChat(String text) {
+        var connection = net.minecraft.client.Minecraft.getInstance().getConnection();
+        if (connection == null || text == null) return;
+        if (text.startsWith("/")) connection.sendCommand(text.substring(1));
+        else connection.sendChat(text);
     }
 }

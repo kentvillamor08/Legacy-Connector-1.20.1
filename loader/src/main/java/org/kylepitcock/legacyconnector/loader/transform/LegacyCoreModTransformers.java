@@ -40,7 +40,9 @@ public final class LegacyCoreModTransformers {
     private static final Logger LOG = LoggerFactory.getLogger("Legacy Connector");
     private static final String API_RESOURCE = "legacyconnector/legacy/%s/coremod-api.jar";
 
-    private record Transformer(String name, Object instance) {}
+    /** @param afterDeobf its plugin sorts after FML's deobfuscation (sorting index above 1000): it saw Minecraft's classes in SRG names */
+    /** {@code mc}: the Minecraft version of the jar the transformer comes from (one class loader serves 1.6.4, 1.5.2 and 1.4.7 jars). */
+    private record Transformer(String name, Object instance, boolean afterDeobf, String mc) {}
 
     private final List<Transformer> transformers = new ArrayList<>();
     private final Set<String> exclusions;
@@ -59,14 +61,32 @@ public final class LegacyCoreModTransformers {
         return transformers.isEmpty();
     }
 
+    /**
+     * Bundled libraries (BundledLibraries) the coremod plugins' own classes use: argo (CodeChickenCore's DepLoader), trove (CoFH Core's ASMCore builds its
+     * method tables with gnu.trove maps in a static initializer; without it the whole CoFH class transformer was skipped and none of its hooks ran).
+     */
+    static boolean isCoremodLibrary(String fileName) {
+        return fileName.startsWith("argo-") || fileName.startsWith("trove4j-");
+    }
+
     /** The coremod API flavour a version's plugins link against: 1.7.10's, or Forge 1.6.4's (java.util.logging, getLibraryRequestClass; also 1.5.2). */
     public static LegacyVersion apiFor(LegacyVersion version) {
-        return version.numericIds() ? LegacyVersion.V1_6_4 : LegacyVersion.V1_7_10;
+        return version.numericIds() ? LegacyVersion.V1_6_4 : version == LegacyVersion.V1_12_2 ? LegacyVersion.V1_12_2 : LegacyVersion.V1_7_10;
+    }
+
+    /** Versions whose coremods run: the 1.7.10 family (1.4.7 to 1.7.10) and 1.12.2. */
+    public static boolean supports(LegacyVersion version) {
+        return version.family() == LegacyVersion.V1_7_10 || version == LegacyVersion.V1_12_2;
+    }
+
+    /** The FML package of an API flavour: {@code cpw.mods.fml} (to 1.7.10) or {@code net.minecraftforge.fml} (1.12.2). */
+    private static String fmlPackage(LegacyVersion api) {
+        return api == LegacyVersion.V1_12_2 ? "net.minecraftforge.fml" : "cpw.mods.fml";
     }
 
     /** The cache file name of an API flavour's nested jar. */
     public static String apiJarName(LegacyVersion api) {
-        return api == LegacyVersion.V1_6_4 ? "coremod-api-1.6.4.jar" : "coremod-api.jar";
+        return api == LegacyVersion.V1_6_4 ? "coremod-api-1.6.4.jar" : api == LegacyVersion.V1_12_2 ? "coremod-api-1.12.2.jar" : "coremod-api.jar";
     }
 
     /**
@@ -74,7 +94,7 @@ public final class LegacyCoreModTransformers {
      * there are none or loading failed. Each flavour has its own isolated class loader.
      */
     public static LegacyCoreModTransformers load(List<LegacyJar> jars, Path cacheDir, Path gameDir, String side, Path runtimeJar, LegacyVersion api) {
-        List<LegacyJar> legacy = jars.stream().filter(j -> j.version.family() == LegacyVersion.V1_7_10 && apiFor(j.version) == api).toList();
+        List<LegacyJar> legacy = jars.stream().filter(j -> supports(j.version) && apiFor(j.version) == api).toList();
         List<LegacyJar> coremods = legacy.stream().filter(j -> j.coreModClass != null && !j.coreModClass.isBlank()).toList();
         if (coremods.isEmpty()) return empty();
         try {
@@ -96,11 +116,11 @@ public final class LegacyCoreModTransformers {
             ClassLoader fml = runtimeClasses == null ? apiLoader : new ShimLoader(runtimeClasses, apiLoader, api);
             List<URL> urls = new ArrayList<>();
             for (LegacyJar j : legacy) urls.add(j.path.toUri().toURL());
-            // Libraries the old launcher put on the class path that coremod plugins use (argo: CodeChickenCore's DepLoader), extracted by BundledLibraries
+            // Libraries the old launcher put on the class path that coremod plugins use (argo: CodeChickenCore's DepLoader; trove: CoFH Core's ASMCore), extracted by BundledLibraries
             try (var dirs = Files.list(cacheDir)) {
                 for (Path dir : dirs.filter(d -> Files.isDirectory(d) && d.getFileName().toString().startsWith("libs-")).toList()) {
                     try (var libs = Files.list(dir)) {
-                        for (Path lib : libs.filter(f -> f.getFileName().toString().startsWith("argo-") && f.toString().endsWith(".jar")).toList()) urls.add(lib.toUri().toURL());
+                        for (Path lib : libs.filter(f -> isCoremodLibrary(f.getFileName().toString()) && f.toString().endsWith(".jar")).toList()) urls.add(lib.toUri().toURL());
                     }
                 }
             }
@@ -109,18 +129,26 @@ public final class LegacyCoreModTransformers {
             Class<?> lclImpl = api == LegacyVersion.V1_6_4 ? apiLoader.loadClass("cpw.mods.fml.relauncher.RelaunchClassLoader") : lclClass;
             URLClassLoader lcl = (URLClassLoader) lclImpl.getConstructor(URL[].class, ClassLoader.class)
                     .newInstance(urls.toArray(URL[]::new), fml);
+            // Forge 1.12 plugins bootstrap SpongePowered Mixin (MixinBooter and mixin-only coremods): their copy lives in the isolated loader, the game's own is not theirs to drive
+            if (api == LegacyVersion.V1_12_2) lclClass.getMethod("mcc$isolate", String.class).invoke(lcl, "org.spongepowered.");
             openJavaLang(lcl);
             Class<?> launch = apiLoader.loadClass("net.minecraft.launchwrapper.Launch");
             launch.getField("classLoader").set(null, lcl);
-            apiLoader.loadClass("cpw.mods.fml.relauncher.FMLInjectionData").getField("mcVersion").set(null, coremods.get(0).version.id());
+            String fmlPkg = fmlPackage(api);
+            apiLoader.loadClass(fmlPkg + ".relauncher.FMLLaunchHandler").getMethod("mcc$setClassLoader", Object.class).invoke(null, lcl);
+            apiLoader.loadClass(fmlPkg + ".relauncher.FMLInjectionData").getField("mcVersion").set(null, coremods.get(0).version.id());
             launch.getField("minecraftHome").set(null, gameDir.toFile());
             @SuppressWarnings("unchecked")
             Map<String, Object> blackboard = (Map<String, Object>) launch.getField("blackboard").get(null);
             blackboard.put("fml.deobfuscatedEnvironment", Boolean.FALSE);
+            // LaunchWrapper's own entries: plugins read (and add to) the tweaker lists without a null check
+            blackboard.putIfAbsent("TweakClasses", new java.util.ArrayList<String>());
+            blackboard.putIfAbsent("Tweaks", new java.util.ArrayList<Object>());
+            blackboard.putIfAbsent("ArgumentList", new java.util.ArrayList<String>());
 
-            Class<?> pluginType = apiLoader.loadClass("cpw.mods.fml.relauncher.IFMLLoadingPlugin");
-            Class<? extends java.lang.annotation.Annotation> sortingIndex = annotation(apiLoader, "SortingIndex");
-            Class<? extends java.lang.annotation.Annotation> exclusionsAnn = annotation(apiLoader, "TransformerExclusions");
+            Class<?> pluginType = apiLoader.loadClass(fmlPkg + ".relauncher.IFMLLoadingPlugin");
+            Class<? extends java.lang.annotation.Annotation> sortingIndex = annotation(apiLoader, fmlPkg, "SortingIndex");
+            Class<? extends java.lang.annotation.Annotation> exclusionsAnn = annotation(apiLoader, fmlPkg, "TransformerExclusions");
             @SuppressWarnings("unchecked")
             Set<String> exclusions = (Set<String>) lclClass.getMethod("mcc$transformerExclusions").invoke(lcl);
             Method addExclusion = lclClass.getMethod("addTransformerExclusion", String.class);
@@ -130,7 +158,6 @@ public final class LegacyCoreModTransformers {
             Method transform = transformerType.getMethod("transform", String.class, String.class, byte[].class);
             // As FML: every plugin is constructed first (in discovery order); then, by sorting index, each one's
             // transformers are created and its injectData runs (plugins check each other's state there).
-            record Plugin(LegacyJar jar, int index, Object instance) {}
             List<Plugin> plugins = new ArrayList<>();
             for (LegacyJar jar : coremods) {
                 String pluginClass = jar.coreModClass.trim();
@@ -145,6 +172,8 @@ public final class LegacyCoreModTransformers {
                     return new Plugin(jar, index, cls.getDeclaredConstructor().newInstance());
                 });
                 if (p != null) plugins.add(p);
+                // A plugin may add other plugins to FML's CoreModManager.loadPlugins while it is constructed (CodeChickenCore's deobfuscation plugin): they join the set
+                if (p != null) drainInjectedPlugins(apiLoader, fmlPkg, jar, plugins, pluginType);
             }
             plugins.sort(Comparator.comparingInt(Plugin::index));
             record Loaded(String jar, List<Transformer> transformers) {}
@@ -158,7 +187,7 @@ public final class LegacyCoreModTransformers {
                         if (name == null || name.isBlank()) continue;
                         try {
                             Object instance = Class.forName(name.trim(), true, lcl).getDeclaredConstructor().newInstance();
-                            if (transformerType.isInstance(instance)) created.add(new Transformer(name.trim(), instance));
+                            if (transformerType.isInstance(instance)) created.add(new Transformer(name.trim(), instance, p.index() > 1000, jar.version.id()));
                         } catch (Throwable e) {
                             LOG.warn("Legacy Connector: class transformer {} of {} could not be created and is skipped: {}", name, jar.fileName(), rootChain(e));
                         }
@@ -213,7 +242,7 @@ public final class LegacyCoreModTransformers {
                                 try {
                                     Object instance = Class.forName(name, true, lcl).getDeclaredConstructor().newInstance();
                                     if (transformerType.isInstance(instance) && out.stream().noneMatch(o -> o.name().equals(name))) {
-                                        out.add(new Transformer(name, instance));
+                                        out.add(new Transformer(name, instance, false, jar.version.id()));
                                         owners.put(name, jar.fileName());
                                     }
                                 } catch (Throwable e) {
@@ -232,6 +261,38 @@ public final class LegacyCoreModTransformers {
         } catch (Throwable e) {
             LOG.warn("Legacy Connector: legacy coremod transformers are not applied", e);
             return empty();
+        }
+    }
+
+    private record Plugin(LegacyJar jar, int index, Object instance) {}
+
+    /** Moves the wrappers plugins added to {@code CoreModManager.loadPlugins} into the plugin list (each counts as belonging to the jar that added it). */
+    private static void drainInjectedPlugins(ClassLoader apiLoader, String fmlPkg, LegacyJar jar, List<Plugin> plugins, Class<?> pluginType) {
+        try {
+            Class<?> manager = apiLoader.loadClass(fmlPkg + ".relauncher.CoreModManager");
+            java.lang.reflect.Field field = manager.getDeclaredField("loadPlugins");
+            field.setAccessible(true);
+            List<?> list = (List<?>) field.get(null);
+            if (list == null || list.isEmpty()) return;
+            for (Object wrapper : new ArrayList<>(list)) {
+                Class<?> wc = wrapper.getClass();
+                Object instance = wc.getField("coreModInstance").get(wrapper);
+                int index = wc.getField("sortIndex").getInt(wrapper);
+                if (instance != null && instance.getClass().getClassLoader() != apiLoader && pluginType.isInstance(instance) && plugins.stream().noneMatch(o -> o.instance() == instance)) {
+                    plugins.add(new Plugin(jar, index, instance));
+                }
+            }
+            list.removeIf(w -> {
+                try {
+                    return w.getClass().getField("coreModInstance").get(w).getClass().getClassLoader() != apiLoader;
+                } catch (ReflectiveOperationException e) {
+                    return false;
+                }
+            });
+        } catch (ClassNotFoundException | NoSuchFieldException e) {
+            // this API flavour has no plugin list
+        } catch (Throwable e) {
+            LOG.warn("Legacy Connector: plugins added by {} to the coremod manager could not be taken over: {}", jar.fileName(), rootChain(e));
         }
     }
 
@@ -354,8 +415,8 @@ public final class LegacyCoreModTransformers {
     }
 
     @SuppressWarnings("unchecked")
-    private static Class<? extends java.lang.annotation.Annotation> annotation(ClassLoader loader, String name) throws ClassNotFoundException {
-        return (Class<? extends java.lang.annotation.Annotation>) loader.loadClass("cpw.mods.fml.relauncher.IFMLLoadingPlugin$" + name);
+    private static Class<? extends java.lang.annotation.Annotation> annotation(ClassLoader loader, String fmlPkg, String name) throws ClassNotFoundException {
+        return (Class<? extends java.lang.annotation.Annotation>) loader.loadClass(fmlPkg + ".relauncher.IFMLLoadingPlugin$" + name);
     }
 
     /** Runs every transformer over one legacy class (internal name), in plugin order; failures leave the input. */
@@ -385,6 +446,33 @@ public final class LegacyCoreModTransformers {
         return current;
     }
 
+    /** What one transformer made of a Minecraft class it was shown. */
+    public interface VanillaResult {
+        void accept(String transformer, byte[] transformed);
+    }
+
+    /**
+     * Shows one of Minecraft's own classes to every transformer separately, as LaunchWrapper did ({@code name} is the name in the jar, {@code transformedName}
+     * the deobfuscated one), and reports each transformer that changed it. Nothing is kept: the game's classes are not present at run time, so this only tells
+     * which hooks a coremod puts where (see {@code CoremodHookDiscovery}).
+     *
+     * @param afterDeobf which transformers: those sorted after FML's deobfuscation, or those before it
+     * @param mc the Minecraft version the class is from: only the transformers of that version's jars see it
+     */
+    public synchronized void applyToVanilla(String name, String transformedName, byte[] bytes, boolean afterDeobf, String mc, VanillaResult out) {
+        for (Transformer t : transformers) {
+            if (t.afterDeobf != afterDeobf || !t.mc.equals(mc)) continue;
+            try {
+                byte[] next = (byte[]) transform.invoke(t.instance, name, transformedName, bytes.clone());
+                if (next != null && !java.util.Arrays.equals(next, bytes)) out.accept(t.name, next);
+            } catch (Throwable e) {
+                Throwable cause = cause(e);
+                int n = failures.merge(t.name + "#vanilla", 1, Integer::sum);
+                if (n <= 3) LOG.debug("Legacy Connector: class transformer {} failed on Minecraft's {}: {}", t.name, transformedName, cause.toString());
+            }
+        }
+    }
+
     /**
      * Legacy FML/Forge classes beyond the launch API, served from Legacy Connector's own shim with the relocation undone
      * ({@code legacyconnector/v1_7_10/cpw/mods/fml/common/DummyModContainer} as {@code cpw/mods/fml/common/DummyModContainer}).
@@ -393,6 +481,7 @@ public final class LegacyCoreModTransformers {
      */
     private static final class ShimLoader extends ClassLoader {
         private static final String PREFIX = LegacyVersion.V1_7_10.shimPrefix();
+        private final LegacyVersion hierarchy;
         /** Shim roots tried in order: the 1.6.4 API (ITickHandler, TickType...) lives in its own root over the 1.7.10 one. */
         private final List<String> prefixes;
         private final java.util.zip.ZipFile jar;
@@ -401,7 +490,9 @@ public final class LegacyCoreModTransformers {
         /** @param runtime the runtime jar, or (development) its classes directory */
         ShimLoader(Path runtime, ClassLoader parent, LegacyVersion api) throws java.io.IOException {
             super("legacyconnector-coremod-shim", parent);
-            this.prefixes = api == LegacyVersion.V1_6_4 ? List.of(LegacyVersion.V1_6_4.shimPrefix(), PREFIX) : List.of(PREFIX);
+            this.prefixes = api == LegacyVersion.V1_6_4 ? List.of(LegacyVersion.V1_6_4.shimPrefix(), PREFIX)
+                    : api == LegacyVersion.V1_12_2 ? List.of(LegacyVersion.V1_12_2.shimPrefix()) : List.of(PREFIX);
+            this.hierarchy = api == LegacyVersion.V1_12_2 ? LegacyVersion.V1_12_2 : LegacyVersion.V1_7_10;
             this.dir = Files.isDirectory(runtime) ? runtime : null;
             this.jar = dir == null ? new java.util.zip.ZipFile(runtime.toFile()) : null;
         }
@@ -437,7 +528,7 @@ public final class LegacyCoreModTransformers {
             if (bytes == null) {
                 // A vanilla class the shim has no hand-written version of: coremods still name it (ClassWriter's
                 // frame computation asks for common superclasses), so serve an empty class with its real supertypes.
-                var entryData = org.kylepitcock.legacyconnector.loader.synth.LegacyHierarchyData.forVersion(LegacyVersion.V1_7_10).get(internal);
+                var entryData = org.kylepitcock.legacyconnector.loader.synth.LegacyHierarchyData.forVersion(hierarchy).get(internal);
                 if (entryData == null) {
                     // A Minecraft class of the mod's own version (1.5.2 names such as net.minecraft.network.packet.Packet are not in the 1.7.10
                     // data): mod classes whose static initialisers install transformers (Immibis Core) only name it in signatures, and the verifier

@@ -86,6 +86,7 @@ public final class NeiBridge {
         if (configsLoaded) return;
         configsLoaded = true;
         fillItemList();
+        legacyconnector.v1_7_10.codechicken.nei.recipe.FurnaceRecipeHandler.mcc$findFuels();
         ClassLoader loader = Thread.currentThread().getContextClassLoader();
         int n = 0;
         for (var file : ModList.get().getModFiles()) {
@@ -181,7 +182,7 @@ public final class NeiBridge {
                 for (int i = 0; i < h.numRecipes(); i++) {
                     try {
                         PositionedStack result = h.getResultStack(i);
-                        out.add(new Recipe(slots(h.getIngredientStacks(i)), slots(result == null ? List.of() : List.of(result)), slots(h.getOtherStacks(i)), h, i));
+                        out.add(promote(handler, new Recipe(slots(h.getIngredientStacks(i)), slots(result == null ? List.of() : List.of(result)), slots(h.getOtherStacks(i)), h, i)));
                     } catch (RuntimeException | LinkageError e) {
                         // skip a broken recipe
                     }
@@ -209,7 +210,106 @@ public final class NeiBridge {
         return out;
     }
 
-    private static final Map<String, List<Recipe>> LOOKUPS = new java.util.concurrent.ConcurrentHashMap<>();
+    /** The usage lookups {@link #promote} asks, unpromoted, by handler class and item. */
+    private static final Map<String, List<Recipe>> RAW_USAGE = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static List<Recipe> rawUsage(TemplateRecipeHandler handler, net.minecraft.world.item.ItemStack stack) {
+        String key = handler.getClass().getName() + "|" + net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem())
+                + "|" + stack.getOrDefault(org.kylepitcock.legacyconnector.core.data.CompatComponents.legacyMeta(), 0);
+        List<Recipe> cached = RAW_USAGE.get(key);
+        if (cached != null) return cached;
+        List<Recipe> out = new ArrayList<>();
+        try {
+            TemplateRecipeHandler h = handler.newInstance();
+            h.loadUsageRecipes("item", ItemStack.mcc$wrap(stack));
+            for (int i = 0; i < h.numRecipes(); i++) {
+                try {
+                    PositionedStack result = h.getResultStack(i);
+                    out.add(new Recipe(slots(h.getIngredientStacks(i)), slots(result == null ? List.of() : List.of(result)), List.of(), h, i));
+                } catch (RuntimeException | LinkageError e) {
+                    // skip a broken recipe
+                }
+            }
+        } catch (RuntimeException | LinkageError e) {
+            // a handler that cannot answer for this item
+        }
+        RAW_USAGE.put(key, out);
+        return out;
+    }
+
+    private static String signature(Recipe r) {
+        StringBuilder sb = new StringBuilder();
+        for (Slot s : r.inputs()) sb.append(slotKey(s)).append(',');
+        sb.append("->");
+        for (Slot s : r.outputs()) sb.append(slotKey(s)).append(',');
+        return sb.toString();
+    }
+
+    /**
+     * The recipes of a handler's item lookup that JEI would not show anyway: JEI already lists the recipes registered with the category
+     * for a focus (by its inputs or outputs), so a lookup result equal to one of them is dropped, or the recipe appears twice.
+     */
+    public static List<Recipe> withoutRegistered(List<Recipe> looked, List<Recipe> registered, net.minecraft.world.item.ItemStack focus, boolean usage) {
+        if (registered.isEmpty() || looked.isEmpty()) return looked;
+        Map<String, List<Recipe>> bySignature = new java.util.HashMap<>();
+        for (Recipe r : registered) {
+            if (r.inputs().isEmpty() && r.outputs().isEmpty()) continue;
+            bySignature.computeIfAbsent(signature(r), k -> new ArrayList<>()).add(r);
+        }
+        List<Recipe> out = new ArrayList<>();
+        for (Recipe r : looked) {
+            boolean listed = false;
+            if (!r.inputs().isEmpty() || !r.outputs().isEmpty()) {
+                for (Recipe known : bySignature.getOrDefault(signature(r), List.of())) {
+                    if (listsStack(usage ? known.inputs() : known.outputs(), focus)) {
+                        listed = true;
+                        break;
+                    }
+                }
+            }
+            if (!listed) out.add(r);
+        }
+        return out;
+    }
+
+    private static boolean listsStack(List<Slot> slots, net.minecraft.world.item.ItemStack focus) {
+        for (Slot s : slots) for (var st : s.stacks()) if (st.getItem() == focus.getItem() && st.getOrDefault(org.kylepitcock.legacyconnector.core.data.CompatComponents.legacyMeta(), 0).equals(focus.getOrDefault(org.kylepitcock.legacyconnector.core.data.CompatComponents.legacyMeta(), 0))) return true;
+        return false;
+    }
+
+    private static String slotKey(Slot s) {
+        var first = s.stacks().get(0);
+        return net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(first.getItem()) + "@" + first.getOrDefault(org.kylepitcock.legacyconnector.core.data.CompatComponents.legacyMeta(), 0) + "x" + first.getCount();
+    }
+
+    /**
+     * NEI's "other stacks" hold two different things: what a machine merely needs (a furnace's fuel, a catalyst) and a recipe's further ingredients
+     * (the second input of a two-input machine). JEI must list the second kind as inputs, or the item's "uses" miss the recipe. A slot is an ingredient
+     * exactly when the handler's own usage lookup for that item finds this recipe, which is the test NEI's "show uses" applied.
+     */
+    private static Recipe promote(TemplateRecipeHandler handler, Recipe r) {
+        if (r.others().isEmpty() || r.outputs().isEmpty() && r.inputs().isEmpty()) return r;
+        String signature = signature(r);
+        List<Slot> inputs = new ArrayList<>(r.inputs());
+        List<Slot> others = new ArrayList<>();
+        for (Slot s : r.others()) {
+            boolean ingredient = false;
+            try {
+                for (Recipe u : rawUsage(handler, s.stacks().get(0))) {
+                    if (!u.inputs().isEmpty() && signature(u).equals(signature)) {
+                        ingredient = true;
+                        break;
+                    }
+                }
+            } catch (RuntimeException | LinkageError e) {
+                // not decidable: it stays a catalyst
+            }
+            (ingredient ? inputs : others).add(s);
+        }
+        return inputs.size() == r.inputs().size() ? r : new Recipe(inputs, r.outputs(), others, r.handler(), r.index());
+    }
+
+    private static final Map<String, List<Recipe>> LOOKUPS =new java.util.concurrent.ConcurrentHashMap<>();
 
     /**
      * The recipes a handler shows for one item, as NEI asked on a recipe/usage lookup: {@code loadCraftingRecipes("item", stack)}
@@ -231,7 +331,7 @@ public final class NeiBridge {
             for (int i = 0; i < h.numRecipes(); i++) {
                 try {
                     PositionedStack result = h.getResultStack(i);
-                    out.add(new Recipe(slots(h.getIngredientStacks(i)), slots(result == null ? List.of() : List.of(result)), slots(h.getOtherStacks(i)), h, i));
+                    out.add(promote(handler, new Recipe(slots(h.getIngredientStacks(i)), slots(result == null ? List.of() : List.of(result)), slots(h.getOtherStacks(i)), h, i)));
                 } catch (RuntimeException | LinkageError e) {
                     // skip a broken recipe
                 }
@@ -290,6 +390,8 @@ public final class NeiBridge {
         if (catalysts.isEmpty()) {
             java.util.LinkedHashSet<String> namespaces = new java.util.LinkedHashSet<>();
             if (owner != null) namespaces.add(owner);
+            // a jar with several mods (Thermal Expansion: core items, factory machines, energy, transport) keeps its machines in a sibling mod
+            namespaces.addAll(siblingNamespaces(handler.getClass(), owner));
             if (resultNamespace != null && !resultNamespace.equals("minecraft")) namespaces.add(resultNamespace);
             net.minecraft.world.item.ItemStack match = bestMatch(namespaces, title, handler.getClass().getSimpleName());
             if (match != null) catalysts.add(match);
@@ -362,6 +464,29 @@ public final class NeiBridge {
         } catch (RuntimeException | LinkageError e) {
             return null;
         }
+    }
+
+    /** The namespaces of the other legacy mods in the jar a class is in, nearest package first (the machine of a handler may be in any of them). */
+    private static List<String> siblingNamespaces(Class<?> type, String owner) {
+        List<String> out = new ArrayList<>();
+        try {
+            record Hit(String ns, int length) {}
+            List<Hit> hits = new ArrayList<>();
+            for (var c : legacyconnector.v1_7_10.cpw.mods.fml.common.Loader.instance().getActiveModList()) {
+                Object mod = c.getMod();
+                if (mod == null || c.getModId() == null) continue;
+                Class<?> modType = mod.getClass();
+                boolean sameJar = type.getModule().isNamed() ? modType.getModule() == type.getModule() : modType.getClassLoader() == type.getClassLoader();
+                if (!sameJar) continue;
+                String ns = org.kylepitcock.legacyconnector.core.Ids.namespace(c.getModId());
+                if (!ns.equals(owner)) hits.add(new Hit(ns, commonPrefix(type.getName(), modType.getName())));
+            }
+            hits.sort((a, b) -> Integer.compare(b.length(), a.length()));
+            for (Hit h : hits) if (!out.contains(h.ns())) out.add(h.ns());
+        } catch (RuntimeException | LinkageError e) {
+            // only the owner's namespace is searched
+        }
+        return out;
     }
 
     private static int commonPrefix(String a, String b) {

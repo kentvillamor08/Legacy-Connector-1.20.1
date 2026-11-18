@@ -52,6 +52,9 @@ public final class AssetsB173 implements GeneratedPack.Contributor {
     /** b1.7.3 terrain.png sprite index -> modern block texture, for the sprites mods reuse. */
     private static final Map<Integer, String> VANILLA_TERRAIN = new HashMap<>();
 
+    // ImageIO otherwise buffers every PNG it writes through a temporary file: thousands of generated sprites spent seconds on disk I/O
+    static { javax.imageio.ImageIO.setUseCache(false); }
+
     static {
         String[] row = {"grass_block_top", "stone", "dirt", "grass_block_side", "oak_planks", "smooth_stone_slab_side", "smooth_stone", "bricks",
                 "tnt_side", "tnt_top", "tnt_bottom", "cobweb", "poppy", "dandelion", null, "oak_sapling",
@@ -65,6 +68,7 @@ public final class AssetsB173 implements GeneratedPack.Contributor {
                 "clay", "sugar_cane", "note_block", "jukebox_top", null, null, null, null,
                 "torch", null, null, "ladder", null, null, "farmland_moist", "farmland"};
         for (int i = 0; i < row.length; i++) if (row[i] != null) VANILLA_TERRAIN.put(i, row[i]);
+        VANILLA_TERRAIN.put(14, "nether_portal");
         VANILLA_TERRAIN.put(31, "fire_0");
         VANILLA_TERRAIN.put(47, "fire_1");
         for (int s = 0; s < 8; s++) VANILLA_TERRAIN.put(88 + s, "wheat_stage" + s);
@@ -76,6 +80,10 @@ public final class AssetsB173 implements GeneratedPack.Contributor {
         VANILLA_TERRAIN.put(105, "glowstone");
         VANILLA_TERRAIN.put(112, "rail_corner");
         VANILLA_TERRAIN.put(115, "redstone_torch_off");
+        // leaves: 52/53 oak fancy/fast, +80 spruce (BlockLeaves picks by metadata and graphics level)
+        VANILLA_TERRAIN.put(53, "oak_leaves");
+        VANILLA_TERRAIN.put(132, "spruce_leaves");
+        VANILLA_TERRAIN.put(133, "spruce_leaves");
         VANILLA_TERRAIN.put(116, "spruce_log");
         VANILLA_TERRAIN.put(117, "birch_log");
         VANILLA_TERRAIN.put(118, "pumpkin_side");
@@ -93,6 +101,12 @@ public final class AssetsB173 implements GeneratedPack.Contributor {
 
     /** b1.7.3 gui/items.png sprite index -> modern item texture, for the icons mods reuse. */
     private static final Map<Integer, String> VANILLA_ITEMS = new HashMap<>();
+
+    /** The gui/items.png sprite index of a vanilla item by its modern name (damage 0), or -1 when the sheet has none for it. */
+    static int vanillaItemSprite(String modernName){
+        for(var entry:VANILLA_ITEMS.entrySet())if(entry.getValue().equals(modernName))return entry.getKey();
+        return -1;
+    }
 
     static {
         String[] armor = {"leather", "chainmail", "iron", "diamond", "golden"};
@@ -121,7 +135,7 @@ public final class AssetsB173 implements GeneratedPack.Contributor {
      * Vanilla textures with transparent pixels, for mod blocks that reuse them. b1.7.3 drew all terrain with an alpha test, so a block
      * whose sprites have holes showed them even as an "opaque" block: such models are cutout ({@link #hasAlpha}).
      */
-    private static final java.util.Set<String> VANILLA_SEE_THROUGH = java.util.Set.of("glass", "oak_leaves", "cobweb", "poppy", "dandelion",
+    private static final java.util.Set<String> VANILLA_SEE_THROUGH = java.util.Set.of("glass", "nether_portal", "oak_leaves", "spruce_leaves", "cobweb", "poppy", "dandelion",
             "oak_sapling", "red_mushroom", "brown_mushroom", "dead_bush", "torch", "ladder", "sugar_cane", "spawner", "rail", "rail_corner",
             "lever", "redstone_torch", "redstone_torch_off", "cactus_side", "cactus_top", "cactus_bottom");
 
@@ -143,15 +157,90 @@ public final class AssetsB173 implements GeneratedPack.Contributor {
         if(reference==null)return null;var id=ResourceLocation.parse(reference);return ResourceLocation.fromNamespaceAndPath(id.getNamespace(),"textures/"+id.getPath()+".png");
     }
 
+    private static final Map<String,Map<Integer,String>> SHEET_TEXTURES=new java.util.concurrent.ConcurrentHashMap<>();
+    /** The sprites of a sheet a Forge world renderer binds by name ({@code MinecraftForgeClient.bindTexture("/eloraam/wiring/redpower1.png")}), by index. */
+    public static Map<Integer,String> sheetTextures(String sheet){
+        if(sheet==null)return Map.of();
+        return SHEET_TEXTURES.getOrDefault(sheet.startsWith("/")?sheet:"/"+sheet,Map.of());
+    }
+
+    /**
+     * Forge's world renderers bind their own sheets by name while a block is drawn. Which ones only shows when a block is drawn, after the
+     * atlas is stitched, so every sheet-shaped image (square, 16 tiles a side) in the jars of the Beta mod set (once any block has its own world renderer) gets
+     * its drawn tiles stitched, and terrain.png is there for a renderer that switches back to it.
+     */
+    /** A plain white sprite: faces a Forge renderer draws with texturing off are this, in their vertex colour. */
+    public static final String WHITE="legacyconnector:block/b173/white";
+    private void worldSheets(){
+        var white=new BufferedImage(16,16,BufferedImage.TYPE_INT_ARGB);
+        for(int y=0;y<16;y++)for(int x=0;x<16;x++)white.setRGB(x,y,0xFFFFFFFF);
+        write(null,"white",white);
+        var mods=new java.util.LinkedHashSet<LegacyModRecord>();
+        for(Block block:ContentB173.blocks()){
+            if(!(block.mcc$owner instanceof LegacyModRecord mod)||!(block.mcc$modern instanceof LegacyB173Block)||!BlockRenderB173.hasRenderer(safe(block::getRenderType,0)))continue;
+            mods.add(mod);
+            // a block is often registered by another mod of its family (RedPower Array's cells by Logic): its sheets sit in the jar of its class
+            var defining=ContentB173.ownerOf(block.getClass());if(defining!=null)mods.add(defining);
+            var renderer=BlockRenderB173.renderer(safe(block::getRenderType,0));
+            if(renderer!=null){var owner=ContentB173.ownerOf(renderer.getClass());if(owner!=null)mods.add(owner);}
+        }
+        if(mods.isEmpty())return;
+        // a renderer binds a sheet by its path, which may sit in any jar of the mod set (RedPower's array cells are Logic's block, drawn from Array's sheet)
+        for(var mod:LegacyMods.all())if(PlatformB173.VERSION.equals(mod.version))mods.add(mod);
+        var terrain=new java.util.TreeMap<Integer,String>();
+        for(int index=0;index<256;index++){String ref=texture(null,TERRAIN,index,false);if(ref!=null&&!ref.equals(MISSING))terrain.put(index,ref);}
+        SHEET_TEXTURES.put(TERRAIN,Map.copyOf(terrain));
+        for(var mod:mods){
+            java.nio.file.Path root;
+            try{root=mod.container.getModInfo().getOwningFile().getFile().getSecureJar().getRootPath();}
+            catch(RuntimeException e){continue;}
+            try(var files=Files.walk(root)){
+                for(var file:(Iterable<Path>)files.filter(f->f.toString().toLowerCase(Locale.ROOT).endsWith(".png"))::iterator){
+                    String sheet="/"+root.relativize(file).toString().replace(root.getFileSystem().getSeparator(),"/");
+                    if(sheet.equals(TERRAIN)||sheet.equals(ITEMS)||SHEET_TEXTURES.containsKey(sheet))continue;
+                    BufferedImage img=sheets.computeIfAbsent(sheet,s->image(mod,s));
+                    if(img==null||img.getWidth()!=img.getHeight()||img.getWidth()<64||img.getWidth()%16!=0)continue;
+                    int tile=img.getWidth()/16;var palette=new java.util.TreeMap<Integer,String>();
+                    for(int index=0;index<256;index++){
+                        if(blank(img,(index%16)*tile,(index/16)*tile,tile))continue;
+                        String ref=texture(mod,sheet,index,false);
+                        if(ref!=null&&!ref.equals(MISSING))palette.put(index,ref);
+                    }
+                    if(!palette.isEmpty())SHEET_TEXTURES.put(sheet,Map.copyOf(palette));
+                }
+            }catch(IOException|RuntimeException e){LOG.debug("b1.7.3 sheets of {} not listed: {}",mod.legacyId,e.toString());}
+        }
+    }
+    private static boolean blank(BufferedImage img,int x0,int y0,int tile){
+        for(int y=y0;y<y0+tile;y++)for(int x=x0;x<x0+tile;x++)if((img.getRGB(x,y)>>>24)!=0)return false;
+        return true;
+    }
+
     /** Palette baked into the atlas for world-dependent face selection. */
     public static Map<Integer,String> worldTextures(Block block) { return WORLD_TEXTURES.getOrDefault(block,Map.of()); }
     public static boolean usesWorldTextures(Block block) {
         try { return block.getClass().getMethod("getTextureId",legacyconnector.vb1_7_3.net.minecraft.world.BlockView.class,int.class,int.class,int.class,int.class).getDeclaringClass()!=Block.class; }
         catch(ReflectiveOperationException e){return false;}
     }
+    private static final Map<Block,java.util.concurrent.locks.ReentrantLock> FACE_LOCKS = new java.util.concurrent.ConcurrentHashMap<>();
+    /**
+     * A block's face callback runs one thread at a time. A mod's callback may read a tile entity's own (server) world, which from a mesher
+     * thread waits for the server thread; so the server thread never waits for the lock (it returns null and asks again next tick),
+     * or the two would wait for each other.
+     */
+    public static int[] tryFaceTextures(Block block,net.minecraft.world.level.BlockGetter level,net.minecraft.core.BlockPos pos,net.minecraft.world.level.block.state.BlockState state) {
+        var lock = FACE_LOCKS.computeIfAbsent(block, b -> new java.util.concurrent.locks.ReentrantLock());
+        if (!lock.tryLock()) return null;
+        try { return faceTexturesLocked(block, level, pos, state); } finally { lock.unlock(); }
+    }
     public static int[] faceTextures(Block block,net.minecraft.world.level.BlockGetter level,net.minecraft.core.BlockPos pos,net.minecraft.world.level.block.state.BlockState state) {
+        var lock = FACE_LOCKS.computeIfAbsent(block, b -> new java.util.concurrent.locks.ReentrantLock());
+        lock.lock();
+        try { return faceTexturesLocked(block, level, pos, state); } finally { lock.unlock(); }
+    }
+    private static int[] faceTexturesLocked(Block block,net.minecraft.world.level.BlockGetter level,net.minecraft.core.BlockPos pos,net.minecraft.world.level.block.state.BlockState state) {
         var view=new BlockQueryB173(level,pos,state);int[] faces=new int[6];
-        synchronized(block) { for(int side=0;side<6;side++){final int s=side;faces[side]=safe(()->block.getTextureId(view,pos.getX(),pos.getY(),pos.getZ(),s),block.textureId);} }
+        for(int side=0;side<6;side++){final int s=side;faces[side]=safe(()->block.getTextureId(view,pos.getX(),pos.getY(),pos.getZ(),s),block.textureId);}
         return faces;
     }
 
@@ -185,6 +274,7 @@ public final class AssetsB173 implements GeneratedPack.Contributor {
         ProjectileTexturesB173.contribute(out);
         sprites.clear();
         SPRITE_REFS.clear();
+        SHEET_TEXTURES.clear();
         sheets.clear();
         withAlpha.clear();
         missing = 0;
@@ -216,6 +306,7 @@ public final class AssetsB173 implements GeneratedPack.Contributor {
                 LOG.warn("No model for b1.7.3 item {}: {}", item, e.toString());
             }
         }
+        worldSheets();
         LOG.info("b1.7.3 assets: {} blocks, {} items, {} textures; {} sprite references without a texture", blocks, items,
                 sprites.values().stream().filter(s -> !s.startsWith("minecraft:")).distinct().count(), missing);
         this.out = null;
@@ -233,7 +324,7 @@ public final class AssetsB173 implements GeneratedPack.Contributor {
         Map<String, String> modelByJson = new LinkedHashMap<>();
         String[] metaModels = new String[16];
         Map<Integer,String> palette=new java.util.TreeMap<>();
-        if(usesWorldTextures(block) || BlockRenderB173.hasRenderer(renderType)) {
+        if(usesWorldTextures(block) || BlockRenderB173.capturesWorld(block)) {
             // Include faces only encountered beside neighbours or with a tile entity, before atlas stitching.
             var indices=new java.util.TreeSet<Integer>();for(int i=0;i<256;i++)indices.add(i);
             for(var o:ContentB173.textureOverrides())if(o.sheet().equals(sheet))indices.add(o.index());
@@ -272,7 +363,41 @@ public final class AssetsB173 implements GeneratedPack.Contributor {
         put("assets/" + id.getNamespace() + "/blockstates/" + id.getPath() + ".json", state);
 
         var item = block.mcc$modern.asItem();
-        if (item != net.minecraft.world.item.Items.AIR) itemModels(block, mod, sheet, renderType, metaModels, item);
+        if (item != net.minecraft.world.item.Items.AIR) itemModels(block, mod, sheet, renderType,
+                usesWorldTextures(block) ? inventoryModels(block, mod, sheet, renderType, opaque, layer, id, metaModels) : metaModels, item);
+    }
+
+    /**
+     * Beta drew a block in inventories with {@code getBlockTextureFromSideAndMetadata}, not the world lookup a block that reads its tile entity
+     * (IC2 machines: their front by facing) answers without one: such blocks get item models from the inventory textures per metadata.
+     */
+    private String[] inventoryModels(Block block, LegacyModRecord mod, String sheet, int renderType, boolean opaque, int layer, ResourceLocation id, String[] world) {
+        String[] models = new String[16];
+        Map<String, String> byJson = new LinkedHashMap<>();
+        for (int meta = 0; meta < 16; meta++) {
+            final int m = meta;
+            String[] tex = new String[6];
+            boolean failed = false;
+            for (int side = 0; side < 6; side++) {
+                final int s = side;
+                int index = safe(() -> block.getTexture(s, m), Integer.MIN_VALUE);
+                if (index == Integer.MIN_VALUE) { failed = true; break; }
+                tex[side] = texture(mod, sheet, index, false);
+            }
+            if (failed) { models[meta] = world[meta]; continue; }
+            boolean seeThrough = false;
+            for (String t : tex) seeThrough |= hasAlpha(t);
+            String json = GSON.toJson(blockModel(block, renderType, tex, opaque && !seeThrough, layer, meta));
+            String name = byJson.get(json);
+            if (name == null) {
+                name = id.getNamespace() + ":block/b173/" + id.getPath() + "_inv" + meta;
+                byJson.put(json, name);
+                byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+                out.put("assets/" + id.getNamespace() + "/models/block/b173/" + id.getPath() + "_inv" + meta + ".json", () -> bytes);
+            }
+            models[meta] = name;
+        }
+        return models;
     }
 
     /**
@@ -314,6 +439,19 @@ public final class AssetsB173 implements GeneratedPack.Contributor {
                 put("assets/" + itemId.getNamespace() + "/models/item/b173/" + itemId.getPath() + "_m" + meta + ".json", flatModel);
             }
         }
+        if (item instanceof LegacyB173BlockItem && !flat && BlockRenderB173.inventoryRenderer(block) != null) {
+            // The mod draws this block as an item itself (RenderInvBlock): a custom item renderer, with a block's display transforms.
+            JsonObject entity = new JsonObject();
+            entity.addProperty("parent", "minecraft:builtin/entity");
+            entity.add("display", GSON.fromJson("{\"gui\":{\"rotation\":[30,225,0],\"translation\":[0,0,0],\"scale\":[0.625,0.625,0.625]},"
+                    + "\"ground\":{\"rotation\":[0,0,0],\"translation\":[0,3,0],\"scale\":[0.25,0.25,0.25]},"
+                    + "\"fixed\":{\"rotation\":[0,0,0],\"translation\":[0,0,0],\"scale\":[0.5,0.5,0.5]},"
+                    + "\"thirdperson_righthand\":{\"rotation\":[75,45,0],\"translation\":[0,2.5,0],\"scale\":[0.375,0.375,0.375]},"
+                    + "\"firstperson_righthand\":{\"rotation\":[0,45,0],\"translation\":[0,0,0],\"scale\":[0.4,0.4,0.4]},"
+                    + "\"firstperson_lefthand\":{\"rotation\":[0,225,0],\"translation\":[0,0,0],\"scale\":[0.4,0.4,0.4]}}", JsonObject.class));
+            put("assets/" + itemId.getNamespace() + "/models/item/" + itemId.getPath() + ".json", entity);
+            return;
+        }
         JsonObject itemModel;
         if (flat) {
             itemModel = GSON.fromJson(models[0], JsonObject.class);
@@ -353,10 +491,11 @@ public final class AssetsB173 implements GeneratedPack.Contributor {
     private static JsonObject boundedBlockModel(Block block, int renderType, String[] tex, boolean opaque, int layer,int meta) {
         JsonObject model = new JsonObject();
         JsonObject textures = new JsonObject();
+        boolean tinted=BlockTintB173.hasColor(block);
         switch (renderType) {
             case 11 -> {model.addProperty("parent","minecraft:block/fence_inventory");textures.addProperty("texture",tex[0]);textures.addProperty("particle",tex[0]);}
             case 1 -> { // crossed squares: flowers, saplings, reeds
-                model.addProperty("parent", "minecraft:block/cross");
+                model.addProperty("parent", tinted?"minecraft:block/tinted_cross":"minecraft:block/cross");
                 textures.addProperty("cross", tex[0]);
                 textures.addProperty("particle", tex[0]);
                 model.addProperty("render_type", "minecraft:cutout");
@@ -383,9 +522,10 @@ public final class AssetsB173 implements GeneratedPack.Contributor {
                 textures.addProperty("particle", tex[2]);
                 double x0 = block.minX, y0 = block.minY, z0 = block.minZ, x1 = block.maxX, y1 = block.maxY, z1 = block.maxZ;
                 boolean full = x0 <= 0 && y0 <= 0 && z0 <= 0 && x1 >= 1 && y1 >= 1 && z1 >= 1 || x1 <= x0 || y1 <= y0 || z1 <= z0;
-                if (full) {
+                if (full && !tinted) {
                     model.addProperty("parent", "minecraft:block/cube");
                 } else {
+                    if(full){x0=y0=z0=0;x1=y1=z1=1;}
                     model.addProperty("parent", "minecraft:block/block");
                     JsonObject element = new JsonObject();
                     element.add("from", vec(x0, y0, z0));
@@ -395,6 +535,7 @@ public final class AssetsB173 implements GeneratedPack.Contributor {
                     for (int i = 0; i < 6; i++) {
                         JsonObject f = new JsonObject();
                         f.addProperty("texture", "#" + faces[i]);
+                        if(tinted)f.addProperty("tintindex",0);
                         final int face=i;
                         if(safe(()->block.getTexture(face,meta),block.textureId)<0) {
                             JsonArray uv=new JsonArray();for(int v:new int[]{16,0,0,16})uv.add(v);f.add("uv",uv);
@@ -500,7 +641,9 @@ public final class AssetsB173 implements GeneratedPack.Contributor {
         }
         if (sheet.equals(TERRAIN)) {
             String vanilla = VANILLA_TERRAIN.get(index);
-            return vanilla == null ? null : "minecraft:block/" + vanilla;
+            if (vanilla != null) return "minecraft:block/" + vanilla;
+            var sprite = VanillaSpritesB173.sprite(index);
+            return sprite == null ? null : write(null, "vanilla_sprite_" + index, sprite);
         }
         if (sheet.equals(ITEMS)) {
             String vanilla = VANILLA_ITEMS.get(index);

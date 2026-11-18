@@ -17,12 +17,16 @@ public final class NeutralEntitiesB173 {
                             && java.util.Objects.equals(type.getProtectionDomain().getCodeSource(),mod.getClass().getProtectionDomain().getCodeSource())){installed=true;break;}
                 }catch(SecurityException ignored){}
             }
+            // packages several mods bundle (IC2's ic2.*, also shipped by Dynamo) are moved into the shared-API module by the loader
+            if(!installed&&type.getModule()!=null&&"legacyconnector.shared.apis".equals(type.getModule().getName())&&!ContentB173.loadedMods().isEmpty()
+                    &&type.getClassLoader()==ContentB173.loadedMods().iterator().next().getClass().getClassLoader())installed=true;
             if(!installed)return "class is not owned by an installed original mod";
-            try{type.getConstructor(World.class);}catch(NoSuchMethodException e){return "no World restore constructor";}
-            String closure=AnimalsB173.unsupportedBehaviour(type,java.util.Set.of("shouldRender","getShadowRadius","getTargetingMargin","setVelocityClient"));
+            try{restoreConstructor(type);}catch(NoSuchMethodException e){return "no World restore constructor";}
+            String closure=AnimalsB173.unsupportedBehaviour(type,java.util.Set.of("shouldRender","getShadowRadius","getTargetingMargin","setVelocityClient","getBoundingBox","getCollisionAgainstShape","bypassesSteppingEffects","animateHurt"));
             return closure==null?"":closure;
         }
     };
+    private static final java.util.Set<Class<?>> REFUSED=java.util.concurrent.ConcurrentHashMap.newKeySet();
     public static String unsupportedReason(Class<?> type){String reason=REJECTION.get(type);return reason.isEmpty()?null:reason;}
     public static boolean supports(Class<?> type){return unsupportedReason(type)==null;}
     public static Class<? extends Entity> savedType(String name){
@@ -32,19 +36,28 @@ public final class NeutralEntitiesB173 {
         }catch(ClassNotFoundException|LinkageError ignored){}
         return null;
     }
+    private static java.lang.reflect.Constructor<? extends Entity> restoreConstructor(Class<?> type)throws NoSuchMethodException{
+        var entity=type.asSubclass(Entity.class);
+        try{return entity.getConstructor(World.class);}
+        catch(NoSuchMethodException missing){return entity.getConstructor(World.class,double.class,double.class,double.class);}
+    }
     public static Entity restore(String name,net.minecraft.world.level.Level level){
         Class<? extends Entity> type=savedType(name);if(type==null)return null;
-        try{return type.getConstructor(World.class).newInstance(World.mcc$wrap(level));}
+        try{var constructor=restoreConstructor(type);return constructor.getParameterCount()==1?constructor.newInstance(World.mcc$wrap(level)):constructor.newInstance(World.mcc$wrap(level),0D,0D,0D);}
         catch(ReflectiveOperationException|LinkageError e){throw new IllegalStateException("Cannot restore admitted original entity "+name,e);}
     }
     public static boolean spawn(net.minecraft.world.level.Level level,Entity original){
-        if(level.isClientSide||original.mcc$modern!=null||!supports(original.getClass()))return false;
+        if(level.isClientSide||original.mcc$modern!=null)return false;
+        if(!supports(original.getClass())){
+            if(REFUSED.add(original.getClass()))org.slf4j.LoggerFactory.getLogger("LegacyConnector/b1.7.3").warn("Beta entity {} is not hosted: {}",original.getClass().getName(),unsupportedReason(original.getClass()));
+            return false;
+        }
         net.minecraft.world.entity.Entity nativeHost=null;boolean added=false;
         try{
             if(original instanceof legacyconnector.vb1_7_3.net.minecraft.entity.ItemEntity){
                 var item=new LegacyB173ItemEntity(org.kylepitcock.legacyconnector.LegacyConnector.BETA_ITEM_ENTITY.get(),level);nativeHost=item;item.bind(original);
             }else{var entity=new LegacyB173Entity(org.kylepitcock.legacyconnector.LegacyConnector.BETA_ENTITY.get(),level);nativeHost=entity;entity.bind(original);}
-            added=level.addFreshEntity(nativeHost);if(added)EntityViewsB173.spawned(nativeHost,original);return added;
+            added=World.mcc$wrap(level).mcc$spawnNative(nativeHost);if(added)EntityViewsB173.spawned(nativeHost,original);return added;
         }catch(RuntimeException|LinkageError error){org.slf4j.LoggerFactory.getLogger("LegacyConnector/b1.7.3").error("Cannot spawn original neutral entity {}",original.getClass().getName(),error);return false;}
         finally{if(!added){original.mcc$modern=null;if(nativeHost!=null)nativeHost.discard();}}
     }

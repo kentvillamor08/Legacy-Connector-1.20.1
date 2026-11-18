@@ -26,6 +26,14 @@ import org.kylepitcock.legacyconnector.core.registry.LegacyRegistrar;
 public final class CreativeTabsB173 {
     private CreativeTabsB173() {}
 
+    /** The modern tab id of every Beta mod that has one (modern id of the mod -> tab id). */
+    private static final Map<String, ResourceLocation> TABS = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** The id of the creative tab made for the mod with this modern id (Beta has no tab objects: one tab per mod), or null. */
+    public static ResourceLocation tabOfMod(String modernModId) {
+        return TABS.get(modernModId);
+    }
+
     public static void register() {
         Map<LegacyModRecord, List<Object>> byMod = new LinkedHashMap<>();
         for (Block b : ContentB173.blocks()) {
@@ -42,7 +50,8 @@ public final class CreativeTabsB173 {
         for (var e : byMod.entrySet()) {
             LegacyModRecord mod = e.getKey();
             List<Object> content = e.getValue();
-            ResourceLocation id = ResourceLocation.fromNamespaceAndPath("legacyconnector", "b173_" + mod.modernId);
+            ResourceLocation id = ResourceLocation.fromNamespaceAndPath("legacyconnector", mod.modernId.startsWith("b173_") ? mod.modernId : "b173_" + mod.modernId);
+            TABS.put(mod.modernId, id);
             if (BuiltInRegistries.CREATIVE_MODE_TAB.containsKey(id)) continue;
             CreativeModeTab tab = CreativeModeTab.builder()
                     .title(Component.literal(mod.legacyId))
@@ -56,6 +65,15 @@ public final class CreativeTabsB173 {
                     .withTabsBefore(CreativeModeTabs.SPAWN_EGGS)
                     .build();
             LegacyRegistrar.register(BuiltInRegistries.CREATIVE_MODE_TAB, id, tab);
+        }
+    }
+
+    /** Every subtype the mod's recipes make of an item (RedPower's wires and covers are damage values of one block item). */
+    private static void addCrafted(java.util.Set<ItemStack> out, int itemId) {
+        for (int damage : RecipesB173.craftedDamages(itemId)) {
+            if (damage == 0) continue;
+            var stack = StacksB173.toModern(itemId, 1, damage);
+            if (!stack.isEmpty()) out.add(stack);
         }
     }
 
@@ -81,8 +99,10 @@ public final class CreativeTabsB173 {
                     s.set(DataComponents.BLOCK_STATE, BlockItemStateProperties.EMPTY.with(LegacyB173Block.META, meta));
                     out.add(s);
                 }
+                addCrafted(out, b.id);
             } else if (o instanceof Item i) {
                 out.add(new ItemStack(i.mcc$modern));
+                if (i.hasSubtypes()) addCrafted(out, i.id);
             }
         }
         return new ArrayList<>(out);

@@ -44,7 +44,7 @@ public class LegacyEnchantment {
     }
 
     private final Rarity rarity;
-    public final LegacyEnchantmentCategory category;
+    public LegacyEnchantmentCategory category;
     private final EquipmentSlot[] slots;
     private String descriptionId;
     private Holder<Enchantment> vanilla;
@@ -105,6 +105,39 @@ public class LegacyEnchantment {
         };
         e.vanilla = holder;
         return e;
+    }
+
+    /**
+     * {@code Enchantment.byId(int)}: the enchantment with that numeric registry id, or null. APPROXIMATION: the numbering is that of the legacy enchantment
+     * registry of this layer (mod enchantments in registration order), not 1.20.1's vanilla numbering (vanilla enchantments are data now).
+     */
+    public static LegacyEnchantment byId(int id) {
+        return LegacyEnchantments.REGISTRY.byId(id);
+    }
+
+    /** A stand-in for a vanilla enchantment that is known by id only (no registry yet): equal to every other stand-in of the id. */
+    public static LegacyEnchantment ofId(ResourceLocation id) {
+        return new LegacyEnchantment(Rarity.COMMON, null, new EquipmentSlot[0]) {
+            @Override
+            public ResourceLocation wrappedId() {
+                return id;
+            }
+
+            @Override
+            public String getDescriptionId() {
+                return Util.makeDescriptionId("enchantment", id);
+            }
+
+            @Override
+            public boolean equals(Object o) {
+                return o instanceof LegacyEnchantment other && id.equals(other.wrappedId());
+            }
+
+            @Override
+            public int hashCode() {
+                return id.hashCode();
+            }
+        };
     }
 
     // ------------------------------------------------------------------ the 1.20.1 surface
@@ -183,6 +216,11 @@ public class LegacyEnchantment {
         return category != null && category.canEnchant(stack.getItem());
     }
 
+    /** Forge's {@code Enchantment.canApplyAtEnchantingTable(stack)}: asks the item, whose default is the primary-item test. */
+    public boolean canApplyAtEnchantingTable(ItemStack stack) {
+        return stack.getItem().isPrimaryItemFor(stack, holder());
+    }
+
     public void doPostAttack(LivingEntity attacker, Entity target, int level) {
     }
 
@@ -210,6 +248,11 @@ public class LegacyEnchantment {
     }
 
     // ------------------------------------------------------------------ bridge to 1.21.1
+
+    /** The id of the data-driven entry this wraps (a vanilla or native enchantment), or null for an enchantment a mod registered itself. */
+    public ResourceLocation wrappedId() {
+        return vanilla == null ? null : vanilla.unwrapKey().map(ResourceKey::location).orElse(null);
+    }
 
     /** The holder of this enchantment in the running game's data-driven registry. */
     public Holder<Enchantment> holder() {

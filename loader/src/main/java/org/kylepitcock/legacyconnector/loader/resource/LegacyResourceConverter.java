@@ -29,6 +29,7 @@ import java.util.Set;
  * </ul>
  */
 public final class LegacyResourceConverter {
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger("Legacy Connector");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
     /** Legacy texture folders that must be added to the modern atlases. */
@@ -66,6 +67,9 @@ public final class LegacyResourceConverter {
             String jsonPath = modern.substring(0, modern.length() - ".lang".length()) + ".json";
             Map<String, String> entries = langs.computeIfAbsent(jsonPath, k -> new LinkedHashMap<>());
             parseLang(new String(data, StandardCharsets.UTF_8), entries);
+            // CoFH's mods keep their language files in assets/<ns>/language/ and read them themselves (BaseMod.LangManager through the resource
+            // manager): the original stays where the mod looks for it
+            if (!modern.contains("/lang/")) output.putIfAbsent(path, data);
             return true;
         }
         if (modern.matches("assets/[^/]+/recipes/.+\\.json")) {
@@ -103,12 +107,58 @@ public final class LegacyResourceConverter {
             if (modern.contains("/models/")) {
                 data = qualifySelfParent(data, modern);
                 data = renameForgeModelLoader(data);
+                byte[] readable = dropUnreadableOverrides(data, modern);
+                if (readable != null) {
+                    // the mod's own loader reads the original (legacy resource manager: RAW_ROOT first), the modern model loader the cleaned copy
+                    output.putIfAbsent(RAW_ROOT + modern, data);
+                    data = readable;
+                }
                 addVineModels(data);
             }
+            collectModelRefs(data);
+        }
+        if (modern.matches("assets/minecraft/textures/(blocks|items)/.+\\.png(\\.mcmeta)?")) {
+            // a mod's own texture in the minecraft namespace (ConquestReforged's blocks/rebellion/..., Epic Knights' items/...): models name it by
+            // the 1.21 folder and name (block/..., see vanillaTexture), so it is also written there; the original stays for code that binds the old path
+            String rest = modern.substring("assets/minecraft/textures/".length());
+            String ext = rest.endsWith(".mcmeta") ? ".png.mcmeta" : ".png";
+            String moved = VanillaTextureRenames.modern(rest.substring(0, rest.length() - ext.length())) + ext;
+            if (!moved.equals(rest)) output.putIfAbsent("assets/minecraft/textures/" + moved, data);
         }
         ctm.offer(modern, data);
         output.putIfAbsent(modern, data);
         return true;
+    }
+
+    /**
+     * A model whose {@code overrides} are not vanilla item overrides ({@code {"predicate":{...},"model":"ns:x"}}): Tinkers' Construct's {@code .tcon.json} bow
+     * and battle sign models carry per-state {@code textures}/{@code display} entries (or an object instead of an array) that only the mod's own loader
+     * reads. The modern model loader fails the whole model with "Missing model" (and the item renders as the missing model). Returns the model without
+     * those entries (an entry that names a model stays), or null when nothing had to change; the caller keeps the original for the mod's loader.
+     */
+    static byte[] dropUnreadableOverrides(byte[] data, String assetPath) {
+        try {
+            if (!(JsonParser.parseString(new String(data, StandardCharsets.UTF_8)) instanceof JsonObject obj) || !obj.has("overrides")) return null;
+            JsonElement overrides = obj.get("overrides");
+            JsonArray kept = new JsonArray();
+            boolean changed = false;
+            if (overrides instanceof JsonArray arr) {
+                for (JsonElement o : arr) {
+                    if (o instanceof JsonObject oo && oo.get("model") instanceof JsonPrimitive mp && mp.isString()) kept.add(o);
+                    else changed = true;
+                }
+            } else {
+                changed = true;
+            }
+            if (!changed) return null;
+            LOG.debug("{}: {} item override(s) without a model are for the mod's own model loader; the modern copy of the model drops them", assetPath,
+                    overrides instanceof JsonArray a ? a.size() - kept.size() : 1);
+            if (kept.isEmpty()) obj.remove("overrides");
+            else obj.add("overrides", kept);
+            return GSON.toJson(obj).getBytes(StandardCharsets.UTF_8);
+        } catch (RuntimeException e) {
+            return null; // malformed JSON stays as it is
+        }
     }
 
     /** Folder (in the translated jar) holding JSON files from {@code models/} that are not models; the path below it is the original one. */
@@ -136,8 +186,34 @@ public final class LegacyResourceConverter {
         }
     }
 
+    /** Names of the models a blockstate variant or a model's parent/override use, for {@link VanillaModelShims}. */
+    private final java.util.Set<String> modelRefs = new java.util.HashSet<>();
+    private static final java.util.regex.Pattern MODEL_REF = java.util.regex.Pattern.compile("\"(?:model|parent)\"\\s*:\\s*\"([^\"]+)\"");
+
+    private void collectModelRefs(byte[] data) {
+        java.util.regex.Matcher m = MODEL_REF.matcher(new String(data, StandardCharsets.UTF_8));
+        while (m.find()) modelRefs.add(m.group(1));
+    }
+
+    /**
+     * Writes the 1.12 vanilla models this jar names that 1.21.1 no longer has (see {@link VanillaModelShims}): a blockstate names them
+     * relative to {@code models/block/}, a parent by path; the minecraft namespace is vanilla's, anything else is the mod's.
+     */
+    private void addVanillaModelShims() {
+        for (String ref : modelRefs) {
+            int colon = ref.indexOf(':');
+            if (colon >= 0 && !ref.startsWith("minecraft:")) continue;
+            String path = colon < 0 ? ref : ref.substring(colon + 1);
+            for (String candidate : new String[] {path, "block/" + path}) {
+                byte[] json = VanillaModelShims.json(candidate);
+                if (json != null) output.putIfAbsent("assets/minecraft/models/" + candidate + ".json", json);
+            }
+        }
+    }
+
     /** Called once all entries are seen; returns every resource to write into the transformed jar. */
     public Map<String, byte[]> finish() {
+        addVanillaModelShims();
         for (var lang : langs.entrySet()) {
             // A real .json lang shipped next to the .lang wins.
             if (output.containsKey(lang.getKey())) continue;
@@ -304,7 +380,7 @@ public final class LegacyResourceConverter {
         Map<String, String> extra = new java.util.LinkedHashMap<>();
         for (var e : out.entrySet()) {
             String k = e.getKey();
-            if (!k.startsWith("entity.") || !k.endsWith(".name")) continue;
+            if (k.length() < 13 || !k.startsWith("entity.") || !k.endsWith(".name")) continue; // "entity.name" itself has no id
             String mid = k.substring(7, k.length() - 5); // <modid>.<name>
             int dot = mid.indexOf('.');
             if (dot <= 0 || dot == mid.length() - 1 || mid.indexOf('.', dot + 1) >= 0) continue;
@@ -503,6 +579,9 @@ public final class LegacyResourceConverter {
         return out.toString();
     }
 
+    /** Key of a converted model json that keeps a parent name no valid id can hold (read by the 1.12.2 runtime's custom model loading). */
+    public static final String LEGACY_PARENT = "legacyconnector:legacy_parent";
+
     private static void fixRefs(JsonElement element, String key) {
         if (element instanceof JsonObject obj) {
             // item override predicates name properties ("bodyModel"): modern ids take lower case only (the runtime registers them lower-cased)
@@ -514,9 +593,13 @@ public final class LegacyResourceConverter {
                     obj.add("predicate", fixed);
                 }
             }
+            String legacyParent = null;
             for (var e : obj.entrySet()) {
                 if (e.getValue() instanceof JsonPrimitive p && p.isString() && isRefKey(e.getKey(), key)) {
                     String fixed = normalizeRef(p.getAsString());
+                    // a parent that is no valid id names a model of the mod's own model loader (The Betweenlands'
+                    // "item/internal/x$from_item(mod:x)"): the original name is kept for the runtime, which asks the loaders for it
+                    if (e.getKey().equals("parent") && !fixed.equals(p.getAsString().toLowerCase(Locale.ROOT))) legacyParent = p.getAsString();
                     if ("textures".equals(key)) fixed = vanillaTexture(fixed);
                     else if (e.getKey().equals("parent")) fixed = vanillaModel(fixed);
                     e.setValue(new JsonPrimitive(fixed));
@@ -524,6 +607,7 @@ public final class LegacyResourceConverter {
                     fixRefs(e.getValue(), e.getKey());
                 }
             }
+            if (legacyParent != null) obj.addProperty(LEGACY_PARENT, legacyParent);
         } else if (element instanceof JsonArray arr) {
             for (JsonElement e : arr) fixRefs(e, key);
         }

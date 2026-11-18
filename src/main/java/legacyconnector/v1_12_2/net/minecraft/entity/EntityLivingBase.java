@@ -128,7 +128,9 @@ public abstract class EntityLivingBase extends Entity {
 
     public EntityLivingBase(World world) {
         super(world);
-        try {
+        // A vanilla view reaches this World constructor through the bridge's existing-entity binding.
+        // Its native attributes may belong to another mod; constructor defaults are only for new entities.
+        if (!mcc$existingNativeView()) try {
             applyEntityAttributes();
         } catch (RuntimeException | LinkageError e) {
             org.slf4j.LoggerFactory.getLogger("LegacyConnector/Entities").warn("applyEntityAttributes of {} failed: {}", getClass().getName(), e.toString());
@@ -843,6 +845,33 @@ public abstract class EntityLivingBase extends Entity {
     }
 
 
+    /** Phantom: the tick the entity was last hurt by a mob ({@link #mcc$get$revengeTimer}; the modern living entity's own timestamp). */
+    @Deprecated
+    public int revengeTimer;
+    private static final java.lang.reflect.Field MCC$REVENGE = mcc$revengeField();
+
+    private static java.lang.reflect.Field mcc$revengeField() {
+        try {
+            return net.neoforged.fml.util.ObfuscationReflectionHelper.findField(net.minecraft.world.entity.LivingEntity.class, "lastHurtByMobTimestamp");
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    public static int mcc$get$revengeTimer(EntityLivingBase e) {
+        return e.getRevengeTimer();
+    }
+
+    public static void mcc$set$revengeTimer(EntityLivingBase e, int v) {
+        var l = e.mcc$living();
+        if (l == null || MCC$REVENGE == null) return;
+        try {
+            MCC$REVENGE.setInt(l, v);
+        } catch (IllegalAccessException ex) {
+            // keeps the modern timestamp
+        }
+    }
+
     public int getRevengeTimer() {
         var l = mcc$living();
         return l != null ? l.getLastHurtByMobTimestamp() : 0;
@@ -1453,5 +1482,13 @@ public abstract class EntityLivingBase extends Entity {
         } catch (ReflectiveOperationException e) {
             // the shield keeps its durability
         }
+    }
+
+    /** The yaw change a wandering mob wants (read by its movement; mods set it from their own AI). */
+    public float randomYawVelocity;
+
+    /** A shield took a hit: the attacker is pushed back from the blocker. */
+    protected void blockUsingShield(EntityLivingBase attacker) {
+        if (attacker != null) attacker.knockBack(this, 0.5F, mcc$x() - attacker.mcc$x(), mcc$z() - attacker.mcc$z());
     }
 }

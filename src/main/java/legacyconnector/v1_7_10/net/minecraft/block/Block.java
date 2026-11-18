@@ -125,9 +125,30 @@ public class Block {
         // 1.7.10 named a few textures differently from the block (the brick block's is "brick"); mods read the field reflectively.
         this.textureName = "brick_block".equals(info.legacyName()) || "minecraft:brick_block".equals(info.legacyName()) ? "brick" : info.legacyName();
         BlockBridge.initVanilla(this, info);
+        this.blockIndexInTexture = mcc$vanillaTerrainIndex(info.legacyName());
         this.setBlockBounds(0.0F, 0.0F, 0.0F, 1.0F, 1.0F, 1.0F);
         this.opaque = this.isOpaqueCube();
         this.canBlockGrass = !blockMaterial.getCanBlockGrass();
+    }
+
+    /**
+     * 1.4.7 mods read {@code Block.blockIndexInTexture} of vanilla blocks as a field (a tank draws the liquid a stack holds from the tile of its block in
+     * {@code /terrain.png}; water read -1 and drew stone): the tile of the block's name where the sheet has one, else -1 (blocks with per-side tiles).
+     */
+    private static int mcc$vanillaTerrainIndex(String legacyName) {
+        if (legacyName == null) return -1;
+        String name = legacyName.startsWith("minecraft:") ? legacyName.substring(10) : legacyName;
+        switch (name) {
+            case "water", "flowing_water" -> name = "water_still";
+            case "lava", "flowing_lava" -> name = "lava_still";
+            default -> {
+            }
+        }
+        try {
+            return org.kylepitcock.legacyconnector.v1_6_4.bridge.SpriteSheets147.terrainIndexOf(name);
+        } catch (RuntimeException | LinkageError e) {
+            return -1;
+        }
     }
 
     /** Lets the bridge copy modern properties into the protected legacy fields of a vanilla wrapper. */
@@ -310,6 +331,23 @@ public class Block {
     }
 
     public float getBlockHardness(World world, int x, int y, int z) {
+        return HARDNESS_BY_META.get(getClass()) ? getHardness(world.getBlockMetadata(x, y, z)) : this.blockHardness;
+    }
+
+    /** Whether a class overrides {@link #getHardness} (Forge 3.x's per-metadata hardness, Minecraft 1.2.x): only then the metadata is looked up. */
+    private static final ClassValue<Boolean> HARDNESS_BY_META = new ClassValue<>() {
+        @Override
+        protected Boolean computeValue(Class<?> type) {
+            try {
+                return type.getMethod("getHardness", int.class).getDeclaringClass() != Block.class;
+            } catch (ReflectiveOperationException e) {
+                return false;
+            }
+        }
+    };
+
+    /** Forge 3.x (Minecraft 1.2.x): the hardness of a block by metadata; mods override it, the game's {@link #getBlockHardness} asks it. */
+    public float getHardness(int metadata) {
         return this.blockHardness;
     }
 
@@ -437,7 +475,11 @@ public class Block {
     public TileEntity createTileEntity(World world, int metadata) {
         if (!(this instanceof ITileEntityProvider provider)) return null;
         try {
-            return provider.createNewTileEntity(world, metadata);
+            TileEntity made = provider.createNewTileEntity(world, metadata);
+            // 1.2.5: a block that overrides getBlockEntity(metadata) (RedPower's BlockExtended picks the tile class by metadata) has a no-argument factory
+            // that answers null; the loader's bridge turns that factory into createNewTileEntity(World, int), which then hides the metadata entity
+            if (made == null && this instanceof BlockContainer container) made = container.getBlockEntity(metadata);
+            return made;
         } catch (AbstractMethodError e) {
             // a 1.6.4 provider implements createNewTileEntity(World), which has no meta argument
             TileEntity legacy = mcc$createNewTileEntity1(this, world);
@@ -590,6 +632,11 @@ public class Block {
         return this == legacyconnector.v1_7_10.net.minecraft.init.Blocks.farmland && world.getBlockMetadata(x, y, z) > 0;
     }
 
+    /** Whether the block wants scheduled/random updates registered; 1.7.10 answered yes for every block. */
+    public boolean requiresUpdates() {
+        return true;
+    }
+
     public boolean getBlocksMovement(IBlockAccess world, int x, int y, int z) {
         return !getMaterial().blocksMovement();
     }
@@ -673,8 +720,13 @@ public class Block {
         return getFlammability(world, x, y, z, world.getBlockMetadata(x, y, z), face);
     }
 
-    /** Forge 1.6.4 shape with the metadata; the default is the legacy table entry of the block, else the vanilla fire table. */
+    /** Forge 1.6.4 shape with the metadata; the default asks the Forge 3.x shape (an int side), which 1.2.x mods override. */
     public int getFlammability(IBlockAccess world, int x, int y, int z, int metadata, ForgeDirection face) {
+        return getFlammability(world, x, y, z, metadata, face == null ? -1 : face.ordinal());
+    }
+
+    /** Forge 3.x shape ({@code getFlammability(world, x, y, z, metadata, side)}): the legacy table entry of the block, else the vanilla fire table. */
+    public int getFlammability(IBlockAccess world, int x, int y, int z, int metadata, int side) {
         java.util.function.ToIntFunction<Block> legacy = mcc$legacyFlammability;
         int v = legacy == null ? 0 : legacy.applyAsInt(this);
         return v > 0 ? v : legacyconnector.v1_7_10.net.minecraft.init.Blocks.fire.getFlammability(this);
@@ -891,6 +943,13 @@ public class Block {
     public void onPostBlockPlaced(World world, int x, int y, int z, int meta) {
     }
 
+    /**
+     * Minecraft 1.2.5's {@code updateMetadataOnPlaced(world, x, y, z, side)}: called right after the block was set, with the side the item was used
+     * on (1.4.7 moved this into {@code onBlockPlaced}'s metadata). The loader names a mod's override {@code mcc125$updateMetadataOnPlaced}.
+     */
+    public void mcc125$updateMetadataOnPlaced(World world, int x, int y, int z, int side) {
+    }
+
     public void onBlockHarvested(World world, int x, int y, int z, int meta, EntityPlayer player) {
     }
 
@@ -1098,6 +1157,22 @@ public class Block {
     }
 
     public AxisAlignedBB getCollisionBoundingBoxFromPool(World world, int x, int y, int z) {
+        if (mcc$plainVanilla() && world != null) {
+            // a vanilla block seen as a plain Block (air, torches, flowers, rails, water...): its box is the modern block's collision shape at the
+            // position, as 1.7.10's own classes answered (air and liquids: none; MFR's weather collector found the sky blocked by a full box of air)
+            try {
+                var access = world.mcc$level();
+                if (access != null) {
+                    var pos = new net.minecraft.core.BlockPos(x, y, z);
+                    var shape = access.getBlockState(pos).getCollisionShape(access instanceof net.minecraft.world.level.BlockGetter g ? g : net.minecraft.world.level.EmptyBlockGetter.INSTANCE, pos);
+                    if (shape.isEmpty()) return null;
+                    var box = shape.bounds();
+                    return AxisAlignedBB.getBoundingBox(x + box.minX, y + box.minY, z + box.minZ, x + box.maxX, y + box.maxY, z + box.maxZ);
+                }
+            } catch (RuntimeException e) {
+                // fall back to the block bounds
+            }
+        }
         return AxisAlignedBB.getBoundingBox(x + minX, y + minY, z + minZ, x + maxX, y + maxY, z + maxZ);
     }
 
@@ -1105,14 +1180,12 @@ public class Block {
     public legacyconnector.v1_7_10.net.minecraft.util.MovingObjectPosition collisionRayTrace(World world, int x, int y, int z,
             legacyconnector.v1_7_10.net.minecraft.util.Vec3 start, legacyconnector.v1_7_10.net.minecraft.util.Vec3 end) {
         setBlockBoundsBasedOnState(world, x, y, z);
-        net.minecraft.world.phys.AABB box = new net.minecraft.world.phys.AABB(minX, minY, minZ, maxX, maxY, maxZ);
-        var from = new net.minecraft.world.phys.Vec3(start.xCoord - x, start.yCoord - y, start.zCoord - z);
-        var to = new net.minecraft.world.phys.Vec3(end.xCoord - x, end.yCoord - y, end.zCoord - z);
-        var hit = net.minecraft.world.phys.AABB.clip(java.util.List.of(box), from, to, net.minecraft.core.BlockPos.ZERO);
+        // The legacy algorithm (AxisAlignedBB.calculateIntercept): unlike the modern AABB.clip it also hits from a start ON a face or inside
+        // the box. Mods that walk a ray cell by cell start each step on the previous cell's boundary (BucketCraft's own ray trace).
+        var hit = legacyconnector.v1_7_10.net.minecraft.util.AxisAlignedBB.getBoundingBox(minX, minY, minZ, maxX, maxY, maxZ)
+                .calculateIntercept(start.addVector(-x, -y, -z), end.addVector(-x, -y, -z));
         if (hit == null) return null;
-        var at = hit.getLocation();
-        return new legacyconnector.v1_7_10.net.minecraft.util.MovingObjectPosition(x, y, z, hit.getDirection().get3DDataValue(),
-                legacyconnector.v1_7_10.net.minecraft.util.Vec3.createVectorHelper(at.x + x, at.y + y, at.z + z));
+        return new legacyconnector.v1_7_10.net.minecraft.util.MovingObjectPosition(x, y, z, hit.sideHit, hit.hitVec.addVector(x, y, z));
     }
 
     public boolean canPlaceTorchOnTop(World world, int x, int y, int z) {
@@ -1371,5 +1444,52 @@ public class Block {
 
     public boolean isFlowerPot() {
         return false;
+    }
+
+    // Members125 batch 1
+
+    /** 1.2.5 {@code Block.getMiningTime()} (Feather name; the hardness of the block, what {@code getHardness} returned). */
+    public float mcc125$getMiningTime() {
+        return this.blockHardness;
+    }
+
+    /** 1.2.5 {@code Block.getBlockTexture(world, x, y, z, side)}: the sprite index of a side at a position (default: the side's texture for the block's metadata). */
+    public int getBlockTexture(legacyconnector.v1_7_10.net.minecraft.world.IBlockAccess world, int x, int y, int z, int side) {
+        return getBlockTextureFromSideAndMetadata(side, world.getBlockMetadata(x, y, z));
+    }
+
+    // Members125 round 2
+
+    /**
+     * Forge 3.x {@code Block.blockStrength(player, metadata)}: how much of the block the player breaks per tick (the 1.2.x digging formula: hardness by metadata, 1/100 without the
+     * right tool, else the tool speed over 30). The game's own {@link #getPlayerRelativeBlockHardness} asks {@link #getBlockHardness}, which asks the mod's {@link #getHardness}.
+     */
+    public float blockStrength(EntityPlayer player, int metadata) {
+        float hardness = getHardness(metadata);
+        if (hardness < 0.0F) return 0.0F;
+        if (!canHarvestBlock(player, metadata)) return 1.0F / hardness / 100.0F;
+        return player.mcc$breakSpeed(this, metadata) / hardness / 30.0F;
+    }
+
+    /** Forge 3.x {@code Block.blockStrength(world, player, x, y, z)}: the same by the block's metadata and hardness at a position. */
+    public float blockStrength(World world, EntityPlayer player, int x, int y, int z) {
+        int metadata = world.getBlockMetadata(x, y, z);
+        float hardness = getBlockHardness(world, x, y, z);
+        if (hardness < 0.0F) return 0.0F;
+        if (!canHarvestBlock(player, metadata)) return 1.0F / hardness / 100.0F;
+        return player.mcc$breakSpeed(this, metadata) / hardness / 30.0F;
+    }
+
+    /**
+     * 1.2.x {@code Block.requiresSelfNotify[blockId]}: blocks that wanted their neighbours told when only their metadata changed. Since 1.3 every metadata change with the notify flag does
+     * that, so the table only has to exist for the mods that set it (nothing reads it).
+     */
+    public static boolean[] requiresSelfNotify = new boolean[4096];
+
+    // Members125 batch 2
+
+    /** Forge 3.x {@code Block.isBlockSolidOnSide(world, x, y, z, side)} (the int side; 1.7.10: {@code isSideSolid}). */
+    public boolean isBlockSolidOnSide(World world, int x, int y, int z, int side) {
+        return isSideSolid(world, x, y, z, legacyconnector.v1_7_10.net.minecraftforge.common.util.ForgeDirection.getOrientation(side));
     }
 }

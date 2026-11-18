@@ -33,10 +33,11 @@ class SoftLink1201Test implements Opcodes {
     static void index() {
         Mc1201Hierarchy.setMinecraftForTests(Map.of(
                 BASE, new String[] {"java/lang/Object"},
-                SUB, new String[] {BASE}));
+                SUB, new String[] {BASE},
+                "net/minecraft/world/Wide", new String[] {"java/lang/Object"}));
         McMembers1201.setForTests(Map.of(
                 BASE, new McMembers1201.Members(Set.of("<init>()V", "present()I", "tick()V"), Set.of("count:I")),
-                SUB, new McMembers1201.Members(Set.of("<init>()V"), Set.of())));
+                SUB, new McMembers1201.Members(Set.of("<init>()V", "take(L" + BASE + ";)V"), Set.of())));
     }
 
     @AfterAll
@@ -71,6 +72,35 @@ class SoftLink1201Test implements Opcodes {
             if (in.getOpcode() == opcode && (name == null || (in instanceof MethodInsnNode mi && mi.name.equals(name)))) return true;
         }
         return false;
+    }
+
+    @Test
+    void handlerOfAMissingEventIsDropped() {
+        ClassNode c = cls("mod/H", "java/lang/Object");
+        MethodNode h = new MethodNode(ACC_PUBLIC | ACC_STATIC, "onColor", "(L" + GONE + ";)V", null, null);
+        h.visitAnnotation("Lnet/neoforged/bus/api/SubscribeEvent;", true);
+        h.visitInsn(RETURN);
+        c.methods.add(h);
+        SoftLink1201 s = link(c);
+        assertEquals(1, s.apply(c));
+        assertTrue(c.methods.isEmpty());
+        assertTrue(s.stats.missingClasses.contains(GONE));
+    }
+
+    @Test
+    void parameterWidenedToASupertypeStillLinks() {
+        ClassNode c = cls("mod/W", "java/lang/Object");
+        MethodNode m = method(c);
+        m.visitVarInsn(ALOAD, 0);
+        m.visitVarInsn(ALOAD, 0);
+        m.visitMethodInsn(INVOKEVIRTUAL, SUB, "take", "(L" + SUB + ";)V", false);
+        m.visitInsn(RETURN);
+        SoftLink1201 s = link(c);
+        s.apply(c);
+        MethodInsnNode call = null;
+        for (AbstractInsnNode in : m.instructions) if (in instanceof MethodInsnNode mi && mi.name.equals("take")) call = mi;
+        assertEquals("(L" + BASE + ";)V", call.desc);
+        assertTrue(s.stats.missingMethods.isEmpty());
     }
 
     @Test
@@ -276,5 +306,22 @@ class SoftLink1201Test implements Opcodes {
         SoftLink1201 s = link(c);
         assertEquals(1, s.apply(c));
         for (AbstractInsnNode in : m.instructions) assertFalse(in instanceof LdcInsnNode l && l.cst instanceof Type);
+    }
+
+    /** Issue 302: a mixin handler's call that does not link (a changed return type) used to be skipped by the soft link and threw NoSuchMethodError on every use. */
+    @Test
+    void mixinHandlerBodiesAreSoftLinkedAndReported() {
+        ClassNode c = cls("mod/mixin/HandlerMixin", "java/lang/Object");
+        c.visitAnnotation("Lorg/spongepowered/asm/mixin/Mixin;", false);
+        MethodNode m = method(c);
+        m.visitVarInsn(ALOAD, 0);
+        m.visitMethodInsn(INVOKEVIRTUAL, SUB, "gone", "()I", false);
+        m.visitInsn(POP);
+        m.visitInsn(RETURN);
+        SoftLink1201 s = link(c);
+        assertEquals(1, s.apply(c), "the class is no longer skipped");
+        assertFalse(has(m, INVOKEVIRTUAL, "gone"), "the call became a stand-in");
+        assertTrue(s.stats.missingMethods.contains(SUB + ".gone()I"));
+        assertTrue(s.stats.mixinSymbols.contains("method " + SUB + ".gone()I"), "kept apart for the report");
     }
 }

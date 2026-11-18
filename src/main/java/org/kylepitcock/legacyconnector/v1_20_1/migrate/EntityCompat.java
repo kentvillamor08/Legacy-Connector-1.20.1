@@ -176,7 +176,7 @@ public final class EntityCompat {
     }
 
     public static boolean addBrewingRecipe(Object recipe) {
-        return false; // brewing recipes are data/event driven in 1.21.1 (RegisterBrewingRecipesEvent)
+        return LegacyBrewing.addRecipe(recipe); // replayed into RegisterBrewingRecipesEvent
     }
 
     // ------------------------------------------------------------------ blocks and fluids
@@ -227,6 +227,10 @@ public final class EntityCompat {
 
     public static DeferredHolder<Attribute, Attribute> stepHeightAddition() {
         return attribute(Attributes.STEP_HEIGHT);
+    }
+
+    public static DeferredHolder<Attribute, Attribute> nametagDistance() {
+        return attribute(net.neoforged.neoforge.common.NeoForgeMod.NAMETAG_DISTANCE);
     }
 
     public static DeferredHolder<Attribute, Attribute> swimSpeed() {

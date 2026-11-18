@@ -88,7 +88,7 @@ public class LegacyBlockEntity extends BlockEntity implements org.kylepitcock.le
             refresh = false;
         }
         if (!refresh) return;
-        legacy.invalidate();
+        invalidateLegacy(legacy);
         legacy = null;
         pending = null;
         createFailed = false;
@@ -121,7 +121,7 @@ public class LegacyBlockEntity extends BlockEntity implements org.kylepitcock.le
     }
 
     public void replaceLegacy(TileEntity te) {
-        if (legacy != null) legacy.invalidate();
+        if (legacy != null) invalidateLegacy(legacy);
         legacy = te;
         if (te != null) attach(te);
         setChanged();
@@ -148,6 +148,25 @@ public class LegacyBlockEntity extends BlockEntity implements org.kylepitcock.le
             // e.g. multiblock registration using an API this world view lacks: the tile entity still exists and ticks.
             if (CREATE_FAILURES.add("validate:" + te.getClass().getName())) {
                 LoggerFactory.getLogger("LegacyConnector/TileEntity").error("Legacy tile entity {} failed in validate()", te.getClass().getName(), e);
+            }
+        }
+        try {
+            te.cofh_validate();
+        } catch (RuntimeException | LinkageError e) {
+            if (CREATE_FAILURES.add("cofh_validate:" + te.getClass().getName())) {
+                LoggerFactory.getLogger("LegacyConnector/TileEntity").error("Legacy tile entity {} failed in cofh_validate()", te.getClass().getName(), e);
+            }
+        }
+    }
+
+    /** {@code invalidate()}, then the hook CoFH Core's patched world called when a tile entity left its list. */
+    private static void invalidateLegacy(TileEntity te) {
+        te.invalidate();
+        try {
+            te.cofh_invalidate();
+        } catch (RuntimeException | LinkageError e) {
+            if (CREATE_FAILURES.add("cofh_invalidate:" + te.getClass().getName())) {
+                LoggerFactory.getLogger("LegacyConnector/TileEntity").error("Legacy tile entity {} failed in cofh_invalidate()", te.getClass().getName(), e);
             }
         }
     }
@@ -271,7 +290,7 @@ public class LegacyBlockEntity extends BlockEntity implements org.kylepitcock.le
 
     @Override
     public void setRemoved() {
-        if (legacy != null) legacy.invalidate();
+        if (legacy != null) invalidateLegacy(legacy);
         super.setRemoved();
     }
 
@@ -286,6 +305,7 @@ public class LegacyBlockEntity extends BlockEntity implements org.kylepitcock.le
         super.loadAdditional(tag, registries);
         if (tag.contains("legacy")) {
             CompoundTag data = atThisPosition(tag.getCompound("legacy"));
+            lastGood = data;
             if (legacy != null) {
                 try {
                     legacy.readFromNBT(new NBTTagCompound(data));
@@ -317,6 +337,8 @@ public class LegacyBlockEntity extends BlockEntity implements org.kylepitcock.le
         return data;
     }
 
+    /** The legacy NBT of the last successful save or load (see NbtSaveGuard). */
+    private CompoundTag lastGood;
     private boolean nbtFailureLogged;
 
     /** A legacy tile entity throwing while its NBT is read or written must not crash the chunk load or save; log it once per block entity. */
@@ -331,13 +353,14 @@ public class LegacyBlockEntity extends BlockEntity implements org.kylepitcock.le
         super.saveAdditional(tag, registries);
         TileEntity te = legacy();
         if (te != null) {
-            NBTTagCompound out = new NBTTagCompound();
-            try {
+            // a throwing writeToNBT (or a tag the chunk writer rejects) must neither fail the chunk save nor wipe the tile's data: save the last good copy
+            CompoundTag fresh = org.kylepitcock.legacyconnector.core.NbtSaveGuard.attempt(() -> {
+                NBTTagCompound out = new NBTTagCompound();
                 te.writeToNBT(out);
-            } catch (RuntimeException | LinkageError e) {
-                logNbtFailure("writing", e);
-            }
-            tag.put("legacy", out.mcc$modern());
+                return out.mcc$modern();
+            }, te, net.minecraft.core.registries.BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(getType()), getBlockPos().toShortString());
+            if (fresh != null) lastGood = fresh;
+            if (lastGood != null) tag.put("legacy", lastGood);
         } else if (pending != null) {
             tag.put("legacy", pending);
         }
@@ -417,7 +440,25 @@ public class LegacyBlockEntity extends BlockEntity implements org.kylepitcock.le
 
     private static final java.util.concurrent.atomic.AtomicInteger DELIVERY_FAILURES = new java.util.concurrent.atomic.AtomicInteger();
 
+    /** Chunk-load update tags arrive before the client world can find this block entity by coordinates (the chunk is stored after its tags are handled). */
+    private void deliverWhenFindable(CompoundTag tag, int tries) {
+        if (level == null || !level.isClientSide || tries > 400 || isRemoved()) return;
+        if (level.getBlockEntity(worldPosition) == this) {
+            deliver(tag, true);
+            return;
+        }
+        net.minecraft.client.Minecraft.getInstance().tell(() -> deliverWhenFindable(tag, tries + 1));
+    }
+
     private void deliver(CompoundTag tag) {
+        deliver(tag, false);
+    }
+
+    private void deliver(CompoundTag tag, boolean found) {
+        if (!found && (tag.contains("mcc$fml") || tag.contains("mcc$wire")) && level != null && level.isClientSide && level.getBlockEntity(worldPosition) != this) {
+            deliverWhenFindable(tag, 0);
+            return;
+        }
         if (tag.contains("mcc$fml")) {
             // The mod's handler finds its tile entity in the client's world by coordinates: for a copy of this block in a moving
             // contraption's render world they are contraption-local and would hit an unrelated block of the real world.

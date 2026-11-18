@@ -2,7 +2,7 @@
 """Link probe: translates a directory of legacy mod jars offline (no game) and adds the result to docs/data/mods.json,
 like the Sinytra Connector compatibility checker does for Fabric.
 
-usage: probe.py <jar-dir> [--mc 1.7.10|1.12.2|1.20.1] [--date YYYY-MM-DD] [--version <layer version>] [--json out.json] [--dry-run] [--no-history] [--fail-on-regression]
+usage: probe.py <jar-dir> [--mc 1.2.5|1.7.10|1.12.2|1.20.1] [--date YYYY-MM-DD] [--version <layer version>] [--json out.json] [--dry-run] [--no-history] [--fail-on-regression]
        probe.py --from-json probe.json [...]     (convert an earlier run without translating again)
 
 The jars are only read (test-mods/ stays gitignored, never commit or redistribute them); only results are written.
@@ -12,6 +12,7 @@ All jars are translated as ONE mod set so mods that extend each other link. Per 
   gap_shim    missing old Minecraft/Forge functionality (our shim)   -> status "fails"
   gap_mod     missing another mod's API (NEI, Thaumcraft, AE2, ...)  -> status "fails"
   gap_lib     missing removed Java/library code                      -> status "fails"
+  gap_dep     a required dependency mod is not in the set            -> "fails", or "loads" when the jar links apart from that
   obsolete    engine patch with nothing to do on 1.21.1 -> not listed
 --mc 1.20.1 (Forge 1.20.1 jars, remapped in place onto NeoForge 1.21.1) has no shim to link against: it runs ./gradlew gap1201 (loader tools Gap1201: SRG to
 Mojang and Forge to NeoForge renames, then every reference is resolved against Minecraft 1.21.1 + NeoForge + the other jars) and turns the unresolved symbols into the
@@ -35,10 +36,17 @@ def norm(s):
     return re.sub(r"[^a-z0-9]+", "", s.lower())
 
 
-def run_probe(jar_dir, out, zips=False):
+def old_zip_era(mc):
+    """Forge 1.6.4 and older (and Beta) mods were mostly distributed as .zip files (ComputerCraft, BuildCraft, RedPower, ...): they are part of the set."""
+    return mc.startswith("b") or mc.split(".")[:2] in (["1", "2"], ["1", "3"], ["1", "4"], ["1", "5"], ["1", "6"])
+
+
+def run_probe(jar_dir, out, zips=False, mc="", only=""):
     jars = sorted(pathlib.Path(jar_dir).rglob("*.jar"))
-    if zips:   # Beta mods came as .zip files (ModLoader mods)
+    if zips:   # Beta and 1.2.5-1.6.4 mods came as .zip files (ModLoader and early Forge mods)
         jars = sorted(jars + list(pathlib.Path(jar_dir).rglob("*.zip")))
+    if only:   # --only REGEX: probe just these archives (a mod family alone, next to the run of the whole set)
+        jars = [j for j in jars if re.search(only, j.name, re.I)]
     if not jars:
         sys.exit(f"no jars in {jar_dir}")
     # -PlegacyJar is a comma-separated list: a jar whose name contains a comma is probed through a symlink with a safe name
@@ -54,6 +62,8 @@ def run_probe(jar_dir, out, zips=False):
         listing.write_text(chr(10).join(map(str, jars)), encoding="utf-8")
         jar_arg = "@" + str(listing)
     cmd = [str(ROOT / ("gradlew.bat" if sys.platform == "win32" else "gradlew")), "-q", "checkLegacyMod", f"-PlegacyJar={jar_arg}", f"-PcheckJson={out}"]
+    if mc == "1.2.5":   # 1.2.5 jars are hosted through the 1.4.7 chain after the Calamus/Feather join (docs/wiki/Legacy-1.2.5.md)
+        cmd.append("-Pmappings125")
     print(f"probing {len(jars)} jar(s) as one mod set ...", flush=True)
     r = subprocess.run(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     if r.returncode != 0 or not pathlib.Path(out).exists():
@@ -81,7 +91,7 @@ def gap1201_targets():
               "com.google.code.gson", "com.google.code.findbugs", "org.jetbrains", "com.github.oshi", "net.java.dev.jna", "com.mojang", "org.slf4j",
               "org.apache.logging.log4j", "com.electronwill.night-config", "net.neoforged", "net.neoforged.fancymodloader", "cpw.mods", "io.github.llamalad7",
               "org.joml", "net.sf.jopt-simple", "org.apache.httpcomponents", "org.ow2.asm", "net.fabricmc", "org.jspecify", "org.lz4", "org.checkerframework",
-              "com.google.errorprone"]
+              "com.google.errorprone", "org.jline", "net.minecrell"]
     skip = ("sources", "javadoc", "installertools", "jst", "moddev", "srgutils", "neoform", "AutoRenaming", "DevLaunch", "JarJar", "minecraft-dependencies",
             "binarypatcher", "cli-utils", "gradle", "fatjar", "at-parser", "natives", "javadoctor", "mergetool-2.0.0")
 
@@ -135,6 +145,19 @@ def native_libraries():
     return {l.split("	")[0] for l in f.read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")}
 
 
+def not_translated(jar):
+    """Why the layer never translates this jar, or "": a Fabric/Quilt jar without a Forge mods.toml is Sinytra Connector's (LegacyJarInspector.inspect only takes
+    mods.toml / neoforge.mods.toml jars; a multi-loader jar WITH a mods.toml is translated and its fabric.mod.json dropped, so it is not listed here)."""
+    try:
+        with zipfile.ZipFile(jar) as z:
+            names = set(z.namelist())
+    except Exception:
+        return ""
+    if ("fabric.mod.json" in names or "quilt.mod.json" in names) and "META-INF/mods.toml" not in names and "META-INF/neoforge.mods.toml" not in names:
+        return "Fabric/Quilt jar: loaded by Sinytra Connector, never translated by the layer"
+    return ""
+
+
 def dotted(kind, sym):
     """A gap report symbol (internal names, descriptors) as the dotted name probe.py classifies by prefix."""
     if kind != "class":
@@ -155,6 +178,8 @@ def run_gap1201(jar_dir, out, keep_detail=None):
            f"-PgapJars={pathlib.Path(jar_dir).resolve()}", f"-PgapReport={report}", "-Pgap.translate=true"]
     if os.environ.get("GAP1201_ASSUME_NATIVE"):   # e.g. mcjty/theoneprobe/api/,dev/emi/emi/api/,me/shedaniel/rei/ : API packages of libraries the pack gets as native 1.21.1 builds
         cmd.append("-Pgap.assumeNative=" + os.environ["GAP1201_ASSUME_NATIVE"])   # the report is of the jars AFTER the layer (facades, library bridges, renames)
+    if os.environ.get("GAP1201_TRANSLATED_DIR"):   # keep the translated jars (what the layer leaves) for javap
+        cmd.append("-Pgap.translated.dir=" + os.environ["GAP1201_TRANSLATED_DIR"])
     print(f"gap report for {len(jars)} Forge 1.20.1 jar(s) ...", flush=True)
     r = subprocess.run(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     detail = pathlib.Path(str(report) + ".detail.tsv")
@@ -181,6 +206,8 @@ def run_gap1201(jar_dir, out, keep_detail=None):
         rec = {"jar": j.name, "mc": "1.20.1", "mods": info, "classes": classes, "synthesizedMembers": 0, "references": refs.get(j.name, 0)}
         if info and all(m["id"].lower() in native_libraries() for m in info):
             rec["result"] = "obsolete"   # a library with a native 1.21.1 build of the same mod id: the layer skips this jar (NativeLibraries1201), the native build is what runs
+        elif not_translated(j):
+            rec.update({"result": "obsolete", "notTranslated": not_translated(j)})   # the layer never touches it: its unresolved names (Fabric intermediary...) are not gaps
         elif miss:
             rec.update({"result": "unresolved", "unresolved": len(miss), "missing": miss[:20]})
         else:
@@ -210,6 +237,8 @@ def kind(rec):
     """The category a record counts as: links, stubs (links but largely placeholders), gap_shim / gap_mod / gap_lib, obsolete."""
     if rec["result"] == "links":
         return "stubs" if rec.get("synthesizedMembers", 0) >= STUB_LIMIT else "links"
+    if rec["result"] == "missing-dependency":
+        return "gap_dep"
     if rec["result"] == "unresolved":
         return cause(rec.get("missing") or [])
     return rec["result"]
@@ -219,6 +248,7 @@ GAP_TEXT = {
     "gap_shim": "needs Minecraft or Forge features the layer does not have yet",
     "gap_mod": "needs code from another mod or API that is not available or does not match",
     "gap_lib": "uses old Java or library code that no longer exists",
+    "gap_dep": "needs another mod that was not installed",
 }
 
 
@@ -231,8 +261,19 @@ def asset_note(rec):
     return f" Resource check: {a['layer']} model/texture reference(s) are missing after translation (rendering may show missing textures or models), e.g. " + "; ".join(ex) + "."
 
 
+PLACEHOLDER_HEAVY = ("1.2.5",)   # versions whose "links" is only a weak signal: the join to 1.4.7 leaves many game members as empty synthesized stubs
+
+
+def stub_note(rec):
+    """1.2.5 only: how many empty placeholders a jar uses, also when it is not a "links" row (the table of a failed jar would otherwise hide it)."""
+    n = rec.get("synthesizedMembers", 0)
+    if rec.get("mc") not in PLACEHOLDER_HEAVY or not n or kind(rec) in ("links", "stubs"):
+        return ""
+    return f" It also uses {n} empty placeholder feature(s) of the 1.2.5 layer."
+
+
 def note(rec, layer):
-    return note_links(rec, layer) + asset_note(rec)
+    return note_links(rec, layer) + stub_note(rec) + asset_note(rec)
 
 
 def note_links(rec, layer):
@@ -245,7 +286,14 @@ def note_links(rec, layer):
             text += f" But {stubs} features it uses are empty placeholders, so large parts probably do nothing."
         elif stubs:
             text += f" {stubs} minor feature(s) it uses are empty placeholders."
+        if rec.get("mc") in PLACEHOLDER_HEAVY:
+            text += " For 1.2.5 this is weak evidence: the layer for it still fills many game members with empty placeholders, so a jar can link and do nothing."
         return text + " The game was not started: this only shows the jar translates, not that it works."
+    if k == "gap_dep":
+        if rec.get("linksWithoutDependency"):
+            ids = ", ".join(sorted({m.split(" requires ", 1)[-1].split(",", 1)[0].split(" (", 1)[0] for m in rec.get("missingDependencies", [])}))
+            return f"{base}declares a mod that was not installed: {ids}. Everything else it uses links; the mod may still work without it."
+        return f"{base}{'; '.join(rec.get('missingDependencies', [])[:3])}."
     miss = ", ".join(rec.get("missing", [])[:5])
     more = f" (+{rec['unresolved'] - 5} more)" if rec.get("unresolved", 0) > 5 else ""
     return f"{base}{GAP_TEXT.get(k, 'has missing pieces')}: {miss}{more}."
@@ -260,9 +308,9 @@ def merge(records, mc, date, layer):
     hidden = {norm(h) for h in data.get("hidden", [])} | {norm(h) for h in data.get("hidden_by_mc", {}).get(mc, [])}
     added = refreshed = skipped = 0
     for rec in records:
-        if rec["result"] not in ("links", "unresolved") or rec.get("mc") != mc:
+        if rec["result"] not in ("links", "unresolved", "missing-dependency") or rec.get("mc") != mc:
             continue
-        status = "loads" if rec["result"] == "links" else "fails"
+        status = "loads" if rec["result"] == "links" or rec.get("linksWithoutDependency") else "fails"
         for m in rec["mods"]:
             name = (m.get("name") or m["id"]).strip()
             key = norm(name)
@@ -286,7 +334,7 @@ def merge(records, mc, date, layer):
     return data, added, refreshed, skipped
 
 
-RANK = {"links": 0, "stubs": 1, "gap_shim": 2, "gap_mod": 2, "gap_lib": 2, "unresolved": 2}   # worse is higher; "obsolete" is not compared
+RANK = {"links": 0, "stubs": 1, "gap_shim": 2, "gap_mod": 2, "gap_lib": 2, "gap_dep": 2, "unresolved": 2}   # worse is higher; "obsolete" is not compared
 MAX_CHANGES = 100
 
 
@@ -371,6 +419,34 @@ def newest_builds(records, mc):
     return [r for r in records if r.get("mc") != mc or not r.get("mods") or id(r) in keep]
 
 
+def source_of(run):
+    """The jar population of a run; runs without a source (the maintainer's local corpus) are their own source "local"."""
+    return run.get("source") or "local"
+
+
+def previous_runs(runs, mc, source):
+    """Earlier runs with a per-mod list that are comparable with a new run: same Minecraft version AND same source, oldest first.
+    Runs of other sources have other mod sets, so a "vs" against them (or --fail-on-regression) would be meaningless."""
+    want = source_of({"source": source})
+    out = [x for x in runs if x["mc"] == mc and x.get("mods") and source_of(x) == want]
+    out.sort(key=lambda x: (x["date"], x["version"]))
+    return out
+
+
+def self_test():
+    runs = [{"mc": "b1.7.3", "date": "2026-11-13", "version": "1", "source": "mcarchive", "mods": [["A", "1", "links", ""]]},
+            {"mc": "b1.7.3", "date": "2026-11-14", "version": "1", "mods": [["A", "1", "links", ""]]},
+            {"mc": "b1.7.3", "date": "2026-11-15", "version": "1", "source": "modrinth", "mods": [["B", "1", "links", ""]]},
+            {"mc": "1.7.10", "date": "2026-11-16", "version": "1", "source": "modrinth", "mods": [["C", "1", "links", ""]]}]
+    pick = lambda mc, src: [(x.get("source") or "local") for x in previous_runs(runs, mc, src)]
+    assert pick("b1.7.3", "modrinth") == ["modrinth"]
+    assert pick("b1.7.3", "") == ["local"] and pick("b1.7.3", "local") == ["local"]
+    assert pick("b1.7.3", "mcarchive") == ["mcarchive"]
+    assert pick("1.12.2", "modrinth") == []
+    assert compare(runs[0], [["A", "1", "stubs", ""]])["regressedCount"] == 1
+    print("self-test ok")
+
+
 def history(records, mc, date, layer, source=""):
     """Appends this run to docs/data/probe.json: counts per result and the per-jar list (mod, result, first unresolved reference)."""
     records = newest_builds(records, mc)
@@ -402,14 +478,23 @@ def history(records, mc, date, layer, source=""):
                 row += [a.get("layer", 0), a.get("mod", 0), [e for e in a.get("examples", []) if e.startswith("[layer]")][:2]]
         rows.append(row)
     rows.sort(key=lambda x: x[0].lower())
+    stub_counts = {}
+    if mc in PLACEHOLDER_HEAVY:   # per-mod count of synthesized (empty) members: the site shows it next to the result so "links" is not read as "works"
+        for r in records:
+            n = r.get("synthesizedMembers", 0)
+            if r.get("mc") == mc and r.get("mods") and n:
+                stub_counts[(r["mods"][0].get("name") or r["mods"][0]["id"]).strip()] = n
     h = json.loads(HISTORY.read_text(encoding="utf-8")) if HISTORY.exists() else {"runs": []}
     # a run is identified by version, date and source: results of different populations (the local corpus plus Modrinth, or Modrinth only in CI)
     # never replace or get compared with each other
-    h["runs"] = [x for x in h["runs"] if not (x["mc"] == mc and x["date"] == date and x["version"] == layer and x.get("source", "") == source)]
-    prior = [x for x in h["runs"] if x["mc"] == mc and x.get("mods") and x.get("source", "") == source]
-    prior.sort(key=lambda x: (x["date"], x["version"]))
+    h["runs"] = [x for x in h["runs"] if not (x["mc"] == mc and x["date"] == date and x["version"] == layer and source_of(x) == source_of({"source": source}))]
+    prior = previous_runs(h["runs"], mc, source)
     vs = compare(prior[-1], rows) if prior else None
     run = {"mc": mc, "date": date, "version": layer, "counts": counts, "env": environment(layer, len(records)), "mods": rows}
+    if stub_counts:
+        run["stubCounts"] = stub_counts
+        run["stubMembers"] = sum(stub_counts.values())
+        run["stubDistinct"] = len({m for r in records if r.get("mc") == mc and r.get("mods") for m in r.get("stubbed", [])})
     if assets["checked"]:
         run["assets"] = assets
     if source:
@@ -427,6 +512,9 @@ def history(records, mc, date, layer, source=""):
 
 
 def main():
+    if "--self-test" in sys.argv:
+        self_test()
+        return
     ap = argparse.ArgumentParser()
     ap.add_argument("jar_dir", nargs="?")
     ap.add_argument("--mc", default="1.7.10")
@@ -439,15 +527,20 @@ def main():
     ap.add_argument("--no-history", action="store_true", help="do not add the run to docs/data/probe.json")
     ap.add_argument("--fail-on-regression", action="store_true", help="exit 2 when a mod got worse than in the previous run (after writing the results)")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--only", default="", help="regex on the archive file name: probe only those (a mod family alone, e.g. --only buildcraft)")
     a = ap.parse_args()
     if a.from_json:
         path = a.from_json
     elif a.jar_dir:
         path = a.json or tempfile.mktemp(suffix=".json")
-        run_gap1201(a.jar_dir, path, a.detail) if a.mc == "1.20.1" else run_probe(a.jar_dir, path, zips=a.mc.startswith("b"))
+        run_gap1201(a.jar_dir, path, a.detail) if a.mc == "1.20.1" else run_probe(a.jar_dir, path, zips=old_zip_era(a.mc), mc=a.mc, only=a.only)
     else:
         ap.error("jar directory or --from-json required")
     records = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))
+    if a.mc == "1.2.5":   # 1.2.5 jars are hosted through the 1.4.7 chain, so checkLegacyMod labels them 1.4.7: they are 1.2.5 results
+        for r in records:
+            if r.get("mc") == "1.4.7":
+                r["mc"] = "1.2.5"
     counts = {}
     for r in records:
         counts[r["result"]] = counts.get(r["result"], 0) + 1

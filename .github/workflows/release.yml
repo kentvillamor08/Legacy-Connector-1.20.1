@@ -1,0 +1,104 @@
+name: Release
+
+# Cuts a stable release from GitHub (Actions tab > Release > Run workflow): builds the distributable jar of master with the given version
+# (passed to Gradle; nothing is committed, master is a protected branch), creates the tag and the GitHub release (notes: the text given, followed by the commits since the last
+# release), then starts publish.yml (Modrinth and CurseForge) and probe.yml for the new tag.
+# A release created by a workflow does not fire the "release published" event for other workflows, hence the explicit starts.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version (e.g. 0.5.0). Empty = next patch after the latest release tag"
+        required: false
+        default: ""
+      notes:
+        description: "Release notes (Markdown, optional; the commit list is appended)"
+        required: false
+        default: ""
+      stores:
+        description: "Also publish to Modrinth and CurseForge"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Work out the version
+        id: ver
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          LAST=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)
+          CUR="${LAST#v}"
+          [ -z "$CUR" ] && CUR=$(grep -E '^mod_version=' gradle.properties | cut -d= -f2 | tr -d '[:space:]')
+          VER=$(echo "$INPUT_VERSION" | tr -d '[:space:]'); VER="${VER#v}"
+          if [ -z "$VER" ]; then
+            VER=$(echo "$CUR" | awk -F. '{printf "%d.%d.%d", $1, $2, $3 + 1}')
+          fi
+          if ! echo "$VER" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then echo "::error::'$VER' is not a version like 0.5.0"; exit 1; fi
+          if git rev-parse -q --verify "refs/tags/v$VER" >/dev/null; then echo "::error::tag v$VER already exists"; exit 1; fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "last=$LAST" >> "$GITHUB_OUTPUT"
+          echo "Releasing $VER (last release ${LAST:-none})"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build
+        run: |
+          chmod +x gradlew
+          ./gradlew bundleJar -Pmod_version=${{ steps.ver.outputs.version }}
+          mkdir -p out
+          cp build/dist/legacyconnector-${{ steps.ver.outputs.version }}*.jar "out/legacyconnector-${{ steps.ver.outputs.version }}.jar"
+          ls -la out
+
+      - name: Release notes
+        env:
+          INPUT_NOTES: ${{ inputs.notes }}
+        run: |
+          {
+            if [ -n "$INPUT_NOTES" ]; then printf '%s\n\n' "$INPUT_NOTES"; fi
+            if [ -n "${{ steps.ver.outputs.last }}" ]; then
+              echo "## Changes since ${{ steps.ver.outputs.last }}"
+              echo
+              git log --no-merges --pretty='- %s (%h)' "${{ steps.ver.outputs.last }}..HEAD" | head -n 400 | sed -E 's/(^|[^`A-Za-z0-9_])@([A-Za-z0-9_-]+)/\1`@\2`/g' 
+            fi
+          } > notes.md
+          head -c 100000 notes.md > notes.cut && mv notes.cut notes.md
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ steps.ver.outputs.version }}" "out/legacyconnector-${{ steps.ver.outputs.version }}.jar" \
+            -R "${{ github.repository }}" \
+            --target "$(git rev-parse HEAD)" \
+            --title "${{ steps.ver.outputs.version }}" \
+            --notes-file notes.md --latest
+
+      - name: Start the store upload and the probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ inputs.stores }}" = "true" ]; then
+            gh workflow run publish.yml -R "${{ github.repository }}" -f tag="v${{ steps.ver.outputs.version }}"
+          fi
+          gh workflow run probe.yml -R "${{ github.repository }}" || true

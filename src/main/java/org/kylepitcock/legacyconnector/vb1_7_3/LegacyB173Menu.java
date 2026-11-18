@@ -25,8 +25,8 @@ import org.slf4j.LoggerFactory;
  * container: slots of the player's inventory become slots of the modern inventory, the others {@link LegacySlotB173}s over the legacy slots;
  * shift-click, validity and closing call the container; the progress values it reports to its crafters ({@code updateCraftingInventoryInfo})
  * become menu data. The client builds the same slot layout from the menu's extra data and draws it with the mod's GUI: in single player the
- * one the server built (it reads the tile entity directly, as b1.7.3 did), on a server the one the client's own block callback built, which
- * gets the menu data through {@code updateProgressBar}.
+ * one the server built (it reads the tile entity directly, as b1.7.3 did). Remote clients use their own block callback's GUI or reconstruct
+ * its public machine constructor from the canonical client tile. Both remote paths receive original container slot and progress updates.
  */
 public class LegacyB173Menu extends AbstractContainerMenu {
     private static final Logger LOG = LoggerFactory.getLogger("LegacyConnector/b1.7.3");
@@ -44,9 +44,21 @@ public class LegacyB173Menu extends AbstractContainerMenu {
     private final boolean forwardData;
     private final int backgroundWidth;
     private final int backgroundHeight;
+    private final boolean playerInventoryMenu;
+    private final legacyconnector.vb1_7_3.net.minecraft.entity.player.PlayerEntity transactionActor;
+    public boolean isPlayerInventoryMenu() { return playerInventoryMenu; }
+    /** Server only: the original screen of this menu, kept for a remote client that cannot make it (it then draws the server's). */
+    private Object serverGui;
+    void serverGui(Object gui) { serverGui = gui; }
+    Object serverGui() { return serverGui; }
 
     LegacyB173Menu(int id, ServerPlayer player, ScreenHandler legacy, int handoff) {
-        super(MenusB173.type(), id);
+        this(id, player, legacy, handoff, null);
+    }
+
+    private LegacyB173Menu(int id, Player player, ScreenHandler legacy, int handoff,
+            legacyconnector.vb1_7_3.net.minecraft.entity.player.PlayerEntity transactionActor) {
+        super(transactionActor == null ? MenusB173.type() : null, id);
         this.legacy = legacy;
         this.player = player;
         this.handoff = handoff;
@@ -54,24 +66,30 @@ public class LegacyB173Menu extends AbstractContainerMenu {
         this.forwardData = false;
         this.backgroundWidth = 176;
         this.backgroundHeight = 166;
-        legacy.syncId = id;
+        this.playerInventoryMenu = PlayerMenuContextB173.isPlayerMenu(legacy);
+        this.transactionActor = transactionActor;
+        if (transactionActor == null) legacy.syncId = id;
         for (Slot s : legacy.slots) {
-            addSlot(isPlayerSlot(s) ? new net.minecraft.world.inventory.Slot(player.getInventory(), s.index, s.x, s.y) : new LegacySlotB173(s));
+            addSlot(isPlayerSlot(s) ? new PlayerSlot(player.getInventory(), s) : new LegacySlotB173(s));
         }
-        addDataSlots(data);
-        listener = new Listener();
-        call("addListener", () -> legacy.addListener(listener));
+        if (transactionActor == null) {
+            addDataSlots(data);
+            listener = new Listener();
+            call("addListener", () -> legacy.addListener(listener));
+        }
     }
 
-    private LegacyB173Menu(int id, Inventory inventory, int[][] layout, Object gui, boolean forwardData, int width, int height) {
+    private LegacyB173Menu(int id, Inventory inventory, int[][] layout, Object gui, boolean forwardData, int width, int height, boolean playerInventoryMenu) {
         super(MenusB173.type(), id);
         this.legacy = null;
+        this.transactionActor = null;
         this.player = inventory.player;
         this.handoff = 0;
         this.gui = gui;
         this.forwardData = forwardData;
         this.backgroundWidth = width;
         this.backgroundHeight = height;
+        this.playerInventoryMenu = playerInventoryMenu;
         SimpleContainer others = new SimpleContainer(Math.max(1, layout.length));
         for (int i = 0; i < layout.length; i++) {
             int[] s = layout[i];
@@ -88,18 +106,17 @@ public class LegacyB173Menu extends AbstractContainerMenu {
         int height = buf.readVarInt();
         int[][] layout = new int[buf.readVarInt()][];
         for (int i = 0; i < layout.length; i++) layout[i] = new int[] {buf.readByte(), buf.readVarInt(), buf.readVarInt(), buf.readVarInt()};
-        Object gui = handoff != 0 ? MenusB173.handedOff(handoff) : null;
-        boolean forward = false;
-        if (gui == null && !guiClass.isEmpty()) {
-            gui = MenusB173.pending(guiClass);
-            forward = gui != null;
-        }
+        var context=RemoteMenuContextB173.read(buf);
+        var selected=RemoteMenuContextB173.select(handoff!=0?MenusB173.handedOff(handoff):null,
+                ()->guiClass.isEmpty()?null:MenusB173.pending(guiClass),
+                ()->guiClass.isEmpty()||context==null?null:RemoteMenuContextB173.reconstruct(guiClass,context,inventory,layout));
+        Object gui=selected.gui();boolean forward=selected.forward();
         MenusB173.trace("client menu {}: {} slots, drawn by {}", id, layout.length,
                 gui != null ? gui.getClass().getName() + (forward ? " (the client's own)" : " (handed over)") : "a plain panel (" + guiClass + " not found)");
-        return new LegacyB173Menu(id, inventory, layout, gui, forward, width, height);
+        return new LegacyB173Menu(id, inventory, layout, gui, forward, width, height, context != null && context.getBoolean("player"));
     }
 
-    /** Extra data of the open-screen packet: the GUI to draw with (handed over in single player, else by class name) and the slots. */
+    /** Open-screen data: GUI identity, slots and finite registered-tile context for remote reconstruction. */
     static void write(RegistryFriendlyByteBuf buf, ScreenHandler container, Object gui, int handoff) {
         buf.writeVarInt(handoff);
         buf.writeUtf(gui == null ? "" : gui.getClass().getName());
@@ -113,10 +130,37 @@ public class LegacyB173Menu extends AbstractContainerMenu {
             buf.writeVarInt(s.x);
             buf.writeVarInt(s.y);
         }
+        var context = handoff==0&&gui instanceof HandledScreen handled?RemoteMenuContextB173.capture(handled):new net.minecraft.nbt.CompoundTag();
+        if (PlayerMenuContextB173.isPlayerMenu(container)) context.putBoolean("player", true);
+        buf.writeNbt(context);
     }
 
-    private static boolean isPlayerSlot(Slot s) {
+    static boolean isPlayerSlot(Slot s) {
         return s.inventory instanceof PlayerInventory && s.index >= 0 && s.index < 40;
+    }
+
+    /** Native storage remains authoritative while original armor/custom slot rules still apply. */
+    static final class PlayerSlot extends net.minecraft.world.inventory.Slot {
+        private final Slot original;
+        PlayerSlot(Inventory inventory, Slot original) {
+            super(inventory, original.index, original.x, original.y);
+            this.original = original;
+        }
+        @Override public boolean mayPlace(ItemStack stack) {
+            // An unrestricted vanilla player slot can hold modern items too.
+            if (original.getClass() == Slot.class) return true;
+            var legacy = StacksB173.toLegacy(stack);
+            return legacy != null && original.canInsert(legacy);
+        }
+        @Override public int getMaxStackSize() { return original.getMaxItemCount(); }
+        @Override public void onTake(Player player, ItemStack stack) {
+            super.onTake(player, stack);
+            var legacy = StacksB173.toLegacy(stack);
+            if (legacy == null) return;
+            var view = PlayerViewB173.of(player);
+            try { original.onTakeItem(legacy); }
+            finally { view.writeBack(); }
+        }
     }
 
     public Object gui() {
@@ -145,7 +189,25 @@ public class LegacyB173Menu extends AbstractContainerMenu {
     }
 
     private void use() {
-        Minecraft.mcc$use(World.mcc$wrap(player.level()));
+        Minecraft.mcc$use(transactionActor == null ? World.mcc$wrap(player.level()) : transactionActor.world);
+    }
+
+    /** Auxiliary transaction only: never opened, installed on a player, listened to, or closed. */
+    public static legacyconnector.vb1_7_3.net.minecraft.item.ItemStack transactionClick(ScreenHandler handler,
+            legacyconnector.vb1_7_3.net.minecraft.entity.player.PlayerEntity actor, int slot, int button, boolean quick) {
+        if (actor == null || !(actor.mcc$modern instanceof Player player) || button < 0 || button > 1
+                || slot < 0 || slot >= handler.slots.size()) return null;
+        var menu = new LegacyB173Menu(0, player, handler, 0, actor);
+        var before = menu.getSlot(slot).getItem().copy();
+        menu.setCarried(StacksB173.toModern(actor.inventory.getCursorStack()));
+        try {
+            menu.clicked(slot, button, quick ? net.minecraft.world.inventory.ClickType.QUICK_MOVE
+                    : net.minecraft.world.inventory.ClickType.PICKUP, player);
+        } finally {
+            menu.flushSlots();
+            actor.inventory.setCursorStack(StacksB173.toLegacy(menu.getCarried()));
+        }
+        return StacksB173.toLegacy(before);
     }
 
     private void call(String what, Runnable r) {
@@ -172,7 +234,8 @@ public class LegacyB173Menu extends AbstractContainerMenu {
         ItemStack before = slot.getItem().copy();
         if (before.isEmpty()) return ItemStack.EMPTY;
         flushSlots();
-        PlayerViewB173 view = PlayerViewB173.of(player);
+        PlayerViewB173 view = transactionActor == null ? PlayerViewB173.of(player)
+                : transactionActor instanceof PlayerViewB173 existing ? existing : null;
         try {
             use();
             legacy.quickMove(index);
@@ -180,7 +243,7 @@ public class LegacyB173Menu extends AbstractContainerMenu {
             LOG.warn("b1.7.3 container {} failed to shift-click slot {}: {}", legacy.getClass().getName(), index, e.toString());
             return ItemStack.EMPTY;
         } finally {
-            view.writeBack();
+            if (view != null) view.writeBack();
         }
         // vanilla repeats while this returns the slot's item; the legacy default answered the unchanged stack, which never ends
         return ItemStack.matches(before, slot.getItem()) ? ItemStack.EMPTY : before;
@@ -224,6 +287,7 @@ public class LegacyB173Menu extends AbstractContainerMenu {
             view.writeBack();
             if (listener != null) legacy.mcc$removeListener(listener);
             MenusB173.release(handoff);
+            if (player instanceof net.minecraft.server.level.ServerPlayer sp) GuiSessionsB173.closeMenu(sp, containerId);
         }
     }
 
@@ -243,13 +307,18 @@ public class LegacyB173Menu extends AbstractContainerMenu {
     /** The client's slots come from the server's layout; extra or missing entries are ignored instead of disconnecting. */
     @Override
     public void initializeContents(int stateId, List<ItemStack> items, ItemStack carried) {
-        for (int i = 0; i < items.size() && i < slots.size(); i++) getSlot(i).set(items.get(i));
+        for (int i = 0; i < items.size() && i < slots.size(); i++) {getSlot(i).set(items.get(i));forwardStack(i,items.get(i));}
         setCarried(carried);
     }
 
     @Override
     public void setItem(int slot, int stateId, ItemStack stack) {
-        if (slot >= 0 && slot < slots.size()) super.setItem(slot, stateId, stack);
+        if (slot >= 0 && slot < slots.size()) {super.setItem(slot, stateId, stack);forwardStack(slot,stack);}
+    }
+
+    private void forwardStack(int slot,ItemStack stack){
+        if(!failed&&forwardData&&gui instanceof HandledScreen handled)try{RemoteMenuContextB173.forward(handled,slot,stack);}
+        catch(RuntimeException|LinkageError error){failed=true;LOG.warn("Original remote menu {} failed to receive slot {}",gui.getClass().getName(),slot,error);}
     }
 
     /** {@code ICrafting} of the modern menu: progress values become menu data. */

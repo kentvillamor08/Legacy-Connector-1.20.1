@@ -34,6 +34,13 @@ public final class BlocksB173 {
             if (fluid.getType() == Fluids.LAVA) return 11;
             if (fluid.getType() == Fluids.FLOWING_LAVA) return 10;
         }
+        // native buttons and pressure plates of every material are Beta's button and its stone (mobs and players) or wooden (everything) plate,
+        // so original redstone code (RedPower's wires) connects to them
+        if (state.getBlock() instanceof net.minecraft.world.level.block.ButtonBlock) return 77;
+        if (state.getBlock() instanceof net.minecraft.world.level.block.WeightedPressurePlateBlock) return 70;
+        if (state.getBlock() instanceof net.minecraft.world.level.block.PressurePlateBlock)
+            return state.is(Blocks.STONE_PRESSURE_PLATE) || state.is(Blocks.POLISHED_BLACKSTONE_PRESSURE_PLATE)
+                    || state.is(net.minecraft.tags.BlockTags.STONE_PRESSURE_PLATES) ? 70 : 72;
         int[] hit = reverse().get(state.getBlock());
         if (hit != null) return hit[0]==44&&state.hasProperty(net.minecraft.world.level.block.SlabBlock.TYPE)
                 &&state.getValue(net.minecraft.world.level.block.SlabBlock.TYPE)==net.minecraft.world.level.block.state.properties.SlabType.DOUBLE?43:hit[0];
@@ -59,7 +66,8 @@ public final class BlocksB173 {
         Block legacy = Block.BLOCKS[id];
         if (legacy != null && legacy.mcc$modern instanceof LegacyB173Block modern) return modern.defaultBlockState().setValue(LegacyB173Block.META, meta & 15);
         if (legacy != null && legacy.mcc$owner != null && legacy.mcc$modern != null) return legacy.mcc$modern.defaultBlockState();
-        net.minecraft.world.item.Item variant = VanillaB173.modernItem(id, meta);
+        // Beta stored block metadata in a nibble: a mod's -1 ("unchanged") is 15 there
+        net.minecraft.world.item.Item variant = VanillaB173.modernItem(id, meta & 15);
         if (variant instanceof net.minecraft.world.item.BlockItem bi && (id == 35 || id == 17 || id == 18 || id == 6 || id == 44 || id == 43)) {
             var state=bi.getBlock().defaultBlockState();
             return id==43&&state.hasProperty(net.minecraft.world.level.block.SlabBlock.TYPE)

@@ -24,9 +24,16 @@ public final class BlockBridge1122 {
 
     static void register(Block block) {
         var id = modernId(block.getRegistryName());
+        if ("minecraft".equals(id.getNamespace()) && BuiltInRegistries.BLOCK.containsKey(id)) {
+            // a mod that replaces a vanilla block (Colored Redstone's dust is "minecraft:redstone_wire"): 1.12 let the registry hand out its object
+            // under the vanilla name; the modern vanilla block stays, and the mod's block lives next to it under an id of the layer's own
+            var alias = ResourceLocation.fromNamespaceAndPath("legacyconnector", "minecraft_" + id.getPath());
+            org.slf4j.LoggerFactory.getLogger("LegacyConnector/Blocks").info("{} replaces the vanilla block {}: registered as {}", block.getClass().getName(), id, alias);
+            id = alias;
+        }
         var legacySound = block.getSoundType();
-        BlockBehaviour.Properties p = BlockBehaviour.Properties.of().sound(legacySound != null && legacySound.mcc$modern != null
-                ? legacySound.mcc$modern : sound(block.getMaterialLegacy()));
+        // a mod-made sound type (its own events, volume and pitch) keeps them; the material's sounds only stand in when the block has none
+        BlockBehaviour.Properties p = BlockBehaviour.Properties.of().sound(legacySound != null ? legacySound.mcc$toModern() : sound(block.getMaterialLegacy()));
         float hardness = block.mcc$hardness();
         if (hardness < 0) p.strength(-1.0F, 3600000.0F);
         // 1.12 kept three times the setResistance value and divided by five when an explosion asked (stone: 30 -> 6, modern stone 6)
@@ -47,6 +54,8 @@ public final class BlockBridge1122 {
         }
         if (!opaque) p.noOcclusion();
         if (m != null && !m.blocksMovement()) p.noCollission();
+        // 1.12: rock, iron and the like drop nothing without the right tool (Forge's canHarvestBlock; the tags of ToolTags1122 say which tool)
+        if (m != null && !m.isToolNotRequired()) p.requiresCorrectToolForDrops();
         if (m != null) {
             p.pushReaction(m.mcc$pushReaction());
             if (m.getCanBurn()) p.ignitedByLava();
@@ -60,18 +69,45 @@ public final class BlockBridge1122 {
         } catch (RuntimeException | LinkageError e) {
             // a block that cannot answer before it has a world has no tile entity
         }
+        if (!entity) {
+            // hasTileEntity(state) may depend on the state (a spring that has one only as oil, a tap only when attached): the block is an
+            // entity block when ANY of its metadata states has one (newBlockEntity then answers per state)
+            for (int meta = 1; meta < 16 && !entity; meta++) {
+                try {
+                    entity = block.hasTileEntity(block.getStateFromMeta(meta));
+                } catch (RuntimeException | LinkageError e) {
+                    break;
+                }
+            }
+        }
+        // a fluid block (Forge's BlockFluidBase or a mod's BlockLiquid): a liquid the modern fluid of its Forge fluid is bound to later (FluidBridge1122)
+        boolean fluid = !entity && (block instanceof legacyconnector.v1_12_2.net.minecraftforge.fluids.BlockFluidBase
+                || block instanceof legacyconnector.v1_12_2.net.minecraft.block.BlockLiquid);
+        if (fluid) p.liquid().noCollission().replaceable().pushReaction(net.minecraft.world.level.material.PushReaction.DESTROY);
         Legacy1122Block modern;
-        if (entity) {
-            var eb = new org.kylepitcock.legacyconnector.v1_12_2.adapter.Legacy1122EntityBlock(block, p);
-            TileEntityBridge1122.addBlock(eb);
-            modern = eb;
+        if (fluid) {
+            modern = new org.kylepitcock.legacyconnector.v1_12_2.adapter.Legacy1122FluidBlock(block, p);
+        } else if (entity) {
+            modern = new org.kylepitcock.legacyconnector.v1_12_2.adapter.Legacy1122EntityBlock(block, p);
         } else {
             modern = new Legacy1122Block(block, p);
         }
-        LegacyRegistrar.register(BuiltInRegistries.BLOCK, id, modern);
+        if (LegacyRegistrar.register(BuiltInRegistries.BLOCK, id, modern) != modern) {
+            // a duplicate name: the block never became a modern block, so its states must never be placed (StatesBridge1122.toModern answers air)
+            block.mcc$modern = null;
+            return;
+        }
+        if (modern instanceof org.kylepitcock.legacyconnector.v1_12_2.adapter.Legacy1122EntityBlock eb) TileEntityBridge1122.addBlock(eb);
         block.mcc$modern = modern;
         synchronized (MODERN) {
             MODERN.put(block, modern);
+        }
+    }
+
+    /** The legacy blocks registered so far (mods', not vanilla's). */
+    public static java.util.List<Block> modBlocks() {
+        synchronized (MODERN) {
+            return new java.util.ArrayList<>(MODERN.keySet());
         }
     }
 

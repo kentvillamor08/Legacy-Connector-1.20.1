@@ -39,6 +39,8 @@ public final class BlockSelfTest {
     private static final List<String> NAMES = new ArrayList<>();
     private static int ticks = -1;
     private static int placed;
+    private static final Map<String, Integer> tilesWritten = new java.util.TreeMap<>();
+    private static final Map<String, String> tilesWriteThrew = new java.util.TreeMap<>();
     private static int skipped;
     private static boolean stopping;
 
@@ -60,6 +62,11 @@ public final class BlockSelfTest {
 
     private static void start(MinecraftServer server) {
         ServerLevel level = server.overworld();
+        if (TileRoundTrip.mode().equals("check")) {
+            // second run over the saved world: nothing is placed, tick 60 looks the first run's tile entities up
+            ticks = 0;
+            return;
+        }
         BlockPos spawn = level.getSharedSpawnPos();
         int i = 0;
         // Inside the spawn chunks (already loaded): generating chunks one by one from here would take minutes.
@@ -88,6 +95,11 @@ public final class BlockSelfTest {
                         state = state.setValue(org.kylepitcock.legacyconnector.v1_12_2.adapter.Legacy1122Block.META, meta);
                     }
                     level.setBlock(pos, state, 3);
+                    if (!level.getBlockState(pos).is(modernBlock)) {
+                        // dropped at once for lack of support (torches, ladders, plants: as in 1.7.10, they need a face to stand on): give it a floor and place again
+                        level.setBlock(pos.below(), net.minecraft.world.level.block.Blocks.STONE.defaultBlockState(), 2);
+                        level.setBlock(pos, state, 3);
+                    }
                     PLACED.add(pos);
                     NAMES.add(name);
                     placed++;
@@ -97,11 +109,13 @@ public final class BlockSelfTest {
                         // 1.12.2: World.setBlockState creates the tile entity at once, so a block that has one must host it right after the placement
                         boolean wants;
                         try {
-                            wants = m1122.legacy().hasTileEntity(m1122.legacy().getStateFromMeta(meta)) || m1122.legacy() instanceof legacyconnector.v1_12_2.net.minecraft.block.ITileEntityProvider;
+                            wants = m1122.legacy().hasTileEntity(m1122.legacy().getStateFromMeta(meta));
+                            // (Forge's default hasTileEntity already answers true for an ITileEntityProvider; a mod that overrides it per state decides)
                         } catch (RuntimeException | LinkageError e) {
                             wants = false;
                         }
-                        if (wants && !(be instanceof org.kylepitcock.legacyconnector.v1_12_2.adapter.Legacy1122BlockEntity)) PROBLEMS.putIfAbsent(name, "has a tile entity but no host block entity");
+                        // a block that drops itself at once (no support under it: a tap, a wall receptacle) is checked by the "gone" list, not here
+                        if (wants && level.getBlockState(pos).is(modernBlock) && !(be instanceof org.kylepitcock.legacyconnector.v1_12_2.adapter.Legacy1122BlockEntity)) PROBLEMS.putIfAbsent(name, "has a tile entity but no host block entity");
                         else if (be instanceof org.kylepitcock.legacyconnector.v1_12_2.adapter.Legacy1122BlockEntity h && h.legacy() == null) PROBLEMS.putIfAbsent(name, "host without a legacy tile entity");
                     }
                 } catch (RuntimeException | LinkageError ex) {
@@ -144,11 +158,16 @@ public final class BlockSelfTest {
 
     private static final List<Object[]> FLUIDS = new ArrayList<>();
 
-    /** A stone floor with a source block of each flowing legacy fluid on it: the fluid must spread by scheduled ticks. */
+    /**
+     * A stone floor and ceiling with a full source of each flowing legacy fluid on the surface it settles on (the floor; the ceiling for
+     * gases, which have negative density and rise): the fluid must spread by its own block ticks. The source is a full one (classic
+     * fluids: metadata 0; finite fluids: all their quanta, a single quantum cannot spread by definition) and sits on the surface because a
+     * mod's own {@code canDisplace} may stop it falling through air (Traincraft's fluids only displace liquids, as in Forge 1.7.10).
+     */
     private static void startFluids(ServerLevel level, int baseX, int z, int y) {
         int k = 0;
         for (Block legacy : BlockBridge.modBlocks()) {
-            if (!(legacy instanceof legacyconnector.v1_7_10.net.minecraftforge.fluids.BlockFluidBase) || legacy.mcc$modern == null) continue;
+            if (!(legacy instanceof legacyconnector.v1_7_10.net.minecraftforge.fluids.BlockFluidBase fluid) || legacy.mcc$modern == null) continue;
             if (k >= 6) break;
             int x = baseX + 4 + k * 12;
             k++;
@@ -156,13 +175,17 @@ public final class BlockSelfTest {
             try {
                 for (int dx = -4; dx <= 4; dx++) for (int dz = -4; dz <= 4; dz++) {
                     level.setBlock(new BlockPos(x + dx, y - 1, z + dz), net.minecraft.world.level.block.Blocks.STONE.defaultBlockState(), 2);
+                    level.setBlock(new BlockPos(x + dx, y + 6, z + dz), net.minecraft.world.level.block.Blocks.STONE.defaultBlockState(), 2);
                     for (int dy = 0; dy < 6; dy++) {
                         level.setBlock(new BlockPos(x + dx, y + dy, z + dz), net.minecraft.world.level.block.Blocks.AIR.defaultBlockState(), 2);
                     }
                 }
-                BlockPos pos = new BlockPos(x, y + 3, z);
-                level.setBlock(pos, legacy.mcc$modern.defaultBlockState(), 3);
-                FLUIDS.add(new Object[] {BuiltInRegistries.BLOCK.getKey(legacy.mcc$modern).toString(), legacy.mcc$modern, x, y, z});
+                boolean rises = fluid.getDensity() < 0;
+                int surface = rises ? y + 5 : y;
+                int meta = fluid instanceof legacyconnector.v1_7_10.net.minecraftforge.fluids.BlockFluidFinite ? Math.max(0, fluid.getQuantaPerBlock() - 1) : 0;
+                BlockPos pos = new BlockPos(x, surface, z);
+                level.setBlock(pos, BlockBridge.toModern(legacy, meta), 3);
+                FLUIDS.add(new Object[] {BuiltInRegistries.BLOCK.getKey(legacy.mcc$modern).toString(), legacy.mcc$modern, x, y, z, surface, fluid.getQuantaPerBlock()});
             } catch (RuntimeException | LinkageError ex) {
                 PROBLEMS.putIfAbsent("fluid " + legacy, "placement threw " + describe(ex));
             }
@@ -171,8 +194,10 @@ public final class BlockSelfTest {
 
     private static void checkFluids(ServerLevel level) {
         for (Object[] f : FLUIDS) {
-            net.minecraft.world.level.block.Block block = (net.minecraft.world.level.block.Block) f[1];
-            int x = (Integer) f[2], y = (Integer) f[3], z = (Integer) f[4], count = 0, floor = 0;
+            Object modern = f[1];
+            net.minecraft.world.level.block.Block block = (net.minecraft.world.level.block.Block) modern;
+            int x = (Integer) f[2], y = (Integer) f[3], z = (Integer) f[4], surface = (Integer) f[5], quanta = (Integer) f[6];
+            int count = 0, floor = 0, bestFloor = 0;
             // (no player is near, so the world's own scheduled ticks do not run: tick the fluid blocks directly)
             try {
                 for (int round = 0; round < 40; round++) {
@@ -181,16 +206,24 @@ public final class BlockSelfTest {
                         BlockState st = level.getBlockState(p);
                         if (st.is(block)) st.tick(level, p, level.random);
                     }
+                    // a fluid that removes itself at random (Witchery's disease) is judged by the most it covered at any time
+                    int now = 0;
+                    for (int dx = -4; dx <= 4; dx++) for (int dz = -4; dz <= 4; dz++) {
+                        if (level.getBlockState(new BlockPos(x + dx, surface, z + dz)).is(block)) now++;
+                    }
+                    bestFloor = Math.max(bestFloor, now);
                 }
             } catch (RuntimeException | LinkageError ex) {
                 PROBLEMS.putIfAbsent("fluid " + f[0], "tick threw " + describe(ex));
             }
             for (int dx = -4; dx <= 4; dx++) for (int dz = -4; dz <= 4; dz++) {
-                if (level.getBlockState(new BlockPos(x + dx, y, z + dz)).is(block)) floor++;
+                if (level.getBlockState(new BlockPos(x + dx, surface, z + dz)).is(block)) floor++;
                 for (int dy = 0; dy < 6; dy++) if (level.getBlockState(new BlockPos(x + dx, y + dy, z + dz)).is(block)) count++;
             }
-            if (floor < 4) PROBLEMS.putIfAbsent("fluid " + f[0], "did not flow: " + count + " blocks, " + floor + " on the floor after 60 ticks");
-            else LOG.info("Fluid {} flowed over {} floor blocks ({} blocks)", f[0], floor, count);
+            floor = Math.max(floor, bestFloor);
+            if (quanta < 2) LOG.info("Fluid {} has {} quantum per block and cannot spread ({} blocks)", f[0], quanta, count);
+            else if (floor < 4) PROBLEMS.putIfAbsent("fluid " + f[0], "did not flow: " + count + " blocks, " + floor + " on its surface after 60 ticks");
+            else LOG.info("Fluid {} flowed over {} surface blocks ({} blocks)", f[0], floor, count);
         }
     }
 
@@ -210,10 +243,50 @@ public final class BlockSelfTest {
         return root + where.toString();
     }
 
+    private static volatile String activationName;
+    private static volatile long activationStart;
+    private static volatile boolean watchdogStarted;
+
+    /**
+     * A legacy block's activation that never returns (a village spawner whose generator loops until it has found enough grass, which the test world
+     * lacks) would freeze the whole test silently: after 30 s the stuck server thread's stack is logged once, naming the block.
+     */
+    private static void activationWatchdog(String name) {
+        activationName = name;
+        activationStart = System.currentTimeMillis();
+        if (watchdogStarted) return;
+        watchdogStarted = true;
+        Thread server = Thread.currentThread();
+        Thread t = new Thread(() -> {
+            String reported = null;
+            while (true) {
+                try {
+                    Thread.sleep(5000);
+                } catch (InterruptedException e) {
+                    return;
+                }
+                String n = activationName;
+                if (n != null && !n.equals(reported) && System.currentTimeMillis() - activationStart > 30_000) {
+                    reported = n;
+                    StringBuilder sb = new StringBuilder();
+                    int frames = 0;
+                    for (StackTraceElement e : server.getStackTrace()) {
+                        sb.append("\n    at ").append(e);
+                        if (++frames == 14) break;
+                    }
+                    LOG.error("BLOCK SELF TEST: the activation of {} has not returned after 30 s (a legacy loop that needs terrain the test world lacks?){}", n, sb);
+                }
+            }
+        }, "legacyconnector-selftest-watchdog");
+        t.setDaemon(true);
+        t.start();
+    }
+
     private static void tick(MinecraftServer server) {
         if (ticks < 0 || ++ticks != 60) return;
         ServerLevel level = server.overworld();
         var player = FakePlayerFactory.get(level, new GameProfile(UUID.nameUUIDFromBytes("legacyconnector-block-test".getBytes()), "[LegacyConnectorTest]"));
+        legacyconnector.v1_7_10.net.minecraft.world.World.MCC_TEST_PLAYERS.add(player);
         checkFluids(level);
         int survived = 0, activated = 0;
         Map<String, Integer> vanished = new java.util.TreeMap<>();
@@ -228,18 +301,35 @@ public final class BlockSelfTest {
                 continue;
             }
             survived++;
+            // a tile entity must be able to write its NBT: a failing write saves nothing (the chunk keeps its last good data at best)
+            if (level.getBlockEntity(pos) instanceof LegacyBlockEntity l && l.legacy() != null) {
+                try {
+                    l.legacy().writeToNBT(new legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound());
+                    tilesWritten.merge(l.legacy().getClass().getSimpleName(), 1, Integer::sum);
+                    if (TileRoundTrip.mode().equals("place")) TileRoundTrip.fill(pos, name, l.legacy());
+                } catch (RuntimeException | LinkageError ex) {
+                    // not a problem of the layer by itself: a tile placed by setBlock lacks the state its item's placement sets (a null facing)
+                    tilesWriteThrew.putIfAbsent(name, describe(ex));
+                }
+            }
             try {
                 player.setPos(pos.getX() + 0.5, pos.getY() + 2, pos.getZ() + 0.5);
                 var hit = new BlockHitResult(Vec3.atCenterOf(pos), Direction.UP, pos, false);
+                activationWatchdog(name);
                 state.useWithoutItem(level, player, hit);
                 activated++;
                 player.closeContainer();
             } catch (RuntimeException | LinkageError ex) {
                 PROBLEMS.putIfAbsent(name, "activation threw " + describe(ex));
+            } finally {
+                activationName = null;
             }
         }
         // (not while the server shuts down: mods' services are already stopped, and the world is discarded anyway)
-        if (!stopping) {
+        if (TileRoundTrip.mode().equals("place")) TileRoundTrip.idTest();
+        if (TileRoundTrip.mode().equals("place")) TileRoundTrip.write(server.getServerDirectory());
+        if (TileRoundTrip.mode().equals("check")) TileRoundTrip.check(level, server.getServerDirectory());
+        if (!stopping && !TileRoundTrip.mode().equals("place")) {
             for (BlockPos pos : PLACED) {
                 try {
                     level.removeBlock(pos, false);
@@ -248,6 +338,7 @@ public final class BlockSelfTest {
                 }
             }
         }
+        LOG.info("Tile entities that wrote their NBT: {}; whose write threw: {}", tilesWritten, tilesWriteThrew);
         LOG.info("Blocks gone after 60 ticks, per mod: {}", vanished);
         LOG.info("Blocks gone after 60 ticks: {}", goneNames);
         Map<String, String> itemProblems = itemTest(level, player);
@@ -287,7 +378,9 @@ public final class BlockSelfTest {
         try {
             modern.getName(stack);
             stage = "tooltip";
-            stack.getTooltipLines(net.minecraft.world.item.Item.TooltipContext.of(level), player, net.minecraft.world.item.TooltipFlag.ADVANCED);
+            // tooltips are client-only: on a dedicated server a legacy addInformation legitimately touches client classes
+            if (!net.neoforged.fml.loading.FMLEnvironment.dist.isDedicatedServer())
+                stack.getTooltipLines(net.minecraft.world.item.Item.TooltipContext.of(level), player, net.minecraft.world.item.TooltipFlag.ADVANCED);
             stage = "use";
             player.setItemInHand(net.minecraft.world.InteractionHand.MAIN_HAND, stack.copy());
             modern.use(level, player, net.minecraft.world.InteractionHand.MAIN_HAND);

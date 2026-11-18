@@ -15,4 +15,20 @@ public class CommandHelp extends CommandBase {
     @Override
     public void processCommand(ICommandSender sender, String[] args) {
     }
+
+    /** The commands the sender may use, sorted by name (what {@code /help} lists page by page). */
+    protected java.util.List getSortedPossibleCommands(ICommandSender sender) {
+        legacyconnector.v1_7_10.net.minecraft.server.MinecraftServer server = legacyconnector.v1_7_10.net.minecraft.server.MinecraftServer.getServer();
+        ICommandManager manager = server == null ? null : server.getCommandManager();
+        java.util.List list = manager == null ? new java.util.ArrayList() : new java.util.ArrayList(manager.getPossibleCommands(sender));
+        java.util.Collections.sort(list, (a, b) -> ((ICommand) a).getCommandName().compareTo(((ICommand) b).getCommandName()));
+        return list;
+    }
+
+    /** The commands the server's command manager knows, by name (1.7.10 listed them from here). */
+    protected java.util.Map getCommands() {
+        legacyconnector.v1_7_10.net.minecraft.server.MinecraftServer server = legacyconnector.v1_7_10.net.minecraft.server.MinecraftServer.getServer();
+        ICommandManager manager = server == null ? null : server.getCommandManager();
+        return manager == null ? new java.util.HashMap() : manager.getCommands();
+    }
 }

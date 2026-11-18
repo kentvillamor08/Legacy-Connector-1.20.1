@@ -34,6 +34,10 @@ public final class BridgeB173 {
     private BridgeB173() {}
 
     public static synchronized void registerAll() {
+        ItemEventsB173.install();
+        PacketsB173.install();
+        ModStaticsB173.install();
+        ArmorMaterialsB173.install();
         int replaced = 0;
         for (Block block : ContentB173.blocks()) {
             if (block.mcc$modern != null || !(block.mcc$owner instanceof LegacyModRecord mod) || Block.BLOCKS[block.id] != block) continue;
@@ -53,6 +57,8 @@ public final class BridgeB173 {
         for (Item item : ContentB173.items()) {
             if (item.mcc$modern != null || !(item.mcc$owner instanceof LegacyModRecord mod) || Item.ITEMS[item.id] != item) continue;
             if (LegacyLifecycle.isFailed(mod.modernId)) continue;
+            if (item instanceof BlockItem && item.id >= Block.BETA_LIMIT && VanillaB173.isVanillaId(item.id))
+                LOG.warn("b1.7.3 block id {} of {} is also a vanilla item id: its item is that vanilla item; give the block another id in the mod's config", item.id, mod.legacyId);
             if (VanillaB173.isVanillaId(item.id) && VanillaB173.modernItem(item.id, 0) != null) {
                 // mods re-create vanilla items at their ids to change them (NetherCraft's tools): they stay the vanilla items
                 item.mcc$modern = VanillaB173.modernItem(item.id, 0);
@@ -67,14 +73,36 @@ public final class BridgeB173 {
         }
         if (Boolean.getBoolean("legacyconnector.entitySelfTest")) ItemUseSelfTestB173.register();
         TileEntitiesB173.registerType();
+        SpawnRulesB173.prepareCustomBiomes();
         MobsB173.registerAll();
         RenderersB173.discover();
         AnimalsB173.registerAll();
         flammability();
+        legacyconnector.vb1_7_3.net.minecraft.stat.Stats.initialize();
+        StatisticsB173.install();
         StringBuilder sb = new StringBuilder();
         PER_MOD.forEach((mod, n) -> sb.append(' ').append(mod).append('=').append(n[0]).append(" blocks/").append(n[1]).append(" items"));
         LOG.info("b1.7.3 content registered:{}{}", sb.length() == 0 ? " none" : sb,
                 replaced > 0 ? "; " + replaced + " replacement(s) of vanilla blocks/items kept as the vanilla ones" : "");
+        logFreeIds();
+    }
+
+    /** Block ids share the item id space: a config editor needs the ids no block or item holds (below 256 for blocks of mods that cap there). */
+    private static void logFreeIds() {
+        var blocks = legacyconnector.vb1_7_3.net.minecraft.block.Block.BLOCKS;
+        var items = legacyconnector.vb1_7_3.net.minecraft.item.Item.ITEMS;
+        StringBuilder free = new StringBuilder();
+        int limit = Math.min(4096, Math.min(blocks.length, items.length)), start = -1, count = 0;
+        for (int id = 1; id <= limit; id++) {
+            boolean open = id < limit && blocks[id] == null && items[id] == null;
+            if (open && start < 0) start = id;
+            if (!open && start >= 0) {
+                free.append(free.length() == 0 ? "" : ",").append(start).append(id - 1 > start ? "-" + (id - 1) : "");
+                count += id - start;
+                start = -1;
+            }
+        }
+        LOG.info("b1.7.3 free block ids (no block or item, 1-4095): {} free: {}", count, free);
     }
 
     /**
@@ -86,7 +114,7 @@ public final class BridgeB173 {
         if (!(fire instanceof legacyconnector.vb1_7_3.net.minecraft.block.FireBlock f) || f.burnChances == null) return;
         var modernFire = (net.minecraft.world.level.block.FireBlock) net.minecraft.world.level.block.Blocks.FIRE;
         int n = 0;
-        for (int id = 0; id < 256; id++) {
+        for (int id = 0; id < Block.BLOCKS.length; id++) {
             Block b = Block.BLOCKS[id];
             if (b == null || b.mcc$owner == null || b.mcc$modern == null || isVanillaReplacement(b.mcc$modern)) continue;
             int encourage = f.burnChances[id], burn = f.spreadChances[id];
@@ -145,18 +173,31 @@ public final class BridgeB173 {
         net.minecraft.world.item.Item modern;
         ResourceLocation id;
         if (item instanceof BlockItem bi) {
-            Block block = bi.mcc$blockId() >= 0 && bi.mcc$blockId() < 256 ? Block.BLOCKS[bi.mcc$blockId()] : null;
+            Block block = bi.mcc$blockId() >= 0 && bi.mcc$blockId() < Block.BLOCKS.length ? Block.BLOCKS[bi.mcc$blockId()] : null;
             if (block == null || block.mcc$modern == null) return;
             id = BuiltInRegistries.BLOCK.getKey(block.mcc$modern);
             LegacyB173BlockItem blockItem = new LegacyB173BlockItem(block.mcc$modern, new net.minecraft.world.item.Item.Properties());
             if (item.hasSubtypes()) blockItem.setNames(subtypeNames(item, id));
+            blockItem.setLegacy(item);
             modern = blockItem;
         } else {
             id = ResourceLocation.fromNamespaceAndPath(mod.modernId, unique(mod.modernId, name(item.getTranslationKey(), "item.", "item_" + item.id)));
             var p = new net.minecraft.world.item.Item.Properties();
             if (item.isDamageable()) p.durability(item.getMaxDamage());
             else p.stacksTo(Math.max(1, Math.min(99, item.getMaxCount())));
-            modern = new LegacyB173Item(item, p);
+            if(item instanceof legacyconnector.vb1_7_3.net.minecraft.item.ArmorItem armor){
+                var group=new net.minecraft.world.entity.EquipmentSlotGroup[]{net.minecraft.world.entity.EquipmentSlotGroup.HEAD,
+                        net.minecraft.world.entity.EquipmentSlotGroup.CHEST,net.minecraft.world.entity.EquipmentSlotGroup.LEGS,
+                        net.minecraft.world.entity.EquipmentSlotGroup.FEET}[armor.equipmentSlot];
+                p.attributes(net.minecraft.world.item.component.ItemAttributeModifiers.builder().add(
+                        net.minecraft.world.entity.ai.attributes.Attributes.ARMOR,new net.minecraft.world.entity.ai.attributes.AttributeModifier(
+                                ResourceLocation.fromNamespaceAndPath("legacyconnector","beta_armor_"+armor.equipmentSlot),armor.maxProtection,
+                                net.minecraft.world.entity.ai.attributes.AttributeModifier.Operation.ADD_VALUE),group).build());
+            }
+            if(item instanceof legacyconnector.vb1_7_3.net.minecraft.item.MusicDiscItem disc)
+                p.jukeboxPlayable(RecordsB173.song(id,disc.sound));
+            modern = item instanceof legacyconnector.vb1_7_3.net.minecraft.item.ArmorItem armor
+                    ?new LegacyB173ArmorItem(armor,p):new LegacyB173Item(item,p);
             translation("item." + id.getNamespace() + "." + id.getPath(), item, item.getTranslationKey());
         }
         LegacyRegistrar.register(BuiltInRegistries.ITEM, id, modern);
@@ -232,6 +273,13 @@ public final class BridgeB173 {
             n = name + "_" + i;
         }
         return n;
+    }
+
+    /** An entity type's English name: the mod's {@code entity.<name>.name} translation, else its registered name made readable. */
+    public static void entityName(ResourceLocation id, String legacyName) {
+        if (legacyName == null || legacyName.isEmpty()) return;
+        String key = "entity." + legacyName + ".name", t = ContentB173.translate(key);
+        GeneratedTranslations.put("en_us", "entity." + id.getNamespace() + "." + id.getPath(), t.equals(key) ? readable(legacyName) : t);
     }
 
     private static String readable(String camel) {

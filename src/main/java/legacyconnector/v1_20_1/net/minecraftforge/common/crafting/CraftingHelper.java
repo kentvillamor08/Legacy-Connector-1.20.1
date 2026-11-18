@@ -25,6 +25,9 @@ import org.kylepitcock.legacyconnector.v1_20_1.migrate.ItemStackNbt;
 public final class CraftingHelper {
     private static final Map<ResourceLocation, IIngredientSerializer<?>> INGREDIENTS = new ConcurrentHashMap<>();
     private static final Map<ResourceLocation, IConditionSerializer<?>> CONDITIONS = new ConcurrentHashMap<>();
+    // Forge's field names: libraries read the maps reflectively (SuperMartijn642's Core Lib asks for "conditions"); the same map objects
+    private static final Map<ResourceLocation, IIngredientSerializer<?>> ingredients = INGREDIENTS;
+    private static final Map<ResourceLocation, IConditionSerializer<?>> conditions = CONDITIONS;
 
     private CraftingHelper() {
     }
@@ -111,6 +114,23 @@ public final class CraftingHelper {
         PENDING_TYPES.clear();
     }
 
+    /**
+     * {@code CraftingHelper.write(buffer, ingredient)}: the ingredient's network form. APPROXIMATION: with a registry buffer the 1.21.1 codec is used, with a
+     * plain buffer the matching stacks go as item id and count.
+     */
+    public static void write(net.minecraft.network.FriendlyByteBuf buffer, net.minecraft.world.item.crafting.Ingredient ingredient) {
+        if (buffer instanceof net.minecraft.network.RegistryFriendlyByteBuf registryBuffer) {
+            net.minecraft.world.item.crafting.Ingredient.CONTENTS_STREAM_CODEC.encode(registryBuffer, ingredient);
+            return;
+        }
+        ItemStack[] stacks = ingredient.getItems();
+        buffer.writeVarInt(stacks.length);
+        for (ItemStack stack : stacks) {
+            buffer.writeResourceLocation(BuiltInRegistries.ITEM.getKey(stack.getItem()));
+            buffer.writeVarInt(stack.getCount());
+        }
+    }
+
     public static ResourceLocation getID(IIngredientSerializer<?> serializer) {
         for (var e : INGREDIENTS.entrySet()) if (e.getValue() == serializer) return e.getKey();
         return null;
@@ -186,11 +206,15 @@ public final class CraftingHelper {
     }
 
     public static ItemStack getItemStack(JsonObject json, boolean readNBT, boolean disallowsAirInRecipe) {
-        String itemName = net.minecraft.util.GsonHelper.getAsString(json, "item");
+        // the data converter writes the 1.21 stack form ({id, count, components}) for the shaped-recipe shape of a mod's own recipe type: both forms are read
+        String itemName = net.minecraft.util.GsonHelper.getAsString(json, json.has("item") ? "item" : "id");
         Item item = BuiltInRegistries.ITEM.getOptional(ResourceLocation.parse(itemName)).orElseThrow(() -> new JsonSyntaxException("Unknown item '" + itemName + "'"));
         if (disallowsAirInRecipe && item == Items.AIR) throw new JsonSyntaxException("Invalid item: " + itemName);
         ItemStack stack = new ItemStack(item, net.minecraft.util.GsonHelper.getAsInt(json, "count", 1));
         if (readNBT && json.has("nbt")) ItemStackNbt.setTag(stack, getNBT(json.get("nbt")));
+        if (json.has("components")) {
+            stack.applyComponents(net.minecraft.core.component.DataComponentPatch.CODEC.parse(JsonOps.INSTANCE, json.get("components")).getOrThrow(JsonSyntaxException::new));
+        }
         return stack;
     }
 

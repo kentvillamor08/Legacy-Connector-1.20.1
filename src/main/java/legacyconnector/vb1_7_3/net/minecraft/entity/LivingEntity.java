@@ -5,6 +5,8 @@ import legacyconnector.vb1_7_3.net.minecraft.world.World;
 
 /** Beta 1.7.3 {@code EntityLiving}: health and movement input. */
 public abstract class LivingEntity extends Entity {
+    /** Original: a living entity below the world takes void damage. */
+    @Override public void tickInVoid(){damage(null,4);}
     public int maxHealth = 20;
     public float bodyYaw;
     public float lastBodyYaw;
@@ -16,19 +18,25 @@ public abstract class LivingEntity extends Entity {
     public int deathTime;
     public int attackCooldown;
     public boolean killedByOtherEntity;
-    public float rotationSpeed,swingAnimationProgress;
+    public float rotationSpeed,swingAnimationProgress,lastSwingAnimationProgress;
+    public float walkProgress,lastWalkProgress;
     public int scoreAmount,despawnCounter;
+    /** Target Y retained by the original living-entity interpolation callbacks. */
+    public double lerpY;
     protected boolean interpolateOnly;
     protected float sidewaysSpeed;
     protected float forwardSpeed;
     protected boolean jumping;
     protected float movementSpeed = 0.7F;
+    /** Beta's {@code defaultPitch}: the pitch a mob's head returns to, 0 unless a mod sets it. */
+    public float defaultPitch;
     protected String texture = "/mob/char.png";
 
     public LivingEntity(World world) {
         super(world);stepHeight=.5F;
     }
 
+    @Override public void baseTick(){if(mcc$modern instanceof org.kylepitcock.legacyconnector.vb1_7_3.B173LivingHost host)host.mcc$baseTick();else super.baseTick();}
     @Override public void tick() {
         if(mcc$modern instanceof org.kylepitcock.legacyconnector.vb1_7_3.B173LivingHost host)host.mcc$baseTick();
         else super.tick();
@@ -43,6 +51,7 @@ public abstract class LivingEntity extends Entity {
     public float mcc$sidewaysSpeed(){return sidewaysSpeed;}
     public float mcc$forwardSpeed(){return forwardSpeed;}
     public float mcc$movementSpeed(){return movementSpeed;}
+    public void mcc$movementSpeed(float speed){movementSpeed=speed;}
     public boolean mcc$jumping(){return jumping;}
     public void mcc$movementInputs(float sideways,float forward,boolean jump){sidewaysSpeed=sideways;forwardSpeed=forward;jumping=jump;}
     public void applyKnockback(Entity attacker,int amount,double x,double z) {
@@ -108,14 +117,31 @@ public abstract class LivingEntity extends Entity {
     public final void mcc$dropItems(){dropItems();}
     public int getMinAmbientSoundDelay(){return 80;}
     public boolean canBreatheInWater(){return false;}
-    /** Beta {@code spawnExplosionParticle}-style spawn animation (puffs of smoke); the host spawns no extra particles. */
-    public void animateSpawn(){}
+    /** Beta spawn puffs use the actor's random stream, including before a native host is attached. */
+    public void animateSpawn(){
+        for(int i=0;i<20;i++){
+            double vx=random.nextGaussian()*.02D;
+            double vy=random.nextGaussian()*.02D;
+            double vz=random.nextGaussian()*.02D;
+            world.addParticle("explode",
+                    x+(double)(random.nextFloat()*width*2F)-(double)width-vx*10D,
+                    y+(double)(random.nextFloat()*height)-vy*10D,
+                    z+(double)(random.nextFloat()*width*2F)-(double)width-vz*10D,
+                    vx,vy,vz);
+        }
+    }
     public String getTexture(){return texture;}
     public void travel(float sideways,float forward){if(mcc$modern instanceof org.kylepitcock.legacyconnector.vb1_7_3.B173LivingHost host)host.baseTravel(sideways,forward);}
     public boolean isOnLadder(){return mcc$modern instanceof org.kylepitcock.legacyconnector.vb1_7_3.B173LivingHost host?host.baseIsOnLadder():mcc$modern instanceof net.minecraft.world.entity.LivingEntity living&&living.onClimbable();}
     protected boolean isImmobile(){return health<=0;}
     public final boolean mcc$isImmobile(){return isImmobile();}
-    protected void jump(){velocityY=.42;}
+    protected void jump(){
+        if(mcc$modern instanceof org.kylepitcock.legacyconnector.vb1_7_3.B173LivingHost host)host.baseJump();
+        else velocityY=.42;
+    }
+    public final void mcc$jump(){jump();}
+    @Override public void tickRiding(){super.tickRiding();lastWalkProgress=walkProgress;walkProgress=0;}
+
     public void heal(int amount){if(health>0){health=Math.min(maxHealth,health+amount);damagedTime=20;}}
     public void processServerEntityStatus(byte status){if(mcc$modern instanceof org.kylepitcock.legacyconnector.vb1_7_3.B173LivingHost host)host.baseEntityStatus(status);else if(status==2){hurtTime=10;damagedTime=10;}else if(status==3){health=0;deathTime=1;}}
 
@@ -129,11 +155,42 @@ public abstract class LivingEntity extends Entity {
         hurtTime=tag.getShort("HurtTime");deathTime=tag.getShort("DeathTime");attackCooldown=tag.getShort("AttackTime");
     }
 
-    /** The original skin path, also used by the native mob fallback renderer. */
-    public String mcc$texture(){return getTexture();}
+    /**
+     * The texture to draw: the original {@code getTexture()} when a mod overrides it and it answers the same each time, else the field. A method
+     * of that name that answers differently on each call is the mod's own helper that merely shares the name (Millenaire's villager picks a
+     * random skin from it each call, and sets the field once), never an override of this one. A client-side copy lacks the server's state:
+     * its synced skin is the one the server chose.
+     */
+    private static final java.util.Map<Class<?>,Boolean> TEXTURE_OVERRIDES=new java.util.concurrent.ConcurrentHashMap<>();
+    private boolean overridesTexture(){
+        Boolean known=TEXTURE_OVERRIDES.get(getClass());
+        if(known!=null)return known;
+        boolean declared=false;
+        for(Class<?> c=getClass();c!=null&&c!=LivingEntity.class;c=c.getSuperclass())try{c.getDeclaredMethod("getTexture");declared=true;break;}catch(NoSuchMethodException ignored){}
+        if(!declared){TEXTURE_OVERRIDES.put(getClass(),false);return false;}
+        try{
+            String first=getTexture();
+            if(first==null)return true; // no answer yet (state not set up): decide on a later call
+            boolean stable=true;
+            for(int i=0;i<8&&stable;i++)stable=first.equals(getTexture());
+            TEXTURE_OVERRIDES.put(getClass(),stable);
+            return stable;
+        }catch(RuntimeException e){return true;}
+    }
+    public String mcc$texture(){
+        if(mcc$modern!=null&&mcc$modern.level().isClientSide&&texture!=null&&!"/mob/char.png".equals(texture))return texture;
+        if(overridesTexture())try{String t=getTexture();if(t!=null)return t;}catch(RuntimeException ignored){}
+        return texture;
+    }
     /** Original renderers may compare texture paths with class literals by identity. */
     public void mcc$setTexture(String texture){this.texture=texture==null?null:texture.intern();}
-    public float getHandSwingProgress(float partial){return mcc$modern instanceof net.minecraft.world.entity.LivingEntity living?living.getAttackAnim(partial):0;}
+    public float getHandSwingProgress(float partial){
+        if(mcc$modern instanceof org.kylepitcock.legacyconnector.vb1_7_3.B173LivingHost||mcc$modern==null){
+            float delta=swingAnimationProgress-lastSwingAnimationProgress;if(delta<0)delta++;
+            return lastSwingAnimationProgress+delta*partial;
+        }
+        return mcc$modern instanceof net.minecraft.world.entity.LivingEntity living?living.getAttackAnim(partial):0;
+    }
 
     public ItemStack getHeldItem() {
         if(mcc$modern instanceof org.kylepitcock.legacyconnector.vb1_7_3.B173LivingHost)return null;

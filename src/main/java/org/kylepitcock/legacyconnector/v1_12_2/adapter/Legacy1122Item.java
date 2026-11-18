@@ -218,9 +218,25 @@ public class Legacy1122Item extends net.minecraft.world.item.Item {
         }
     }
 
+    /** The enchanting table's enchantability: the legacy getItemEnchantability (tool and armor materials, mods' overrides), 0 without it. */
+    @Override
+    public int getEnchantmentValue(ItemStack stack) {
+        try {
+            return Math.max(0, legacy.getItemEnchantability(org.kylepitcock.legacyconnector.v1_12_2.bridge.Stacks1122.fromModern(stack)));
+        } catch (RuntimeException | LinkageError e) {
+            return super.getEnchantmentValue(stack);
+        }
+    }
+
     @Override
     public boolean hurtEnemy(ItemStack stack, net.minecraft.world.entity.LivingEntity target, net.minecraft.world.entity.LivingEntity attacker) {
         return cb().hit ? cb().hit(stack, target, attacker) : super.hurtEnemy(stack, target, attacker);
+    }
+
+    /** Forge's Item.onEntitySwing: NeoForge's swing hook calls it with the swinging entity; true cancels the swing. */
+    @Override
+    public boolean onEntitySwing(ItemStack stack, net.minecraft.world.entity.LivingEntity entity, net.minecraft.world.InteractionHand hand) {
+        return cb().swing && cb().entitySwing(stack, entity);
     }
 
     @Override
@@ -229,10 +245,37 @@ public class Legacy1122Item extends net.minecraft.world.item.Item {
         return cb().destroyed ? cb().destroyed(stack, level, state, pos, entity) : super.mineBlock(stack, level, state, pos, entity);
     }
 
+    /** Set while the legacy item answers a mining query: a mod's getDestroySpeed asking ForgeHooks.isToolEffective comes back here. */
+    private static final ThreadLocal<Boolean> MINING_QUERY = new ThreadLocal<>();
+
+    /**
+     * Mining speed: the legacy getDestroySpeed of items that override it and of every legacy tool (ItemTool's Forge rules: the tool
+     * classes' blocks at the material's efficiency). Legacy items have no modern Tool component, so tools mined at hand speed.
+     */
     @Override
     public float getDestroySpeed(ItemStack stack, net.minecraft.world.level.block.state.BlockState state) {
         float modern = super.getDestroySpeed(stack, state);
-        return cb().destroySpeed ? cb().destroySpeed(stack, state, modern) : modern;
+        if (!(cb().destroySpeed || legacy instanceof legacyconnector.v1_12_2.net.minecraft.item.ItemTool) || MINING_QUERY.get() != null) return modern;
+        MINING_QUERY.set(Boolean.TRUE);
+        try {
+            return cb().destroySpeed(stack, state, modern);
+        } finally {
+            MINING_QUERY.remove();
+        }
+    }
+
+    /** Drops of blocks that need the right tool (stone, ores): Forge 1.12's harvest rules on the legacy item (see ItemCallbacks1122.correctTool). */
+    @Override
+    public boolean isCorrectToolForDrops(ItemStack stack, net.minecraft.world.level.block.state.BlockState state) {
+        if (MINING_QUERY.get() == null) {
+            MINING_QUERY.set(Boolean.TRUE);
+            try {
+                if (cb().correctTool(stack, state)) return true;
+            } finally {
+                MINING_QUERY.remove();
+            }
+        }
+        return super.isCorrectToolForDrops(stack, state);
     }
 
     @Override

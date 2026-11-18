@@ -7,15 +7,28 @@ import legacyconnector.vb1_7_3.net.minecraft.util.math.Vec3d;
 public class Path {
     public final PathNode[] nodes;
     public int length,currentNodeIndex;
-    private final net.minecraft.world.level.pathfinder.Path modern;
+    private net.minecraft.world.level.pathfinder.Path modern;
     public Path(PathNode[] nodes){this(nodes,null);}
     private Path(PathNode[] nodes,net.minecraft.world.level.pathfinder.Path modern){this.nodes=nodes;length=nodes.length;this.modern=modern;}
     public static Path mcc$wrap(net.minecraft.world.level.pathfinder.Path path){
-        if(path==null)return null;PathNode[] nodes=new PathNode[path.getNodeCount()];
+        // Beta PathNodeNavigator returns null when its closest node remains the start.
+        // Native A* represents that failure as an unreached singleton instead. A
+        // reached singleton (already at the goal) and useful partial routes remain valid.
+        if(path==null||path.getNodeCount()==0||(!path.canReach()&&path.getNodeCount()==1))return null;
+        PathNode[] nodes=new PathNode[path.getNodeCount()];
         for(int i=0;i<nodes.length;i++){var n=path.getNode(i);nodes[i]=new PathNode(n.x,n.y,n.z);}
         Path wrapped=new Path(nodes,path);wrapped.currentNodeIndex=path.getNextNodeIndex();return wrapped;
     }
-    public net.minecraft.world.level.pathfinder.Path mcc$modern(){if(modern!=null)modern.setNextNodeIndex(Math.min(currentNodeIndex,length));return modern;}
+    /** The native path the host's navigation follows. A path a mod built from its own nodes (its own A*) gets one made from those nodes. */
+    public net.minecraft.world.level.pathfinder.Path mcc$modern(){
+        if(modern==null&&length>0){
+            var list=new java.util.ArrayList<net.minecraft.world.level.pathfinder.Node>(length);
+            for(int i=0;i<length;i++){var n=nodes[i];if(n!=null)list.add(new net.minecraft.world.level.pathfinder.Node(n.x,n.y,n.z));}
+            if(!list.isEmpty()){var end=list.get(list.size()-1);modern=new net.minecraft.world.level.pathfinder.Path(list,new net.minecraft.core.BlockPos(end.x,end.y,end.z),true);}
+        }
+        if(modern!=null)modern.setNextNodeIndex(Math.min(currentNodeIndex,modern.getNodeCount()));
+        return modern;
+    }
     public void next(){if(currentNodeIndex<length)currentNodeIndex++;if(modern!=null)modern.setNextNodeIndex(currentNodeIndex);}
     public boolean isFinished(){if(modern!=null)currentNodeIndex=modern.getNextNodeIndex();return currentNodeIndex>=length;}
     public PathNode getEnd(){return length==0?null:nodes[length-1];}

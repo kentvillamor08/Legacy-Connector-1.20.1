@@ -147,6 +147,7 @@ public final class Assets1710 implements GeneratedPack.Contributor {
         bakeSprites(blocks, true, out);
         bakeSprites(items, false, out);
         if (net.neoforged.fml.loading.FMLEnvironment.dist.isClient()) {
+            contributeModAtlasFolders(out);
             try {
                 org.kylepitcock.legacyconnector.v1_7_10.client.ModernLeaves.contribute(out);
             } catch (RuntimeException | LinkageError e) {
@@ -160,6 +161,29 @@ public final class Assets1710 implements GeneratedPack.Contributor {
             org.kylepitcock.legacyconnector.v1_7_10.client.LegacyWater.contribute(out);
             org.kylepitcock.legacyconnector.v1_7_10.client.LegacyGuiTextures.contribute(out);
         }
+    }
+
+    /**
+     * Mods' own atlases over a folder that is neither textures/blocks nor textures/items (Fisk's Heroes' booster icons in textures/icons)
+     * name their sprites after the folder ({@code TextureMap.id}); the folder joins the modern block atlas as a directory source. Atlas
+     * configurations of all packs are merged, so this adds to the converted jars' own.
+     */
+    private static void contributeModAtlasFolders(Map<String, Supplier<byte[]>> out) {
+        java.util.Set<String> folders = legacyconnector.v1_7_10.net.minecraft.client.renderer.texture.TextureMap.mcc$extraFolders();
+        if (folders.isEmpty()) return;
+        com.google.gson.JsonArray sources = new com.google.gson.JsonArray();
+        for (String folder : folders) {
+            com.google.gson.JsonObject dir = new com.google.gson.JsonObject();
+            dir.addProperty("type", "directory");
+            dir.addProperty("source", folder);
+            dir.addProperty("prefix", folder + "/");
+            sources.add(dir);
+        }
+        com.google.gson.JsonObject atlas = new com.google.gson.JsonObject();
+        atlas.add("sources", sources);
+        byte[] bytes = atlas.toString().getBytes(StandardCharsets.UTF_8);
+        out.putIfAbsent("assets/minecraft/atlases/blocks.json", () -> bytes);
+        LOG.info("Mod atlas folders added to the block atlas: {}", folders);
     }
 
     /**
@@ -653,6 +677,20 @@ public final class Assets1710 implements GeneratedPack.Contributor {
         };
     }
 
+    private static JsonArray plain(double x, double y, double z) {
+        JsonArray a = new JsonArray();
+        a.add(x);
+        a.add(y);
+        a.add(z);
+        return a;
+    }
+
+    /** Whether the four side faces of a block do not all show the same icon (a front, or a different back). */
+    private static boolean sidesDiffer(Block b, int meta) {
+        String north = iconName(b, 2, meta);
+        return !north.equals(iconName(b, 3, meta)) || !north.equals(iconName(b, 4, meta)) || !north.equals(iconName(b, 5, meta));
+    }
+
     private static JsonArray vec(double x, double y, double z) {
         JsonArray a = new JsonArray();
         a.add(Math.round(Math.max(0, Math.min(1, x)) * 1600) / 100.0);
@@ -767,6 +805,18 @@ public final class Assets1710 implements GeneratedPack.Contributor {
                 ResourceLocation bid = BuiltInRegistries.BLOCK.getKey(block.mcc$modern);
                 int blockMeta = item.getMetadata(meta) & 15;
                 model.addProperty("parent", blockModel(bid.getNamespace() + ":block/" + bid.getPath() + "_m" + blockMeta));
+                // 1.7.10's slot view of a cube showed its south face on the left and its east face on the right (RenderItem: rotate 210
+                // about x, then 45 and -90 about y); minecraft:block/block turns the cube the other way (north/east visible), which hid
+                // the front of a machine whose icon differs by side (Thermal Expansion's machines showed the plain side in the slot).
+                if (sidesDiffer(block, blockMeta)) {
+                    JsonObject gui = new JsonObject();
+                    gui.add("rotation", plain(30, 315, 0));
+                    gui.add("translation", plain(0, 0, 0));
+                    gui.add("scale", plain(0.625, 0.625, 0.625));
+                    JsonObject display = new JsonObject();
+                    display.add("gui", gui);
+                    model.add("display", display);
+                }
             } else {
                 model.addProperty("parent", item.isFull3D() ? "minecraft:item/handheld" : "minecraft:item/generated");
                 JsonObject tex = new JsonObject();

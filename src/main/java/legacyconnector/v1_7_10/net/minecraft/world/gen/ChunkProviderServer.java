@@ -59,7 +59,7 @@ public class ChunkProviderServer implements IChunkProvider {
 
     /** The dimension folder's loader of a server world (null elsewhere). */
     private static legacyconnector.v1_7_10.net.minecraft.world.chunk.storage.IChunkLoader mcc$loader(World world) {
-        if (world == null || !(world.mcc$fullLevel() instanceof net.minecraft.server.level.ServerLevel level)) return null;
+        if (world == null || !(world.mcc$levelObject() instanceof net.minecraft.server.level.ServerLevel level)) return null;
         try {
             var root = level.getServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT);
             return new legacyconnector.v1_7_10.net.minecraft.world.chunk.storage.AnvilChunkLoader(
@@ -105,6 +105,13 @@ public class ChunkProviderServer implements IChunkProvider {
     @Override
     public Chunk loadChunk(int x, int z) {
         return provideChunk(x, z);
+    }
+
+    /** Loads the chunk and runs the callback afterwards (1.7.10 did the loading on its IO thread; here the host's chunk cache answers at once). */
+    public Chunk loadChunk(int x, int z, Runnable callback) {
+        Chunk chunk = provideChunk(x, z);
+        if (callback != null) callback.run();
+        return chunk;
     }
 
     @Override

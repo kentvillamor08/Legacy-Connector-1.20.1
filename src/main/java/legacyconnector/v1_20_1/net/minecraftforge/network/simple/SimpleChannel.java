@@ -38,6 +38,12 @@ public class SimpleChannel {
         this.name = name;
         this.version = version.get();
         this.type = new CustomPacketPayload.Type<>(name);
+        // NetworkDirection.buildPacket: bytes a mod encoded itself (with encodeMessage) become a payload of this channel
+        legacyconnector.v1_20_1.net.minecraftforge.network.RawChannels.register(name, (data, index) -> {
+            byte[] bytes = new byte[data.readableBytes()];
+            data.getBytes(data.readerIndex(), bytes);
+            return new Payload(index, bytes);
+        });
         synchronized (CHANNELS) {
             CHANNELS.add(this);
         }
@@ -53,10 +59,25 @@ public class SimpleChannel {
     public final class Payload implements CustomPacketPayload {
         final IndexedMessageCodec.MessageHandler<?> handler;
         final Object message;
+        /** A message the mod encoded itself ({@code buildPacket}): index and bytes are written as they are. */
+        final byte[] raw;
+        final int rawIndex;
+
+        /** The packet buffer kept alive for the handler, or null. */
+        volatile io.netty.buffer.ByteBuf heldBuffer;
 
         Payload(IndexedMessageCodec.MessageHandler<?> handler, Object message) {
             this.handler = handler;
             this.message = message;
+            this.raw = null;
+            this.rawIndex = 0;
+        }
+
+        Payload(int index, byte[] raw) {
+            this.handler = null;
+            this.message = null;
+            this.raw = raw;
+            this.rawIndex = index;
         }
 
         @Override
@@ -84,6 +105,11 @@ public class SimpleChannel {
     }
 
     private void encode(RegistryFriendlyByteBuf buf, Payload payload) {
+        if (payload.raw != null) {
+            buf.writeByte(payload.rawIndex);
+            buf.writeBytes(payload.raw);
+            return;
+        }
         buf.writeByte(payload.handler.index);
         payload.handler.encode(payload.message, buf);
     }
@@ -92,11 +118,26 @@ public class SimpleChannel {
         int index = buf.readByte() & 0xFF;
         IndexedMessageCodec.MessageHandler<?> h = byIndex.get(index);
         if (h == null) throw new IllegalStateException("Unknown message index " + index + " on channel " + name);
-        return new Payload(h, h.decode(buf));
+        // Forge decoded on the network thread with the buffer retained and released it after the handler: a decoder may keep the buffer and retain() it
+        // later (SpectreLib's config sync does). NeoForge releases the buffer when this decode returns, so it is held until the handler is done.
+        boolean held = PacketBufferLifetime.hold(buf);
+        Payload payload;
+        try {
+            payload = new Payload(h, h.decode(buf));
+        } catch (RuntimeException | Error e) {
+            PacketBufferLifetime.release(buf, held);
+            throw e;
+        }
+        payload.heldBuffer = held ? buf : null;
+        return payload;
     }
 
     private void handle(Payload payload, IPayloadContext ctx) {
-        payload.handler.handle(payload.message, new NetworkEvent.Context(ctx));
+        try {
+            payload.handler.handle(payload.message, new NetworkEvent.Context(ctx));
+        } finally {
+            PacketBufferLifetime.release(payload.heldBuffer, payload.heldBuffer != null);
+        }
     }
 
     // ---- Forge's API --------------------------------------------------------------------------------------------------------
@@ -127,6 +168,14 @@ public class SimpleChannel {
         IndexedMessageCodec.MessageHandler<?> h = byClass.get(msg.getClass());
         if (h == null) throw new IllegalArgumentException("Message " + msg.getClass().getName() + " is not registered on channel " + name);
         return new Payload(h, msg);
+    }
+
+    /** {@code channel.encodeMessage(msg, buffer)}: writes the message the way {@code send} would and returns its index (for {@code NetworkDirection.buildPacket}). */
+    public <MSG> int encodeMessage(MSG message, FriendlyByteBuf buf) {
+        IndexedMessageCodec.MessageHandler<?> h = byClass.get(message.getClass());
+        if (h == null) throw new IllegalArgumentException("Message " + message.getClass().getName() + " is not registered on channel " + name);
+        h.encode(message, buf);
+        return h.index;
     }
 
     public void sendToServer(Object message) {

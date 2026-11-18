@@ -68,6 +68,12 @@ public final class ClientCompat {
         return net.minecraft.client.renderer.MultiBufferSource.immediate(new com.mojang.blaze3d.vertex.ByteBufferBuilder(256));
     }
 
+    /** {@code MultiBufferSource.immediateWithBuffers(Map, BufferBuilder)}: the per-layer builders and the fallback are byte buffers now (the old builders only supplied memory, layers get theirs on demand). */
+    public static net.minecraft.client.renderer.MultiBufferSource.BufferSource immediateWithBuffers(
+            java.util.Map<net.minecraft.client.renderer.RenderType, CompatBufferBuilder> ignoredMap, CompatBufferBuilder ignored) {
+        return net.minecraft.client.renderer.MultiBufferSource.immediateWithBuffers(new java.util.LinkedHashMap<>(), new com.mojang.blaze3d.vertex.ByteBufferBuilder(256));
+    }
+
     /** {@code DefaultPlayerSkin.getDefaultSkin(UUID)}: the skin texture of the default skin for that id. */
     public static net.minecraft.resources.ResourceLocation getDefaultSkin(java.util.UUID id) {
         return net.minecraft.client.resources.DefaultPlayerSkin.get(id).texture();
@@ -184,6 +190,10 @@ public final class ClientCompat {
                 menuRegister.setAccessible(true);
             }
             menuRegister.invoke(null, type, constructor);
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            // a mod's client setup that runs twice (its handler reached through two mod containers) registers the same screen again: the first one stays
+            if (e.getCause() instanceof IllegalStateException dup && String.valueOf(dup.getMessage()).startsWith("Duplicate registration")) return;
+            throw new IllegalStateException("MenuScreens.register failed", e);
         } catch (ReflectiveOperationException e) {
             throw new IllegalStateException("MenuScreens.register failed", e);
         }
@@ -200,6 +210,18 @@ public final class ClientCompat {
         return (net.minecraft.client.renderer.entity.LivingEntityRenderer) event.getSkin(skinModel(name));
     }
 
+    /** {@code AddLayers.getSkins()} as it is in 1.21.1 (the models), for code that was adapted to read them. */
+    public static java.util.Set<net.minecraft.client.resources.PlayerSkin.Model> getSkinModels(net.neoforged.neoforge.client.event.EntityRenderersEvent.AddLayers event) {
+        return event.getSkins();
+    }
+
+    /** {@code EntityRenderersEvent.AddLayers.getSkins()}: the skin names ("default", "slim") of 1.20.1 are {@code PlayerSkin.Model} values now. */
+    public static java.util.Set<String> getSkins(net.neoforged.neoforge.client.event.EntityRenderersEvent.AddLayers event) {
+        java.util.Set<String> out = new java.util.LinkedHashSet<>();
+        for (net.minecraft.client.resources.PlayerSkin.Model m : event.getSkins()) out.add(m == net.minecraft.client.resources.PlayerSkin.Model.SLIM ? "slim" : "default");
+        return out;
+    }
+
     /** {@code Options.renderDebug} (F3 overlay shown): the debug overlay keeps the flag now. */
     public static boolean getRenderDebug(net.minecraft.client.Options options) {
         Minecraft mc = Minecraft.getInstance();
@@ -210,4 +232,30 @@ public final class ClientCompat {
         Minecraft mc = Minecraft.getInstance();
         if (mc != null && mc.getDebugOverlay() != null && mc.getDebugOverlay().showDebugScreen() != show) mc.getDebugOverlay().toggleOverlay();
     }
+
+    // ---- AbstractSelectionList: the x0/x1/y0/y1 bounds are the widget's position and size now
+
+    public static int listX0(net.minecraft.client.gui.components.AbstractSelectionList<?> list) { return list.getX(); }
+
+    public static int listX1(net.minecraft.client.gui.components.AbstractSelectionList<?> list) { return list.getRight(); }
+
+    public static int listY0(net.minecraft.client.gui.components.AbstractSelectionList<?> list) { return list.getY(); }
+
+    public static int listY1(net.minecraft.client.gui.components.AbstractSelectionList<?> list) { return list.getBottom(); }
+
+    public static void setListX0(net.minecraft.client.gui.components.AbstractSelectionList<?> list, int x0) {
+        int right = list.getRight();
+        list.setX(x0);
+        list.setWidth(right - x0);
+    }
+
+    public static void setListX1(net.minecraft.client.gui.components.AbstractSelectionList<?> list, int x1) { list.setWidth(x1 - list.getX()); }
+
+    public static void setListY0(net.minecraft.client.gui.components.AbstractSelectionList<?> list, int y0) {
+        int bottom = list.getBottom();
+        list.setY(y0);
+        list.setHeight(bottom - y0);
+    }
+
+    public static void setListY1(net.minecraft.client.gui.components.AbstractSelectionList<?> list, int y1) { list.setHeight(y1 - list.getY()); }
 }

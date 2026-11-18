@@ -48,7 +48,7 @@ public class World implements IBlockAccess {
     /** Phantom: redirected to {@link #mcc$get$provider} (created on first use: mod providers need a usable world). */
     @Deprecated
     public WorldProvider provider;
-    private WorldProvider mcc$provider;
+    private volatile WorldProvider mcc$provider;
     public boolean scheduledUpdatesAreImmediate;
     /** Forge: how far an entity's box may reach past its chunk; collision and selection searches widen by it. */
     public static double MAX_ENTITY_RADIUS = 2.0D;
@@ -63,6 +63,10 @@ public class World implements IBlockAccess {
     /** Phantom: redirected to {@link #mcc$get$loadedTileEntityList}. */
     @Deprecated
     public List loadedTileEntityList;
+
+    /** Phantom: redirected to {@link #mcc$get$saveHandler}. */
+    @Deprecated
+    public legacyconnector.v1_7_10.net.minecraft.world.storage.ISaveHandler saveHandler;
 
     /** Phantom: redirected to {@link #mcc$get$mapStorage}. Global (overworld) saved data. */
     @Deprecated
@@ -83,11 +87,11 @@ public class World implements IBlockAccess {
     }
 
     public static legacyconnector.v1_7_10.net.minecraft.world.storage.MapStorage mcc$get$mapStorage(World w) {
-        return storage(w.mcc$fullLevel() instanceof ServerLevel s ? s.getServer().overworld() : null);
+        return storage(w.mcc$levelObject() instanceof ServerLevel s ? s.getServer().overworld() : null);
     }
 
     public static legacyconnector.v1_7_10.net.minecraft.world.storage.MapStorage mcc$get$perWorldStorage(World w) {
-        return storage(w.mcc$fullLevel() instanceof ServerLevel s ? s : null);
+        return storage(w.mcc$levelObject() instanceof ServerLevel s ? s : null);
     }
 
     public WorldSavedData loadItemData(Class<?> type, String name) {
@@ -156,6 +160,22 @@ public class World implements IBlockAccess {
         return w.mcc$villages;
     }
 
+    /** Phantom: redirected to {@link #mcc$get$villageSiegeObj}. */
+    @Deprecated
+    public legacyconnector.v1_7_10.net.minecraft.village.VillageSiege villageSiegeObj;
+
+    private legacyconnector.v1_7_10.net.minecraft.village.VillageSiege mcc$siege;
+
+    /** The world's siege object (1.7.10 created it with the world); the modern game runs its own sieges, so nothing ticks this one. */
+    public static legacyconnector.v1_7_10.net.minecraft.village.VillageSiege mcc$get$villageSiegeObj(World w) {
+        if (w.mcc$siege == null) w.mcc$siege = new legacyconnector.v1_7_10.net.minecraft.village.VillageSiege(w);
+        return w.mcc$siege;
+    }
+
+    public static void mcc$set$villageSiegeObj(World w, legacyconnector.v1_7_10.net.minecraft.village.VillageSiege siege) {
+        w.mcc$siege = siege;
+    }
+
     public legacyconnector.v1_7_10.net.minecraft.village.VillageCollection getVillageCollection() {
         return mcc$get$villageCollectionObj(this);
     }
@@ -165,21 +185,32 @@ public class World implements IBlockAccess {
         if (p != null) return p;
         synchronized (w) {
             if (w.mcc$provider != null) return w.mcc$provider;
-            Level full = w.mcc$fullLevel();
+            // the provider being built, for the mod's own registerWorldChunkManager (same thread, the lock is held); other threads (world
+            // generation workers, the level load event) wait for the lock instead of seeing a provider whose controller is not built yet
+            if (w.mcc$building != null) return w.mcc$building;
+            Level full = w.mcc$levelObject();
             WorldProvider created = full == null ? new WorldProvider(Level.OVERWORLD, true, false)
                     : org.kylepitcock.legacyconnector.v1_7_10.dimension.LegacyDimensions.newProvider(full);
-            w.mcc$provider = created;
-            if (full != null && created.worldObj == null) {
-                try {
-                    created.registerWorld(w);
-                } catch (RuntimeException | LinkageError e) {
-                    w.mcc$providerFailed = true;
-                    throw e;
-                }
+            if (full == null || created.worldObj != null) {
+                w.mcc$provider = created;
+                return created;
             }
+            w.mcc$building = created;
+            try {
+                created.registerWorld(w);
+            } catch (RuntimeException | LinkageError e) {
+                w.mcc$providerFailed = true;
+                w.mcc$provider = created; // stays, half built
+                throw e;
+            } finally {
+                w.mcc$building = null;
+            }
+            w.mcc$provider = created;
             return created;
         }
     }
+
+    private WorldProvider mcc$building;
 
     /** True if the mod's world provider threw while being attached to this world (it stays, half built, as {@code provider}). */
     public boolean mcc$providerFailed;
@@ -251,12 +282,25 @@ public class World implements IBlockAccess {
 
     /** The level's scoreboard (the server's, or the copy the server keeps a client in sync with). */
     public legacyconnector.v1_7_10.net.minecraft.scoreboard.Scoreboard getScoreboard() {
-        Level full = mcc$fullLevel();
+        Level full = mcc$levelObject();
         return full == null ? null : legacyconnector.v1_7_10.net.minecraft.scoreboard.Scoreboard.mcc$wrap(full.getScoreboard());
     }
 
     /** The full level, or null for a detached world-gen region without one. */
     public Level mcc$fullLevel() {
+        if (org.kylepitcock.legacyconnector.core.worldgen.RealLevelGuard.enabled() && !(lvl() instanceof Level)) {
+            org.kylepitcock.legacyconnector.core.worldgen.RealLevelGuard.reached("mcc$fullLevel()");
+        }
+        return mcc$fullLevel(lvl());
+    }
+
+    /**
+     * The dimension's {@code Level} as an object, also while this world is a generation region: for what needs the level itself and
+     * never reads or writes its blocks, heights, biomes, chunks or light (entity construction, the generator and registries, the
+     * dimension key, world info constants, the save folder). RealLevelGuard does not report it; block access goes through
+     * {@link #mcc$level()}.
+     */
+    public Level mcc$levelObject() {
         return mcc$fullLevel(lvl());
     }
 
@@ -319,7 +363,27 @@ public class World implements IBlockAccess {
 
     public static void mcc$enterDeepPass(int shift) {
         DEEP_PASSES.incrementAndGet();
-        DEEP_SHIFT.set(new int[] {shift});
+        DEEP_SHIFT.set(new int[] {shift, DEEP_CROSS});
+    }
+
+    /**
+     * The shifted pass ({@code deepLayer.mode = shifted}): one full-height pass of an ore generator with legacy y=0 at modern {@code shift}
+     * (-64), over the whole real column instead of only the deep layer; it keeps only the ore writes ({@link #mcc$splitDrops}), the
+     * normal pass of the same generator keeps everything else. So a vein is never cut by a pass boundary.
+     */
+    public static void mcc$enterShiftedPass(int shift) {
+        DEEP_PASSES.incrementAndGet();
+        DEEP_SHIFT.set(new int[] {shift, Integer.MAX_VALUE});
+    }
+
+    private static int deepCross() {
+        int[] s = DEEP_SHIFT.get();
+        return s == null ? DEEP_CROSS : s[1];
+    }
+
+    private static boolean shiftedPass() {
+        int[] s = DEEP_SHIFT.get();
+        return DEEP_PASSES.get() != 0 && s != null && s[1] == Integer.MAX_VALUE;
     }
 
     public static void mcc$leaveDeepPass() {
@@ -338,10 +402,15 @@ public class World implements IBlockAccess {
 
     /** Whether this thread runs a deep pass (legacy structures made modern are placed once, by the game: MapGenStructures1710). */
     /** Set while a legacy generator whose deep layer is active runs its normal pass (see {@link #mcc$splitDrops}). */
-    private static final ThreadLocal<Boolean> MCC_ORE_SPLIT = ThreadLocal.withInitial(() -> Boolean.FALSE);
+    private static final ThreadLocal<Integer> MCC_ORE_SPLIT = ThreadLocal.withInitial(() -> 0);
 
     public static void mcc$setOreSplit(boolean on) {
-        MCC_ORE_SPLIT.set(on);
+        MCC_ORE_SPLIT.set(on ? 1 : 0);
+    }
+
+    /** Normal pass of a generator whose ores come from the shifted pass: 0 = no split, 1 = split by cell (old), 2 = ores refused (shifted). */
+    public static void mcc$setOreMode(int mode) {
+        MCC_ORE_SPLIT.set(mode);
     }
 
     /**
@@ -352,16 +421,48 @@ public class World implements IBlockAccess {
      */
     private boolean mcc$splitDrops(int x, int y, int z, BlockPos p, BlockState state) {
         boolean deep = inDeepPass();
-        if (!deep && !MCC_ORE_SPLIT.get()) return false;
-        if (!(lvl() instanceof net.minecraft.server.level.WorldGenRegion)) return false;
-        if (!deep && (y < 0 || y > 63)) return false;
+        int mode = MCC_ORE_SPLIT.get();
+        if (!deep && mode == 0) return false;
+        if (!(lvl() instanceof net.minecraft.server.level.WorldGenRegion)) return deep && !shiftedPass() && p.getY() >= 0;
+        boolean shifted = deep ? shiftedPass() : mode == 2;
+        if (!deep && !shifted && (y < 0 || y > 63)) return false;
         BlockState current = lvl().getBlockState(p);
         boolean ore = !state.isAir() && current.is(net.minecraft.tags.BlockTags.BASE_STONE_OVERWORLD)
                 && !state.is(net.minecraft.tags.BlockTags.BASE_STONE_OVERWORLD);
-        int h = x * 73856093 ^ y * 19349663 ^ z * 83492791;
-        h ^= h >>> 16;
-        boolean toDeep = (h & 1) == 0;
+        // shifted mode: the shifted pass keeps the ore writes only, the normal pass everything but them (no cell cut through a vein)
+        if (shifted) return deep ? !ore : ore;
+        // The deep pass above modern 0 (the crossing band) shares the cells of the normal pass there, keyed by modern height.
+        int ky = deep && p.getY() >= 0 ? p.getY() : y;
+        boolean toDeep = (cellHash(x >> 3, ky >> 3, z >> 3) & 1) == 0;
         return deep ? !ore || !toDeep : ore && toDeep;
+    }
+
+    /**
+     * The ore split is decided per 8x8x8 cell, not per block: a per-block choice thinned every vein to a checkerboard (every other
+     * block along z, shifting each 8 along y) instead of leaving whole veins and whole gaps. Veins stay as the mod shaped them
+     * inside a cell; the share of ores per layer is the same on average.
+     */
+    private static int cellHash(int cx, int cy, int cz) {
+        int h = cx * 73856093 ^ cy * 19349663 ^ cz * 83492791;
+        h ^= h >>> 16;
+        h *= 0x85ebca6b;
+        h ^= h >>> 13;
+        h *= 0xc2b2ae35;
+        h ^= h >>> 16;
+        return h;
+    }
+
+    /**
+     * A generator whose deep layer is active reads the rock below y=0 as stone in its normal pass too, so a vein that starts above 0
+     * and reaches below it continues into the deep layer (it was cut at y=0: the deep pass generates its own veins elsewhere, and
+     * deepslate was not the stone a vein may replace). The ore split ({@link #mcc$splitDrops}) is untouched: it covers 0..63 only.
+     */
+    private boolean mcc$oreVeinBelowZero(int y) {
+        return y < 0 && MCC_ORE_SPLIT.get() == 1 && lvl() instanceof net.minecraft.server.level.WorldGenRegion;
+    }
+
+    public static boolean mcc$inShiftedPass() {
+        return shiftedPass();
     }
 
     public static boolean mcc$inDeepPass() {
@@ -379,8 +480,15 @@ public class World implements IBlockAccess {
      * placed a pylon whose every block was refused and then failed on the missing tile entity ("te" is null).
      */
     private static boolean mcc$aboveDeepLayer(int legacyY) {
-        return inDeepPass() && legacyY + deepShift() >= 0;
+        return inDeepPass() && legacyY + deepShift() >= deepCross();
     }
+
+    /**
+     * How far above modern y=0 the deep pass still reads and writes (ores only, see {@link #mcc$splitDrops}): a vein of the deep
+     * pass that reaches up to 0 continues into the band above instead of ending flat at the old 1.7.10 floor line (CustomOreGen veins
+     * did not cross y=0, #82). Everything higher is solid rock to the legacy code, as before.
+     */
+    private static final int DEEP_CROSS = 16;
 
     /**
      * The rock above the deep layer ends where the 1.7.10 world did (y=256): above it is air, as there. Generators that walk
@@ -404,8 +512,14 @@ public class World implements IBlockAccess {
     public static List mcc$get$playerEntities(World w) {
         List<EntityPlayer> out = new ArrayList<>();
         for (var p : w.lvl().players()) out.add((EntityPlayer) EntityBridge.wrap(p));
+        // the server self tests act through a fake player that is not in the level's player list: legacy code that looks the acting player up in
+        // playerEntities (GUI opening, per-player state) needs it there while the test runs
+        for (var p : MCC_TEST_PLAYERS) if (p.level() == w.mcc$fullLevel() && !w.lvl().players().contains(p)) out.add((EntityPlayer) EntityBridge.wrap(p));
         return out;
     }
+
+    /** Fake players of the server self tests that count as players of their level for {@code playerEntities} (see {@link #mcc$get$playerEntities}). */
+    public static final java.util.Set<net.minecraft.server.level.ServerPlayer> MCC_TEST_PLAYERS = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /** Phantom: redirected to {@link #mcc$get$activeChunkSet}. The loaded chunks around players (the ones that tick). */
     @Deprecated
@@ -495,7 +609,7 @@ public class World implements IBlockAccess {
         BlockState offThread = mcc$offThreadState(x, y, z);
         BlockState state = offThread != null ? offThread : lvl().getBlockState(mcc$readPos(x, y, z));
         // Ore generators replace stone; the deep layer is deepslate.
-        if (state.is(Blocks.DEEPSLATE) && inDeepPass()) return legacyconnector.v1_7_10.net.minecraft.init.Blocks.stone;
+        if (state.is(Blocks.DEEPSLATE) && (inDeepPass() || mcc$oreVeinBelowZero(y))) return legacyconnector.v1_7_10.net.minecraft.init.Blocks.stone;
         if (mcc$bedrockFloor(y, state)) return legacyconnector.v1_7_10.net.minecraft.init.Blocks.bedrock;
         return BlockBridge.legacyBlock(state);
     }
@@ -521,7 +635,7 @@ public class World implements IBlockAccess {
      * within one chunk of its centre (and logs an error with a stack trace for each refused one, which is slow and noisy).
      */
     private boolean outsideRegion(BlockPos p) {
-        if (p.getY() >= 0 && inDeepPass()) return true;
+        if (inDeepPass() && p.getY() >= deepCross()) return true;
         if (lvl() instanceof net.minecraft.server.level.WorldGenRegion r) {
             var c = r.getCenter();
             return Math.abs((p.getX() >> 4) - c.x) > 1 || Math.abs((p.getZ() >> 4) - c.z) > 1;
@@ -534,7 +648,7 @@ public class World implements IBlockAccess {
      * is loaded: 1.7.10 generated the chunk on the spot (Witchery's Torment mazes span four chunks from chunk 0, 0).
      */
     private void deferOutsideRegion(BlockPos p, BlockState state, int meta) {
-        if (!(lvl() instanceof net.minecraft.server.level.WorldGenRegion r) || p.getY() >= 0 && inDeepPass()) return;
+        if (!(lvl() instanceof net.minecraft.server.level.WorldGenRegion r) || inDeepPass() && p.getY() >= deepCross()) return;
         Runnable write = state != null ? () -> org.kylepitcock.legacyconnector.v1_7_10.bridge.DeferredGenWrites.block(r.getLevel(), p, state)
                 : () -> org.kylepitcock.legacyconnector.v1_7_10.bridge.DeferredGenWrites.meta(r.getLevel(), p, meta);
         // part of what the generator run builds (a locatable legacy structure, LegacyGeneratorStructures)
@@ -738,7 +852,7 @@ public class World implements IBlockAccess {
     private int surface(int x, int z, Heightmap.Types type) {
         int modern = modernSurface(x, z, type);
         // the deep layer is buried: its top is y=0 (see mcc$aboveDeepLayer)
-        if (inDeepPass()) modern = Math.min(modern, 0);
+        if (inDeepPass()) modern = Math.min(modern, deepCross());
         return legacyY(modern);
     }
 
@@ -772,7 +886,7 @@ public class World implements IBlockAccess {
     }
 
     public boolean canBlockSeeTheSky(int x, int y, int z) {
-        if (inDeepPass()) return false; // the deep layer is buried (see mcc$aboveDeepLayer)
+        if (inDeepPass() && !shiftedPass()) return false; // the deep layer is buried (see mcc$aboveDeepLayer)
         return lvl().canSeeSky(pos(x, y, z));
     }
 
@@ -796,8 +910,23 @@ public class World implements IBlockAccess {
 
     public legacyconnector.v1_7_10.net.minecraft.world.storage.ISaveHandler getSaveHandler() {
         Level level = mcc$fullLevel();
-        java.io.File dir = level instanceof ServerLevel s ? s.getServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toFile() : new java.io.File(".");
+        net.minecraft.server.MinecraftServer server = level instanceof ServerLevel s ? s.getServer() : null;
+        // a client world in single player (1.2.5-1.6.4 mods read Minecraft.theWorld.saveHandler to find the save folder): the integrated server's
+        if (server == null && level != null && level.isClientSide() && net.neoforged.fml.loading.FMLEnvironment.dist.isClient()) server = ClientServers.integrated();
+        java.io.File dir = server != null ? server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toFile() : new java.io.File(".");
         return new legacyconnector.v1_7_10.net.minecraft.world.storage.SaveHandler(dir, dir.getName());
+    }
+
+    /** Client-only lookup in its own class: a dedicated server must never load the client classes. */
+    private static final class ClientServers {
+        static net.minecraft.server.MinecraftServer integrated() {
+            return net.minecraft.client.Minecraft.getInstance().getSingleplayerServer();
+        }
+    }
+
+    /** The {@code saveHandler} field of 1.2.5 to 1.7.10's World (a phantom, see {@link #saveHandler}). */
+    public static legacyconnector.v1_7_10.net.minecraft.world.storage.ISaveHandler mcc$get$saveHandler(World w) {
+        return w.getSaveHandler();
     }
 
     /** Whether the player may break blocks here; the provider decides (by default {@link #canMineBlockBody}: spawn protection). */
@@ -1232,7 +1361,8 @@ public class World implements IBlockAccess {
 
     private net.minecraft.core.Holder<net.minecraft.world.level.biome.Biome> generatorBiome(int x, int y, int z) {
         try {
-            if (mcc$fullLevel() instanceof net.minecraft.server.level.ServerLevel sl) {
+            // only the generator's biome source and sampler are read, no chunk
+            if (mcc$levelObject() instanceof net.minecraft.server.level.ServerLevel sl) {
                 var cache = sl.getChunkSource();
                 return cache.getGenerator().getBiomeSource().getNoiseBiome(x >> 2, y >> 2, z >> 2, cache.randomState().sampler());
             }
@@ -1520,7 +1650,7 @@ public class World implements IBlockAccess {
     }
 
     public void playAuxSFXAtEntity(EntityPlayer player, int type, int x, int y, int z, int data) {
-        int[] modern = org.kylepitcock.legacyconnector.v1_7_10.bridge.LevelEvents1710.toModern(type, data);
+        int[] modern = org.kylepitcock.legacyconnector.v1_7_10.bridge.LevelEvents1710.toModern(lvl(), type, data);
         if (modern == null) return;
         lvl().levelEvent(player == null ? null : player.mcc$player(), modern[0], pos(x, y, z), modern[1]);
     }
@@ -1554,11 +1684,11 @@ public class World implements IBlockAccess {
     }
 
     public void setWorldTime(long time) {
-        if (mcc$fullLevel() instanceof ServerLevel s) s.setDayTime(time);
+        if (mcc$levelObject() instanceof ServerLevel s) s.setDayTime(time);
     }
 
     public boolean isDaytime() {
-        Level level = mcc$fullLevel();
+        Level level = mcc$levelObject();
         return level != null && level.isDay();
     }
 
@@ -1574,12 +1704,12 @@ public class World implements IBlockAccess {
     private final java.util.List<IWorldAccess> worldAccesses = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     public boolean isRaining() {
-        Level level = mcc$fullLevel();
+        Level level = mcc$levelObject();
         return level != null && level.isRaining();
     }
 
     public boolean isThundering() {
-        Level level = mcc$fullLevel();
+        Level level = mcc$levelObject();
         return level != null && level.isThundering();
     }
 
@@ -1589,7 +1719,7 @@ public class World implements IBlockAccess {
     }
 
     public float getRainStrength(float partial) {
-        Level level = mcc$fullLevel();
+        Level level = mcc$levelObject();
         return level == null ? 0 : level.getRainLevel(partial);
     }
 
@@ -1603,7 +1733,7 @@ public class World implements IBlockAccess {
 
     public long getSeed() {
         if (lvl() instanceof WorldGenLevel g) return g.getSeed();
-        return mcc$fullLevel() instanceof ServerLevel s ? s.getSeed() : 0L;
+        return mcc$levelObject() instanceof ServerLevel s ? s.getSeed() : 0L;
     }
 
     private legacyconnector.v1_7_10.net.minecraft.world.storage.WorldInfo mcc$info;
@@ -1614,7 +1744,7 @@ public class World implements IBlockAccess {
     }
 
     public ChunkCoordinates getSpawnPoint() {
-        Level level = mcc$fullLevel();
+        Level level = mcc$levelObject();
         BlockPos spawn = level == null ? BlockPos.ZERO : level.getSharedSpawnPos();
         return new ChunkCoordinates(spawn.getX(), spawn.getY(), spawn.getZ());
     }
@@ -2080,7 +2210,8 @@ public class World implements IBlockAccess {
                 }
             }
         }
-        return false;
+        var site = org.kylepitcock.legacyconnector.v1_7_10.bridge.CoremodSites.BLOCK_COLLISION_EXTRA; // coremod hook site (no-op unless listed)
+        return site.listed() && org.kylepitcock.legacyconnector.v1_7_10.bridge.CoremodSites.blockCollisionExtra(this, box);
     }
 
     /** The world's crash report section: its name, chunk statistics and level data. */
@@ -2101,7 +2232,7 @@ public class World implements IBlockAccess {
     }
 
     public void setSpawnLocation(int x, int y, int z) {
-        if (mcc$fullLevel() instanceof ServerLevel s) s.setDefaultSpawnPos(new BlockPos(x, y, z), 0.0F);
+        if (mcc$levelObject() instanceof ServerLevel s) s.setDefaultSpawnPos(new BlockPos(x, y, z), 0.0F);
     }
 
     /**
@@ -2164,7 +2295,7 @@ public class World implements IBlockAccess {
     }
 
     public GameRules getGameRules() {
-        return GameRules.mcc$of(mcc$fullLevel());
+        return GameRules.mcc$of(mcc$levelObject());
     }
 
     /** Whether any block overlapping the box has the given material (vanilla: water checks of items, entities). */
@@ -2190,7 +2321,7 @@ public class World implements IBlockAccess {
         int y1 = (int) Math.floor(box.minY), y2 = (int) Math.floor(box.maxY + 1.0);
         int z1 = (int) Math.floor(box.minZ), z2 = (int) Math.floor(box.maxZ + 1.0);
         for (int x = x1; x < x2; x++) {
-            for (int y = Math.max(0, y1); y < y2; y++) {
+            for (int y = Math.max(mcc$buildBottom(), y1); y < y2; y++) {
                 for (int z = z1; z < z2; z++) {
                     var block = getBlock(x, y, z);
                     if (block != null && block.getMaterial().isLiquid()) return true;
@@ -2434,7 +2565,14 @@ public class World implements IBlockAccess {
     public void destroyBlockInWorldPartially(int breakerId, int x, int y, int z, int progress) {
     }
 
+    /** Plays the record of that song name at the position (null or empty stops it), as the client's RenderGlobal did. */
     public void playRecord(String name, int x, int y, int z) {
+        if (name == null || name.isEmpty()) {
+            playAuxSFX(1005, x, y, z, 0);
+            return;
+        }
+        var disc = legacyconnector.v1_7_10.net.minecraft.item.ItemRecord.getRecord(name.startsWith("records.") ? name.substring(8) : name);
+        if (disc != null) playAuxSFX(1005, x, y, z, legacyconnector.v1_7_10.net.minecraft.item.Item.getIdFromItem(disc));
     }
 
     /** How full the moon is (1 full .. 0 new), vanilla's per-phase table. */
@@ -2466,5 +2604,55 @@ public class World implements IBlockAccess {
     /** The local difficulty at the point ({@link #func_147473_B} of its block). */
     public float getTensionFactorForBlock(double x, double y, double z) {
         return func_147473_B((int) Math.floor(x), (int) Math.floor(y), (int) Math.floor(z));
+    }
+
+    // Members125 batch 1: members of Minecraft 1.2.5's World that 1.3 renamed or moved (the loader names them mcc125$<Feather name>)
+
+    /** 1.2.5 {@code World.getEntity(id)} (1.3: {@code getEntityByID}). */
+    public Entity mcc125$getEntity(int id) {
+        return getEntityByID(id);
+    }
+
+    /** 1.2.5 {@code World.getMoonPhase(partialTicks)}: the phase 0 to 7 (the modern level answers the phase of the current day). */
+    public int getMoonPhase(float partialTicks) {
+        return getMoonPhase();
+    }
+
+    /** Phantom field {@code World.isNew} (1.2.5 {@code isNewWorld}): true while the world was created in this session (its first minute). */
+    public static boolean mcc$get$mcc125$isNew(World w) {
+        return w.getTotalWorldTime() < 1200L;
+    }
+
+    public static void mcc$set$mcc125$isNew(World w, boolean v) {
+    }
+
+    /** 1.2.5 {@code World.isSolidRender(x, y, z)} (Feather name; {@code isBlockOpaqueCube}): the block there is a full opaque cube. */
+    public boolean mcc125$isSolidRender(int x, int y, int z) {
+        Block block = getBlock(x, y, z);
+        return block != null && block.isOpaqueCube();
+    }
+
+    private int mcc$lastSaveTime;
+
+    /**
+     * Phantom field {@code lastSaveTime} (1.2.5's autosave countdown of a world: mods push it forward so the world does not save while a sleep fast-forwards the clock). The modern server
+     * autosaves on its own schedule that a mod cannot move, so the value is kept per world and has no other effect.
+     */
+    public static int mcc$get$mcc125$lastSaveTime(World w) {
+        return w.mcc$lastSaveTime;
+    }
+
+    public static void mcc$set$mcc125$lastSaveTime(World w, int v) {
+        w.mcc$lastSaveTime = v;
+    }
+
+    /** 1.2.5 {@code World.save(flush, progress)}: saves the world's chunks and level data of a server world; a client world has nothing to save. */
+    public void mcc125$save(boolean flush, legacyconnector.v1_7_10.net.minecraft.util.IProgressUpdate progress) {
+        if (this instanceof WorldServer server) server.saveAllChunks(flush, progress);
+    }
+
+    /** 1.2.5 {@code World.forceSave(progress)}: a full save (the 1.2.5 {@code save(true, progress)}). */
+    public void mcc125$forceSave(legacyconnector.v1_7_10.net.minecraft.util.IProgressUpdate progress) {
+        mcc125$save(true, progress);
     }
 }

@@ -139,6 +139,23 @@ public class Chunk implements legacyconnector.v1_12_2.net.minecraftforge.common.
         return idx < 0 ? 0 : access.getSectionYFromSectionIndex(idx) << 4;
     }
 
+    /** Phantom field: reads go to {@link #mcc$get$heightMap}. */
+    @Deprecated
+    public int[] heightMap;
+    /** Phantom field: reads go to {@link #mcc$get$heightMapMinimum}. */
+    @Deprecated
+    public int heightMapMinimum;
+
+    /** 1.12's {@code heightMap}: the top block height of each column (a snapshot of the chunk's current heights). */
+    public static int[] mcc$get$heightMap(Chunk c) {
+        return c.getHeightMap();
+    }
+
+    /** 1.12's {@code heightMapMinimum}: the lowest of the column heights. */
+    public static int mcc$get$heightMapMinimum(Chunk c) {
+        return c.getLowestHeight();
+    }
+
     public int[] getHeightMap() {
         int[] out = new int[256];
         for (int i = 0; i < 16; i++) for (int j = 0; j < 16; j++) out[j << 4 | i] = getHeightValue(i, j);
@@ -192,7 +209,7 @@ public class Chunk implements legacyconnector.v1_12_2.net.minecraftforge.common.
     }
 
     public int getLightFor(EnumSkyBlock type, BlockPos pos) {
-        if (world == null || world.mcc$level() == null) return type.defaultLightValue;
+        if (world == null || world.mcc$level() == null || world.mcc$access() instanceof net.minecraft.server.level.WorldGenRegion) return type.defaultLightValue;
         return world.mcc$level().getBrightness(type.mcc$modern(), absolute(pos.getX(), pos.getY(), pos.getZ()));
     }
 
@@ -200,7 +217,7 @@ public class Chunk implements legacyconnector.v1_12_2.net.minecraftforge.common.
     }
 
     public int getLightSubtracted(BlockPos pos, int amount) {
-        if (world == null || world.mcc$level() == null) return 0;
+        if (world == null || world.mcc$level() == null || world.mcc$access() instanceof net.minecraft.server.level.WorldGenRegion) return 0;
         var p = absolute(pos.getX(), pos.getY(), pos.getZ());
         return world.mcc$level().getRawBrightness(p, amount);
     }
@@ -307,8 +324,26 @@ public class Chunk implements legacyconnector.v1_12_2.net.minecraftforge.common.
     public void onTick(boolean skipRecheckGaps) {
     }
 
+    /**
+     * The chunk whose legacy world generators run on this thread (set by the world-generator bridge). 1.12 flagged a chunk populated
+     * before its generators ran, and mods that defer work until a neighbourhood is populated (CustomOreGen) count the chunk itself; the
+     * modern chunk reaches the features status only when its decoration ends.
+     */
+    private static final ThreadLocal<long[]> POPULATING = new ThreadLocal<>();
+
+    public static void mcc$beginPopulating(int chunkX, int chunkZ) {
+        POPULATING.set(new long[] {legacyconnector.v1_12_2.net.minecraft.util.math.ChunkPos.asLong(chunkX, chunkZ)});
+    }
+
+    public static void mcc$endPopulating() {
+        POPULATING.remove();
+    }
+
     public boolean isPopulated() {
-        return access == null ? terrainPopulated : access.getPersistedStatus().isOrAfter(net.minecraft.world.level.chunk.status.ChunkStatus.FEATURES);
+        if (access == null) return terrainPopulated;
+        long[] populating = POPULATING.get();
+        if (populating != null && populating[0] == legacyconnector.v1_12_2.net.minecraft.util.math.ChunkPos.asLong(x, z)) return true;
+        return access.getPersistedStatus().isOrAfter(net.minecraft.world.level.chunk.status.ChunkStatus.FEATURES);
     }
 
     public boolean wasTicked() {
@@ -487,7 +522,8 @@ public class Chunk implements legacyconnector.v1_12_2.net.minecraftforge.common.
     public legacyconnector.v1_12_2.net.minecraft.util.ClassInheritanceMultiMap<Entity>[] getEntityLists() {
         var out = new legacyconnector.v1_12_2.net.minecraft.util.ClassInheritanceMultiMap[16];
         for (int i = 0; i < 16; i++) out[i] = new legacyconnector.v1_12_2.net.minecraft.util.ClassInheritanceMultiMap<>(Entity.class);
-        if (world != null && world.mcc$level() != null) {
+        if (world != null && world.mcc$levelObject() != null) {
+            // presence check only: the entity query itself is guarded (empty off the server thread)
             int bx = x << 4, bz = z << 4;
             var box = new AxisAlignedBB(bx, -4096, bz, bx + 16, 4096, bz + 16);
             for (Object o : world.getEntitiesWithinAABB(Entity.class, box)) {

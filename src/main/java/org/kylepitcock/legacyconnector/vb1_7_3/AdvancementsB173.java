@@ -7,6 +7,7 @@ import java.util.function.Supplier;
 import legacyconnector.vb1_7_3.net.minecraft.achievement.Achievement;
 import legacyconnector.vb1_7_3.net.minecraft.achievement.Achievements;
 import legacyconnector.vb1_7_3.net.minecraft.stat.Stat;
+import legacyconnector.vb1_7_3.net.minecraft.src.ACPage;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
@@ -28,18 +29,53 @@ public final class AdvancementsB173 {
         if(name.isEmpty())name="unnamed";
         return ResourceLocation.fromNamespaceAndPath(achievement.mcc$namespace,"beta/achievements/"+name+"_"+achievement.id);
     }
+    static ResourceLocation rootOf(String namespace){return ResourceLocation.fromNamespaceAndPath(namespace,"beta/root");}
+    static ResourceLocation pageRoot(ACPage page){
+        String name=page.title.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9/._-]","_");
+        return ResourceLocation.fromNamespaceAndPath(page.mcc$namespace,"beta/pages/"+(name.isEmpty()?"unnamed":name)+"_"+Integer.toUnsignedString(page.title.hashCode(),16)+"_"+page.mcc$titleOrdinal);
+    }
+    static ResourceLocation categoryOf(Achievement achievement){var page=ACPage.mcc$pageOf(achievement);return page==null?rootOf(achievement.mcc$namespace):pageRoot(page);}
+    static ResourceLocation parentOf(Achievement achievement){
+        if(achievement.mcc$vanilla&&achievement.parent!=null)return achievement.parent==Achievements.OPEN_INVENTORY?rootOf(achievement.mcc$namespace):idOf(achievement.parent);
+        return achievement.parent==null||achievement.parent.mcc$vanilla||ACPage.mcc$pageOf(achievement)!=ACPage.mcc$pageOf(achievement.parent)?categoryOf(achievement):idOf(achievement.parent);
+    }
     public static void describe(Achievement achievement,String title,String description){
         Objects.requireNonNull(achievement,"achievement");achievement.mcc$title=title;achievement.mcc$description=description;
         ContentB173.addLocalization(achievement.stringId,title);ContentB173.addLocalization(achievement.translationKey,description);
     }
     public static void contribute(Map<String,Supplier<byte[]>> out){
-        for(Stat stat:all())if(stat instanceof Achievement achievement&&!achievement.mcc$vanilla&&!org.kylepitcock.legacyconnector.core.LegacyLifecycle.isFailed(achievement.mcc$namespace)){
-            ResourceLocation id=idOf(achievement),parent=achievement.parent==null?null:idOf(achievement.parent);
+        if(org.kylepitcock.legacyconnector.core.LegacyMods.ordered().stream().noneMatch(mod->PlatformB173.VERSION.equals(mod.version)
+                &&mod.instance!=null&&!org.kylepitcock.legacyconnector.core.LegacyLifecycle.isFailed(mod.modernId)))return;
+        // Register bridge-owned Beta identities before taking the registry snapshot.
+        Achievement vanillaRoot=Achievements.OPEN_INVENTORY;
+        Map<ResourceLocation,String> roots=new LinkedHashMap<>();
+        Map<ResourceLocation,String> titles=new LinkedHashMap<>();
+        for(Stat stat:all())if(stat instanceof Achievement achievement&&achievement!=vanillaRoot&&!org.kylepitcock.legacyconnector.core.LegacyLifecycle.isFailed(achievement.mcc$namespace)){
+            ResourceLocation id=idOf(achievement),parent=parentOf(achievement);
             var stack=achievement.icon==null?net.minecraft.world.item.ItemStack.EMPTY:StacksB173.toModern(achievement.icon);
             String icon=stack.isEmpty()?"minecraft:barrier":BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
             byte[] bytes=definition(achievement,parent,icon).toString().getBytes(StandardCharsets.UTF_8);
             out.put("data/"+id.getNamespace()+"/advancement/"+id.getPath()+".json",()->bytes);
+            if(parent.equals(categoryOf(achievement))){
+                roots.putIfAbsent(parent,icon);var page=ACPage.mcc$pageOf(achievement);
+                if(page!=null)titles.put(parent,page.title);
+            }
         }
+        for(var entry:roots.entrySet()){
+            ResourceLocation id=entry.getKey();String namespace=id.getNamespace();var mod=org.kylepitcock.legacyconnector.core.LegacyMods.find(namespace);
+            String title=mod==null?namespace:mod.name();
+            byte[] bytes=rootDefinition(titles.getOrDefault(id,title+" (Beta 1.7.3)"),entry.getValue()).toString().getBytes(StandardCharsets.UTF_8);
+            out.put("data/"+id.getNamespace()+"/advancement/"+id.getPath()+".json",()->bytes);
+        }
+    }
+    /** Only the synthetic category unlocks automatically; original achievements retain their award callbacks. */
+    static JsonObject rootDefinition(String title,String icon){
+        JsonObject json=new JsonObject(),display=new JsonObject(),item=new JsonObject();item.addProperty("id",icon);display.add("icon",item);
+        display.addProperty("title",title);display.addProperty("description","Achievements of Beta 1.7.3 mods");display.addProperty("frame","task");
+        display.addProperty("background","minecraft:textures/gui/advancements/backgrounds/stone.png");
+        display.addProperty("show_toast",false);display.addProperty("announce_to_chat",false);json.add("display",display);
+        JsonObject criteria=new JsonObject(),automatic=new JsonObject();automatic.addProperty("trigger","minecraft:tick");criteria.add("visible",automatic);json.add("criteria",criteria);
+        return json;
     }
     static JsonObject definition(Achievement achievement,ResourceLocation parent,String icon){
         JsonObject json=new JsonObject();if(parent!=null)json.addProperty("parent",parent.toString());
@@ -61,11 +97,12 @@ public final class AdvancementsB173 {
         if(stat instanceof Achievement achievement){
             var advancement=player.getServer().getAdvancements().get(idOf(achievement));
             if(advancement!=null){
-                if(achievement.mcc$vanilla)for(String criterion:advancement.value().criteria().keySet())player.getAdvancements().award(advancement,criterion);
+                if(achievement==Achievements.OPEN_INVENTORY)for(String criterion:advancement.value().criteria().keySet())player.getAdvancements().award(advancement,criterion);
                 else player.getAdvancements().award(advancement,CRITERION);
             }
             return;
         }
+        if(StatisticsB173.increment(player,stat,amount))return;
         var persistent=player.getPersistentData();var counters=persistent.getCompound("legacyconnector_beta_stats");
         String key=stat.mcc$namespace+":"+stat.id;
         counters.putInt(key,(int)Math.min(Integer.MAX_VALUE,(long)counters.getInt(key)+amount));persistent.put("legacyconnector_beta_stats",counters);

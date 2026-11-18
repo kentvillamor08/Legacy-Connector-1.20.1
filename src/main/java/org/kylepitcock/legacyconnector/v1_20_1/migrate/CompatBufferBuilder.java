@@ -36,6 +36,31 @@ public final class CompatBufferBuilder implements VertexConsumer {
         this.tesselator = tesselator;
     }
 
+    /** The mesh of a finished 1.21.1 draw, seen as a 1.20.1 builder that is "building" until {@link #end()} hands the mesh over (RenderType.end overrides). */
+    private MeshData finished;
+
+    private CompatBufferBuilder(ByteBufferBuilder memory) {
+        this.tesselator = null;
+        this.own = memory;
+    }
+
+    /** The memory this builder writes into (what {@code RenderBuffers.fixedBuffers} entries hand to the buffer source); null for a tesselator's builder. */
+    public ByteBufferBuilder memory() {
+        return own;
+    }
+
+    /** A builder over memory owned by someone else (a section buffer pack's {@code builder(RenderType)}). */
+    public static CompatBufferBuilder over(ByteBufferBuilder memory) {
+        return new CompatBufferBuilder(memory);
+    }
+
+    /** A builder that has already been filled and ended: {@link #end()} answers {@code mesh} once. */
+    public static CompatBufferBuilder ofMesh(MeshData mesh) {
+        CompatBufferBuilder b = new CompatBufferBuilder((Tesselator) null);
+        b.finished = mesh;
+        return b;
+    }
+
     /** {@code Tesselator.getBuilder()}. */
     public static synchronized CompatBufferBuilder of(Tesselator tesselator) {
         return OF_TESSELATOR.computeIfAbsent(tesselator, CompatBufferBuilder::new);
@@ -47,21 +72,91 @@ public final class CompatBufferBuilder implements VertexConsumer {
         if (mesh != null) BufferUploader.drawWithShader(mesh);
     }
 
+    /** The 1.21.1 builder a mod's 1.20.1 {@code ParticleRenderType.begin(builder, textureManager)} started on the tesselator's builder (null when it started none). */
+    public static BufferBuilder startedOf(Tesselator tesselator) {
+        CompatBufferBuilder b;
+        synchronized (CompatBufferBuilder.class) {
+            b = OF_TESSELATOR.get(tesselator);
+        }
+        return b == null ? null : b.real;
+    }
+
+    /**
+     * The 1.21.1 builder a mod's {@code ParticleRenderType.begin(builder, textures)} started, handed to the particle engine: the engine builds and draws it
+     * itself, so this wrapper lets go of it (a mod's 1.20.1 {@code end} is never called by 1.21.1; keeping it would make the next frame's begin fail with
+     * "Already building!").
+     */
+    public static BufferBuilder handOver(Tesselator tesselator) {
+        CompatBufferBuilder b;
+        synchronized (CompatBufferBuilder.class) {
+            b = OF_TESSELATOR.get(tesselator);
+        }
+        if (b == null) return null;
+        BufferBuilder started = b.real;
+        b.real = null;
+        return started;
+    }
+
+    /** Takes over a builder that 1.21.1 code started ({@code ParticleRenderType.begin(Tesselator, TextureManager)}): a mod's 1.20.1 code then fills and ends it. */
+    public void adopt(BufferBuilder started) {
+        this.real = started;
+    }
+
+    private static final boolean DIAG = Boolean.getBoolean("legacyconnector.bufferDiag");
+    private Throwable beganAt;
+
+    /** {@code BufferBuilder.format} (a public-in-practice field of 1.20.1 that renderers read): the format of the last {@code begin}. */
+    public VertexFormat format;
+    /** {@code BufferBuilder.defaultColorSet}: 1.20.1 flag for {@code defaultColor}; the default colour is not applied here, so it stays false. */
+    public boolean defaultColorSet;
+
+    /** {@code putBulkData(pose, quad, r, g, b, light, overlay)} of 1.20.1: 1.21.1 also takes the alpha (opaque here). */
+    public void putBulkData(com.mojang.blaze3d.vertex.PoseStack.Pose pose, net.minecraft.client.renderer.block.model.BakedQuad quad, float r, float g, float b, int light, int overlay) {
+        putBulkData(pose, quad, r, g, b, 1.0F, light, overlay);
+    }
+
     public void begin(VertexFormat.Mode mode, VertexFormat format) {
-        if (real != null) throw new IllegalStateException("Already building!");
+        this.format = format;
+        if (real != null) throw new IllegalStateException("Already building!", beganAt);
+        if (DIAG) beganAt = new Throwable("previous begin");
         real = tesselator != null ? tesselator.begin(mode, format) : new BufferBuilder(own, mode, format);
     }
 
+    /** The tesselator this builder belongs to ({@code Tesselator.getBuilder()}), or null for a private builder. */
+    public Tesselator tesselator() {
+        return tesselator;
+    }
+
     public boolean isBuilding() {
-        return real != null;
+        return real != null || finished != null;
     }
 
     /** 1.20.1 {@code end()} returned the {@code RenderedBuffer}; null when no vertex was written (1.21.1's {@code build()} contract). */
     public MeshData end() {
+        if (finished != null) {
+            MeshData m = finished;
+            finished = null;
+            return m;
+        }
         BufferBuilder b = real;
         if (b == null) throw new IllegalStateException("BufferBuilder not started");
         real = null;
         return b.build();
+    }
+
+    /** {@code BufferBuilder.endOrDiscardIfEmpty()}: the mesh, or null when nothing was written (1.21.1's {@code build()} answers null for an empty mesh, and frees it). */
+    public MeshData endOrDiscardIfEmpty() {
+        return real == null && finished == null ? null : end();
+    }
+
+    /** {@code BufferBuilder.building()} (the 1.20.1 spelling of {@link #isBuilding}). */
+    public boolean building() {
+        return isBuilding();
+    }
+
+    /** {@code vertex(x, y, z, r, g, b, a, u, v, overlay, light, nx, ny, nz)}: one full vertex (and the 1.20.1 {@code endVertex}, which 1.21.1 does not need). */
+    public void vertex(float x, float y, float z, float r, float g, float b, float a, float u, float v, int overlay, int light, float nx, float ny, float nz) {
+        b().addVertex(x, y, z).setColor(r, g, b, a).setUv(u, v).setOverlay(overlay).setLight(light).setNormal(nx, ny, nz);
     }
 
     public void discard() {
@@ -156,4 +251,20 @@ public final class CompatBufferBuilder implements VertexConsumer {
     }
 
     public void endVertex() {}
+
+    /** {@code BufferBuilder.clear()}: drops what was written so far (the 1.21.1 builder cannot be reset; the memory is reused by the next {@code begin}). */
+    public void clear() {
+        discard();
+    }
+
+    /**
+     * {@code BufferBuilder.setQuadSorting(VertexSorting)}: 1.21.1 sorts a translucent mesh when it is built or uploaded, so the sorting is only remembered
+     * (APPROXIMATION: the quads of a mod-built translucent batch keep their written order).
+     */
+    public void setQuadSorting(com.mojang.blaze3d.vertex.VertexSorting sorting) {}
+
+    /** {@code DefaultedVertexConsumer.defaultColor(r, g, b, a)}: a colour for vertices that write none (APPROXIMATION: ignored; mods set colours explicitly). */
+    public void defaultColor(int r, int g, int b, int a) {}
+
+    public void unsetDefaultColor() {}
 }

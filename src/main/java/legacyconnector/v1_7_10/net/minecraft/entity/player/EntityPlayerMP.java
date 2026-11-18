@@ -6,6 +6,12 @@ import legacyconnector.v1_7_10.net.minecraft.world.WorldServer;
 import net.minecraft.server.level.ServerPlayer;
 
 public class EntityPlayerMP extends EntityPlayer implements legacyconnector.v1_7_10.net.minecraft.inventory.ICrafting {
+    /** The chat setting the player's client reported (full, commands only, hidden). */
+    public EntityPlayer.EnumChatVisibility func_147096_v() {
+        var info = mcc$serverPlayer().clientInformation();
+        return EntityPlayer.EnumChatVisibility.mcc$of(info == null ? null : info.chatVisibility());
+    }
+
     /** Resets the idle timer (nothing to do: the modern server tracks activity itself). */
     public void markPlayerActive() {
     }
@@ -46,6 +52,12 @@ public class EntityPlayerMP extends EntityPlayer implements legacyconnector.v1_7
     public EntityPlayerMP(MinecraftServer server, WorldServer world, com.mojang.authlib.GameProfile profile,
             legacyconnector.v1_7_10.net.minecraft.server.management.ItemInWorldManager manager) {
         this(net.neoforged.neoforge.common.util.FakePlayerFactory.get((net.minecraft.server.level.ServerLevel) world.mcc$fullLevel(), profile));
+    }
+
+    /** 1.6.4 shape {@code new EntityPlayerMP(server, world, name, manager)}: an offline profile of that name. */
+    public EntityPlayerMP(MinecraftServer server, legacyconnector.v1_7_10.net.minecraft.world.World world, String name,
+            legacyconnector.v1_7_10.net.minecraft.server.management.ItemInWorldManager manager) {
+        this(server, (WorldServer) world, new com.mojang.authlib.GameProfile(net.minecraft.core.UUIDUtil.createOfflinePlayerUUID(name == null ? "" : name), name), manager);
     }
 
     public ServerPlayer mcc$serverPlayer() {
@@ -131,5 +143,25 @@ public class EntityPlayerMP extends EntityPlayer implements legacyconnector.v1_7
 
     public static void mcc$set$playerNetServerHandler(EntityPlayerMP p, legacyconnector.v1_7_10.net.minecraft.network.NetHandlerPlayServer handler) {
         p.mcc$netHandler = handler;
+    }
+
+    /** Whether the player respawns at their spawn point even without a bed or anchor there (the point was set by a command). */
+    public boolean isSpawnForced(int dimension) {
+        return mcc$serverPlayer().isRespawnForced();
+    }
+
+    /** The per-tick update of the player (the host's: containers, health, experience and chunk data are sent). */
+    public void onUpdateEntity() {
+        mcc$serverPlayer().doTick();
+    }
+
+    /** Counts the distance moved into the walking, swimming, climbing and flying statistics. */
+    public void addMovementStat(double dx, double dy, double dz) {
+        mcc$serverPlayer().checkMovementStatistics(dx, dy, dz);
+    }
+
+    /** The time (milliseconds, game clock) of the player's last action, which the idle kick counts from. */
+    public long getLastActiveTime() {
+        return mcc$serverPlayer().getLastActionTime();
     }
 }

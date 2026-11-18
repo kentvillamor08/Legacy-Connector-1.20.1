@@ -33,6 +33,14 @@ public class ServerConfigurationManager {
         return out;
     }
 
+    /** 1.2.5 {@code PlayerManager.sendPacket(name, packet)} (Feather name): sends the packet to the player of that name; false when nobody of that name is online. */
+    public boolean mcc125$sendPacket(String name, legacyconnector.v1_7_10.net.minecraft.network.Packet packet) {
+        EntityPlayerMP player = getPlayerByUsername(name);
+        if (player == null) return false;
+        legacyconnector.v1_7_10.net.minecraft.entity.player.EntityPlayerMP.mcc$get$playerNetServerHandler(player).sendPacket(packet);
+        return true;
+    }
+
     public EntityPlayerMP getPlayerByUsername(String name) {
         var p = mcc$server.mcc$modern().getPlayerList().getPlayerByName(name);
         return p == null ? null : (EntityPlayerMP) EntityBridge.wrap(p);
@@ -50,6 +58,11 @@ public class ServerConfigurationManager {
      * Moves a player to another dimension and lets the teleporter place them there. Coordinates are kept (1.7.10 scaled
      * them by the dimensions' move factors for the nether; mod dimensions do not).
      */
+    public void transferPlayerToDimension(EntityPlayerMP player, int dimension) {
+        var world = mcc$server.worldServerForDimension(dimension);
+        transferPlayerToDimension(player, dimension, world == null ? null : new legacyconnector.v1_7_10.net.minecraft.world.Teleporter(world));
+    }
+
     public void transferPlayerToDimension(EntityPlayerMP player, int dimension, legacyconnector.v1_7_10.net.minecraft.world.Teleporter teleporter) {
         var target = org.kylepitcock.legacyconnector.v1_7_10.bridge.DimensionBridge.level(mcc$server.mcc$modern(), dimension);
         if (target == null) return;
@@ -372,5 +385,41 @@ public class ServerConfigurationManager {
             if (score > value && !min) return false;
         }
         return true;
+    }
+
+    /**
+     * Respawns a dead player (1.7.10 {@code respawnPlayer(player, dimension, conqueredEnd)}) and returns the new player entity. The
+     * host decides where: the player's bed or respawn anchor, else the world spawn; the dimension argument is not honoured.
+     */
+    public EntityPlayerMP respawnPlayer(EntityPlayerMP player, int dimension, boolean conqueredEnd) {
+        var modern = mcc$server.mcc$modern().getPlayerList().respawn(player.mcc$serverPlayer(), conqueredEnd,
+                net.minecraft.world.entity.Entity.RemovalReason.KILLED);
+        return (EntityPlayerMP) EntityBridge.wrap(modern);
+    }
+
+    /**
+     * The saved data of the player ({@code <uuid>.dat} of the world's player data folder), which is also loaded into the entity as
+     * 1.7.10's login did; null when the player was never saved.
+     */
+    public legacyconnector.v1_7_10.net.minecraft.nbt.NBTTagCompound readPlayerDataFromFile(EntityPlayerMP player) {
+        var handler = mcc$server.worldServerForDimension(0).getSaveHandler().getSaveHandler();
+        return handler == null ? null : handler.readPlayerData(player);
+    }
+
+    /** The profiles of the players that are online. */
+    public com.mojang.authlib.GameProfile[] getAllProfiles() {
+        return mcc$server.mcc$modern().getPlayerList().getPlayers().stream().map(p -> p.getGameProfile()).toArray(com.mojang.authlib.GameProfile[]::new);
+    }
+
+    /** Disconnects every player (the server is shutting down or a mod restarts the world). */
+    public void removeAllPlayers() {
+        net.minecraft.network.chat.Component reason = net.minecraft.network.chat.Component.translatable("multiplayer.disconnect.server_shutdown");
+        for (var p : new ArrayList<>(mcc$server.mcc$modern().getPlayerList().getPlayers())) p.connection.disconnect(reason);
+    }
+
+    /** Sends the player the chunks around their position again (after a teleport the mod did itself). */
+    public void updatePlayerPertinentChunks(EntityPlayerMP player) {
+        var sp = player.mcc$serverPlayer();
+        sp.serverLevel().getChunkSource().move(sp);
     }
 }

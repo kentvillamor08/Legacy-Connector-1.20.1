@@ -75,7 +75,8 @@ public final class WorldGenBridge1122 {
         List<org.kylepitcock.legacyconnector.core.worldgen.LegacyGenerators.Generator> out = new java.util.ArrayList<>();
         for (IWorldGenerator g : legacyconnector.v1_12_2.net.minecraftforge.fml.common.registry.GameRegistry.mcc$worldGenerators()) {
             out.add(new org.kylepitcock.legacyconnector.core.worldgen.LegacyGenerators.Generator(g, modIdOf(g),
-                    (level, chunkX, chunkZ) -> generateOne(level, chunkX, chunkZ, g)));
+                    (level, chunkX, chunkZ) -> generateOne(level, chunkX, chunkZ, g),
+                    (level, chunkX, chunkZ, bottomY) -> generateShifted(level, chunkX, chunkZ, g, bottomY)));
         }
         return out;
     }
@@ -102,9 +103,34 @@ public final class WorldGenBridge1122 {
      */
     private static void generateOne(WorldGenLevel level, int chunkX, int chunkZ, IWorldGenerator g) {
         World world = WorldBridge1122.wrap(level);
+        legacyconnector.v1_12_2.net.minecraft.world.chunk.Chunk.mcc$beginPopulating(chunkX, chunkZ);
+        // a generator with a shifted pass leaves its ores to it (the normal pass refuses ore writes)
+        boolean shifted = level.getMinBuildHeight() < 0 && org.kylepitcock.legacyconnector.core.LegacyConfig.deepLayerMode(modIdOf(g), g.getClass().getName())
+                == org.kylepitcock.legacyconnector.core.LegacyConfig.DeepMode.SHIFTED;
+        if (shifted) World.mcc$setRefuseOres(true);
         try {
             runOne(world, chunkX, chunkZ, g, new Random(chunkSeed(level.getSeed(), chunkX, chunkZ)), world.getChunkProvider());
         } finally {
+            if (shifted) World.mcc$setRefuseOres(false);
+            legacyconnector.v1_12_2.net.minecraft.world.chunk.Chunk.mcc$endPopulating();
+            WorldBridge1122.mcc$releaseRegion();
+        }
+    }
+
+    /**
+     * The shifted pass of one generator ({@code deepLayer.mode = shifted}): the same run with the same seed as the normal pass, but with
+     * legacy y=0 at {@code bottomY}, keeping only its ore writes. So the mod's ores come out as in 1.12, moved down by the difference of
+     * the world bottoms, in whole veins.
+     */
+    private static void generateShifted(WorldGenLevel level, int chunkX, int chunkZ, IWorldGenerator g, int bottomY) {
+        World world = WorldBridge1122.wrap(level);
+        legacyconnector.v1_12_2.net.minecraft.world.chunk.Chunk.mcc$beginPopulating(chunkX, chunkZ);
+        World.mcc$enterShifted(bottomY);
+        try {
+            runOne(world, chunkX, chunkZ, g, new Random(chunkSeed(level.getSeed(), chunkX, chunkZ)), world.getChunkProvider());
+        } finally {
+            World.mcc$leaveShifted();
+            legacyconnector.v1_12_2.net.minecraft.world.chunk.Chunk.mcc$endPopulating();
             WorldBridge1122.mcc$releaseRegion();
         }
     }
@@ -123,7 +149,7 @@ public final class WorldGenBridge1122 {
         try {
             // 1.12 decorated one chunk at a time on the server thread; a mod's generators keep state in plain fields
             long g0 = TIMING ? System.nanoTime() : 0;
-            org.kylepitcock.legacyconnector.core.LegacyModLocks.generation(lock, () -> g.generate(fmlRandom, chunkX, chunkZ, world, DUMMY, provider));
+            org.kylepitcock.legacyconnector.core.LegacyModLocks.generation(lock, () -> g.generate(fmlRandom, chunkX, chunkZ, world, GeneratorProviders1122.forWorld(world, DUMMY), provider));
             if (TIMING) time(g.getClass().getName(), System.nanoTime() - g0);
         } catch (RuntimeException | LinkageError e) {
             int n = FAILURES.incrementAndGet();
@@ -145,10 +171,11 @@ public final class WorldGenBridge1122 {
         boolean events = TerrainEvents1122.wanted();
         if (gens.isEmpty() && !events) return;
         World world = WorldBridge1122.wrap(level);
+        legacyconnector.v1_12_2.net.minecraft.world.chunk.Chunk.mcc$beginPopulating(chunkX, chunkZ);
         try {
             // 1.12 populated the chunk (with its terrain events) before GameRegistry ran the mods' generators
             long t0 = TIMING ? System.nanoTime() : 0;
-            if (events) TerrainEvents1122.populate(world, worldSeed, chunkX, chunkZ, DUMMY);
+            if (events) TerrainEvents1122.populate(world, worldSeed, chunkX, chunkZ, GeneratorProviders1122.forWorld(world, DUMMY));
             if (TIMING) time("terrain events (populate)", System.nanoTime() - t0);
             Random fmlRandom = new Random(worldSeed);
             long chunkSeed = chunkSeed(worldSeed, chunkX, chunkZ);
@@ -158,6 +185,7 @@ public final class WorldGenBridge1122 {
                 runOne(world, chunkX, chunkZ, g, fmlRandom, provider);
             }
         } finally {
+            legacyconnector.v1_12_2.net.minecraft.world.chunk.Chunk.mcc$endPopulating();
             WorldBridge1122.mcc$releaseRegion();
         }
     }

@@ -28,6 +28,46 @@ public class PlayerList {
         return legacyconnector.v1_12_2.net.minecraft.world.storage.IPlayerFileData.mcc$server();
     }
 
+    /** Phantom field: whether every player may use commands; reads go to {@link #mcc$get$commandsAllowedForAll}. */
+    @Deprecated
+    public boolean commandsAllowedForAll;
+
+    private static final java.lang.reflect.Field MCC$ALLOW_COMMANDS = mcc$allowCommandsField();
+
+    private static java.lang.reflect.Field mcc$allowCommandsField() {
+        try {
+            return net.neoforged.fml.util.ObfuscationReflectionHelper.findField(net.minecraft.server.players.PlayerList.class, "allowCommandsForAll");
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    public static boolean mcc$get$commandsAllowedForAll(PlayerList list) {
+        var m = modern();
+        if (m == null || MCC$ALLOW_COMMANDS == null) return false;
+        try {
+            return MCC$ALLOW_COMMANDS.getBoolean(m);
+        } catch (IllegalAccessException e) {
+            return false;
+        }
+    }
+
+    public static void mcc$set$commandsAllowedForAll(PlayerList list, boolean allowed) {
+        list.setCommandsAllowedForAll(allowed);
+    }
+
+    /** Whether the player may join: no whitelist in use, or the player is an operator or on it. */
+    public boolean canJoin(GameProfile profile) {
+        var m = modern();
+        return m == null || m.isWhiteListed(profile);
+    }
+
+    /** Lets every player use commands (the "cheats" switch of a LAN world). */
+    public void setCommandsAllowedForAll(boolean allowed) {
+        var m = modern();
+        if (m != null) m.setAllowCommandsForAllPlayers(allowed);
+    }
+
     private static net.minecraft.server.players.PlayerList modern() {
         var s = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
         return s == null ? null : s.getPlayerList();
@@ -126,6 +166,17 @@ public class PlayerList {
         if (s == null || profile == null) return null;
         var sp = new net.minecraft.server.level.ServerPlayer(s, s.overworld(), profile, net.minecraft.server.level.ClientInformation.createDefault());
         return view(sp);
+    }
+
+    /** Loads the player's saved data (playerdata of the world) into the player; the data, or null when the player has none. */
+    public legacyconnector.v1_12_2.net.minecraft.nbt.NBTTagCompound readPlayerDataFromFile(EntityPlayerMP playerIn) {
+        return playerIn == null ? null
+                : legacyconnector.v1_12_2.net.minecraft.world.storage.IPlayerFileData.mcc$server().readPlayerData(playerIn);
+    }
+
+    /** The login is done by the game; a mod's list overrides this to add its own steps and calls it first. */
+    public void initializeConnectionToPlayer(legacyconnector.v1_12_2.net.minecraft.network.NetworkManager netManager, EntityPlayerMP playerIn,
+            legacyconnector.v1_12_2.net.minecraft.network.NetHandlerPlayServer nethandlerplayserver) {
     }
 
     public String[] getOppedPlayerNames() {

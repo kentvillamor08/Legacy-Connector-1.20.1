@@ -29,6 +29,8 @@ public final class ForgeRegistries {
     private ForgeRegistries() {
     }
 
+    /** Forge 1.20.1 registered the {@code ItemDisplayContext} constants; NeoForge 1.21.1 has an extensible enum instead, so this is a supplier of a registry built over its constants (the ids are their serialized names). */
+    public static final java.util.function.Supplier<IForgeRegistry<net.minecraft.world.item.ItemDisplayContext>> DISPLAY_CONTEXTS = DisplayContexts.SUPPLIER;
     public static final IForgeRegistry<Block> BLOCKS = new ForgeRegistryWrapper<>(BuiltInRegistries.BLOCK);
     public static final IForgeRegistry<Fluid> FLUIDS = new ForgeRegistryWrapper<>(BuiltInRegistries.FLUID);
     public static final IForgeRegistry<Item> ITEMS = new ForgeRegistryWrapper<>(BuiltInRegistries.ITEM);
@@ -62,7 +64,11 @@ public final class ForgeRegistries {
     /** A supplier in Forge 1.20.1 (the registry is created late). */
     public static final java.util.function.Supplier<IForgeRegistry<net.neoforged.neoforge.fluids.FluidType>> FLUID_TYPES = () -> new ForgeRegistryWrapper<>(NeoForgeRegistries.FLUID_TYPES);
     public static final IForgeRegistry<net.minecraft.network.syncher.EntityDataSerializer<?>> ENTITY_DATA_SERIALIZERS = new ForgeRegistryWrapper(NeoForgeRegistries.ENTITY_DATA_SERIALIZERS);
-    public static final IForgeRegistry<com.mojang.serialization.MapCodec<? extends net.neoforged.neoforge.common.loot.IGlobalLootModifier>> GLOBAL_LOOT_MODIFIER_SERIALIZERS = new ForgeRegistryWrapper(NeoForgeRegistries.GLOBAL_LOOT_MODIFIER_SERIALIZERS);
+    // a Supplier in Forge 1.20.1 (like FLUID_TYPES): mods read it as one
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static final java.util.function.Supplier<IForgeRegistry<com.mojang.serialization.MapCodec<? extends net.neoforged.neoforge.common.loot.IGlobalLootModifier>>> GLOBAL_LOOT_MODIFIER_SERIALIZERS = () -> new ForgeRegistryWrapper(NeoForgeRegistries.GLOBAL_LOOT_MODIFIER_SERIALIZERS);
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static final java.util.function.Supplier<IForgeRegistry<com.mojang.serialization.MapCodec<? extends net.neoforged.neoforge.common.world.BiomeModifier>>> BIOME_MODIFIER_SERIALIZERS = () -> new ForgeRegistryWrapper(NeoForgeRegistries.BIOME_MODIFIER_SERIALIZERS);
     public static final IForgeRegistry<net.neoforged.neoforge.common.world.BiomeModifier> BIOME_MODIFIERS = new ForgeRegistryWrapper(NeoForgeRegistries.Keys.BIOME_MODIFIERS);
     public static final IForgeRegistry<net.neoforged.neoforge.registries.holdersets.HolderSetType> HOLDER_SET_TYPES = new ForgeRegistryWrapper<>(NeoForgeRegistries.HOLDER_SET_TYPES);
 
@@ -88,6 +94,7 @@ public final class ForgeRegistries {
         public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<VillagerProfession>> VILLAGER_PROFESSIONS = Registries.VILLAGER_PROFESSION;
         public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<PoiType>> POI_TYPES = Registries.POINT_OF_INTEREST_TYPE;
         public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<Biome>> BIOMES = Registries.BIOME;
+        public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<net.minecraft.commands.synchronization.ArgumentTypeInfo<?, ?>>> COMMAND_ARGUMENT_TYPES = Registries.COMMAND_ARGUMENT_TYPE;
         public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<net.minecraft.world.level.levelgen.feature.Feature<?>>> FEATURES = Registries.FEATURE;
         public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<net.neoforged.neoforge.fluids.FluidType>> FLUID_TYPES = NeoForgeRegistries.Keys.FLUID_TYPES;
         public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<net.minecraft.network.syncher.EntityDataSerializer<?>>> ENTITY_DATA_SERIALIZERS = NeoForgeRegistries.Keys.ENTITY_DATA_SERIALIZERS;
@@ -96,5 +103,35 @@ public final class ForgeRegistries {
         public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<com.mojang.serialization.MapCodec<? extends net.neoforged.neoforge.common.world.StructureModifier>>> STRUCTURE_MODIFIER_SERIALIZERS = NeoForgeRegistries.Keys.STRUCTURE_MODIFIER_SERIALIZERS;
         public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<net.neoforged.neoforge.common.world.StructureModifier>> STRUCTURE_MODIFIERS = NeoForgeRegistries.Keys.STRUCTURE_MODIFIERS;
         public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<com.mojang.serialization.MapCodec<? extends net.neoforged.neoforge.common.world.BiomeModifier>>> BIOME_MODIFIER_SERIALIZERS = NeoForgeRegistries.Keys.BIOME_MODIFIER_SERIALIZERS;
+        public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<net.minecraft.world.entity.ai.memory.MemoryModuleType<?>>> MEMORY_MODULE_TYPES = Registries.MEMORY_MODULE_TYPE;
+        public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<net.minecraft.world.entity.ai.sensing.SensorType<?>>> SENSOR_TYPES = Registries.SENSOR_TYPE;
+        public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<net.minecraft.world.entity.schedule.Schedule>> SCHEDULES = Registries.SCHEDULE;
+        public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<net.minecraft.world.entity.schedule.Activity>> ACTIVITIES = Registries.ACTIVITY;
+        public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<net.minecraft.world.level.levelgen.carver.WorldCarver<?>>> WORLD_CARVERS = Registries.CARVER;
+        public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<net.minecraft.stats.StatType<?>>> STAT_TYPES = Registries.STAT_TYPE;
+        public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<net.minecraft.world.entity.decoration.PaintingVariant>> PAINTING_VARIANTS = Registries.PAINTING_VARIANT;
+        public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<net.minecraft.world.level.levelgen.feature.stateproviders.BlockStateProviderType<?>>> BLOCK_STATE_PROVIDER_TYPES = Registries.BLOCK_STATE_PROVIDER_TYPE;
+        public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<net.minecraft.world.level.levelgen.feature.foliageplacers.FoliagePlacerType<?>>> FOLIAGE_PLACER_TYPES = Registries.FOLIAGE_PLACER_TYPE;
+        public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<net.minecraft.world.level.levelgen.feature.treedecorators.TreeDecoratorType<?>>> TREE_DECORATOR_TYPES = Registries.TREE_DECORATOR_TYPE;
+        public static final net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<net.neoforged.neoforge.registries.holdersets.HolderSetType>> HOLDER_SET_TYPES = NeoForgeRegistries.Keys.HOLDER_SET_TYPES;
+    }
+
+    /** Holder of the registry over the display contexts (built when first read). */
+    private static final class DisplayContexts {
+        static final IForgeRegistry<net.minecraft.world.item.ItemDisplayContext> REGISTRY = new ForgeRegistryWrapper<>(displayContexts());
+        static final java.util.function.Supplier<IForgeRegistry<net.minecraft.world.item.ItemDisplayContext>> SUPPLIER = () -> REGISTRY;
+    }
+
+    private static net.minecraft.core.Registry<net.minecraft.world.item.ItemDisplayContext> displayContexts() {
+        net.minecraft.resources.ResourceKey<net.minecraft.core.Registry<net.minecraft.world.item.ItemDisplayContext>> key =
+                net.minecraft.resources.ResourceKey.createRegistryKey(net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("forge", "display_contexts"));
+        net.minecraft.core.MappedRegistry<net.minecraft.world.item.ItemDisplayContext> registry =
+                new net.minecraft.core.MappedRegistry<>(key, com.mojang.serialization.Lifecycle.stable());
+        for (net.minecraft.world.item.ItemDisplayContext context : net.minecraft.world.item.ItemDisplayContext.values()) {
+            registry.register(net.minecraft.resources.ResourceKey.create(key, net.minecraft.resources.ResourceLocation.withDefaultNamespace(context.getSerializedName())),
+                    context, net.minecraft.core.RegistrationInfo.BUILT_IN);
+        }
+        registry.freeze();
+        return registry;
     }
 }

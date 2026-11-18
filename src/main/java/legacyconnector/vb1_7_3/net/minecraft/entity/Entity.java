@@ -11,11 +11,24 @@ import legacyconnector.vb1_7_3.net.minecraft.world.World;
 public abstract class Entity {
     private static int nextId;
 
+    /** Typed Beta NBT helpers used by original entity save implementations. */
+    protected legacyconnector.vb1_7_3.net.minecraft.nbt.NbtList toNbtList(double... values){
+        var list=new legacyconnector.vb1_7_3.net.minecraft.nbt.NbtList();
+        for(double value:values)list.add(new legacyconnector.vb1_7_3.net.minecraft.nbt.NbtDouble(value));
+        return list;
+    }
+    protected legacyconnector.vb1_7_3.net.minecraft.nbt.NbtList toNbtList(float... values){
+        var list=new legacyconnector.vb1_7_3.net.minecraft.nbt.NbtList();
+        for(float value:values)list.add(new legacyconnector.vb1_7_3.net.minecraft.nbt.NbtFloat(value));
+        return list;
+    }
+
     public int id = nextId++;
     public double renderDistanceMultiplier = 1.0;
     public boolean blocksSameBlockSpawning;
     public Entity passenger;
     public Entity vehicle;
+    private double vehicleYawDelta,vehiclePitchDelta;
     public World world;
     public double prevX;
     public double prevY;
@@ -75,7 +88,7 @@ public abstract class Entity {
 
     /** The modern entity this one is a view of, or null for a mod's own entity. */
     public net.minecraft.world.entity.Entity mcc$modern;
-    public legacyconnector.vb1_7_3.net.minecraft.util.math.Box boundingBox;
+    public legacyconnector.vb1_7_3.net.minecraft.util.math.Box boundingBox = legacyconnector.vb1_7_3.net.minecraft.util.math.Box.create(0, 0, 0, 0, 0, 0);
 
     /** The entity's data slots, created before {@link #initDataTracker()} runs. */
     public legacyconnector.vb1_7_3.net.minecraft.entity.data.DataTracker dataTracker = new legacyconnector.vb1_7_3.net.minecraft.entity.data.DataTracker();
@@ -87,14 +100,27 @@ public abstract class Entity {
         initDataTracker();
     }
     protected void initDataTracker() {}
+    /** Biny's historical name is inverted: true enables walking sounds and block stepping. */
+    protected boolean bypassesSteppingEffects(){return true;}
+    public final boolean mcc$steppingEffects(){return bypassesSteppingEffects();}
+    public legacyconnector.vb1_7_3.net.minecraft.util.math.Box getBoundingBox(){return null;}
+    public legacyconnector.vb1_7_3.net.minecraft.util.math.Box getCollisionAgainstShape(Entity other){return null;}
+    public void animateHurt(){}
+    public boolean interact(legacyconnector.vb1_7_3.net.minecraft.entity.player.PlayerEntity player){return false;}
 
-    /** Beta {@code onStruckByLightning}: fire damage; the host's own lightning handling applies the native effects. */
-    public void onStruckByLightning(LightningEntity lightning) {}
+    /** Beta lightning uses the fire-immune damage helper, then advances the ignition counter. */
+    public void onStruckByLightning(LightningEntity lightning) {
+        damage(5);
+        if (++fireTicks == 0) fireTicks = 300;
+    }
 
+    /** Original: an entity below the world is removed. */
+    public void tickInVoid(){markDead();}
     public void markDead() {
         this.dead = true;
         if (mcc$modern instanceof org.kylepitcock.legacyconnector.vb1_7_3.B173EntityHost host) host.baseMarkDead();
-        else if(mcc$modern!=null)mcc$modern.discard();
+        // a native player is not discarded: a mod that replaces its client player with an object of its own class calls this on the old one
+        else if(mcc$modern!=null&&!(mcc$modern instanceof net.minecraft.world.entity.player.Player))mcc$modern.discard();
     }
 
     public void setPosition(double x, double y, double z) {
@@ -106,6 +132,9 @@ public abstract class Entity {
     }
 
     public void tick() {if(mcc$modern instanceof org.kylepitcock.legacyconnector.vb1_7_3.B173EntityHost host)host.mcc$baseTick();}
+    /** Original base update (the part of tick every entity shares). */
+    public void baseTick(){if(mcc$modern instanceof org.kylepitcock.legacyconnector.vb1_7_3.B173EntityHost host)host.mcc$baseTick();}
+    public boolean isOnFire(){return fireTicks>0;}
     protected void damage(int amount){if(!fireImmune)damage(null,amount);}
     protected void setOnFire(){if(!fireImmune){damage(null,4);fireTicks=600;}}
     protected void scheduleVelocityUpdate(){velocityModified=true;if(mcc$modern!=null)mcc$modern.hurtMarked=true;}
@@ -114,12 +143,26 @@ public abstract class Entity {
         if(landed){if(fallDistance>0){onLanding(fallDistance);fallDistance=0;}}else if(deltaY<0)fallDistance-=deltaY;
     }
     public final void mcc$fall(double deltaY,boolean landed){fall(deltaY,landed);}
+    /** Beta's {@code setInPortal}: a portal block's collision marks the entity as standing in a portal; for a player it leads to the dimension in {@code portal}. */
+    public void tickPortalCooldown(){
+        if(this instanceof legacyconnector.vb1_7_3.net.minecraft.entity.player.ClientPlayerEntity player&&!hasVehicle()&&passenger==null)org.kylepitcock.legacyconnector.vb1_7_3.DimensionsB173.portalContact(world,this,player.portal);
+    }
     public final float mcc$fallDistance(){return fallDistance;}
     public final void mcc$fallDistance(float distance){fallDistance=distance;}
     public double getSquaredDistance(Entity entity){return getSquaredDistance(entity.x,entity.y,entity.z);}
     public void move(double dx,double dy,double dz){
         if(mcc$modern instanceof org.kylepitcock.legacyconnector.vb1_7_3.B173EntityHost host)host.baseMove(dx,dy,dz);
-        else if(mcc$modern!=null){mcc$modern.move(net.minecraft.world.entity.MoverType.SELF,new net.minecraft.world.phys.Vec3(dx,dy,dz));setPosition(mcc$modern.getX(),mcc$modern.getY()+standingEyeHeight,mcc$modern.getZ());}
+        else if(mcc$modern!=null){
+            double fromX=mcc$modern.getX(),fromY=mcc$modern.getY(),fromZ=mcc$modern.getZ();
+            mcc$modern.move(net.minecraft.world.entity.MoverType.SELF,new net.minecraft.world.phys.Vec3(dx,dy,dz));
+            setPosition(mcc$modern.getX(),mcc$modern.getY()+standingEyeHeight,mcc$modern.getZ());
+            // Beta's moveEntity zeroed the motion on an axis the move was blocked on; a player subclass of a mod keeps its own motion fields
+            if(this instanceof legacyconnector.vb1_7_3.net.minecraft.entity.player.ClientPlayerEntity player&&org.kylepitcock.legacyconnector.vb1_7_3.PlayerClassOverridesB173.drives(player)){
+                if(Math.abs(mcc$modern.getX()-fromX-dx)>1.0E-7)velocityX=0;
+                if(Math.abs(mcc$modern.getY()-fromY-dy)>1.0E-7)velocityY=0;
+                if(Math.abs(mcc$modern.getZ()-fromZ-dz)>1.0E-7)velocityZ=0;
+            }
+        }
         else setPosition(x+dx,y+dy,z+dz);
     }
     public void moveNonSolid(float sideways,float forward,float speed){
@@ -139,6 +182,28 @@ public abstract class Entity {
     public boolean isTouchingLava(){return mcc$modern!=null&&mcc$modern.isInLava();}
     public boolean isPushable(){return false;}
     public boolean hasVehicle(){return vehicle!=null;}
+    /** Original additive impulse hook; subclasses can reject pushes by overriding it. */
+    public void addVelocity(double x,double y,double z){velocityX+=x;velocityY+=y;velocityZ+=z;}
+    /** Passenger update owns its one virtual tick and the vehicle's original placement callback. */
+    public void tickRiding(){
+        if(vehicle==null)return;
+        if(vehicle.dead){vehicle=null;return;}
+        velocityX=velocityY=velocityZ=0;
+        tick();
+        if(vehicle==null)return;
+        vehicle.updatePassengerPosition();
+        vehicleYawDelta+=vehicle.yaw-vehicle.prevYaw;
+        vehiclePitchDelta+=vehicle.pitch-vehicle.prevPitch;
+        while(vehicleYawDelta>=180)vehicleYawDelta-=360;
+        while(vehicleYawDelta< -180)vehicleYawDelta+=360;
+        while(vehiclePitchDelta>=180)vehiclePitchDelta-=360;
+        while(vehiclePitchDelta< -180)vehiclePitchDelta+=360;
+        double yawStep=Math.max(-10,Math.min(10,vehicleYawDelta*.5));
+        double pitchStep=Math.max(-10,Math.min(10,vehiclePitchDelta*.5));
+        vehicleYawDelta-=yawStep;vehiclePitchDelta-=pitchStep;
+        yaw=(float)(yaw+yawStep);pitch=(float)(pitch+pitchStep);
+    }
+
     public boolean getEntitiesInside(double dx,double dy,double dz){
         if(world==null||boundingBox==null)return false;var box=boundingBox.offset(dx,dy,dz);
         return world.getEntityCollisions(this,box).isEmpty()&&!world.isBoxSubmergedInFluid(box);
@@ -147,7 +212,7 @@ public abstract class Entity {
         if(other==null||other==vehicle||other==passenger)return;
         double dx=other.x-x,dz=other.z-z,d=Math.max(Math.abs(dx),Math.abs(dz));if(d<.01)return;
         d=Math.sqrt(d);dx/=d;dz/=d;double factor=Math.min(1,1/d)*.05*(1-pushSpeedReduction);dx*=factor;dz*=factor;
-        velocityX-=dx;velocityZ-=dz;other.velocityX+=dx;other.velocityZ+=dz;velocityModified=other.velocityModified=true;
+        addVelocity(-dx,0,-dz);other.addVelocity(dx,0,dz);velocityModified=other.velocityModified=true;
     }
     public void lookAt(Entity other,float yawLimit,float pitchLimit){
         double dx=other.x-x,dz=other.z-z,dy=other.y+other.getEyeHeight()-(y+getEyeHeight());
@@ -160,7 +225,7 @@ public abstract class Entity {
     public void onKilledOther(LivingEntity killed){}
 
     public void setBoundingBoxSpacing(float width, float height) {
-        this.width=width; this.height=height; setPosition(x,y,z);
+        this.width=width; this.height=height;
     }
     public boolean isCollidable() { return !(mcc$modern instanceof org.kylepitcock.legacyconnector.vb1_7_3.B173EntityHost)&&mcc$modern != null && mcc$modern.isPickable(); }
     public boolean shouldRender(double squaredDistance){
@@ -175,6 +240,23 @@ public abstract class Entity {
     public final void mcc$environment(boolean inWater){submergedInWater=inWater;}
     public boolean checkWaterCollisions() { return mcc$modern != null && mcc$modern.isInWater(); }
     public boolean isSubmergedInWater() { return submergedInWater; }
+    /** Eye-fluid query, distinct from cached whole-body water contact and rain. */
+    public boolean isInFluid(legacyconnector.vb1_7_3.net.minecraft.block.material.Material material){
+        if(material==null||!material.isFluid())return false;
+        if(mcc$modern!=null){
+            if(material==legacyconnector.vb1_7_3.net.minecraft.block.material.Material.WATER)return mcc$modern.isEyeInFluid(net.minecraft.tags.FluidTags.WATER);
+            if(material==legacyconnector.vb1_7_3.net.minecraft.block.material.Material.LAVA)return mcc$modern.isEyeInFluid(net.minecraft.tags.FluidTags.LAVA);
+        }
+        if(world==null)return false;
+        double eye=y+getEyeHeight();int bx=(int)Math.floor(x),by=(int)Math.floor(eye),bz=(int)Math.floor(z);
+        if(world.getBlockId(bx,by,bz)==0||world.getMaterial(bx,by,bz)!=material)return false;
+        int metadata=world.getBlockMeta(bx,by,bz);if(metadata>=8)metadata=0;
+        float depth=(metadata+1)/9F-1F/9F;
+        return eye<(float)(by+1)-depth;
+    }
+    public boolean isWet(){
+        return submergedInWater||world!=null&&world.isRaining((int)Math.floor(x),(int)Math.floor(y),(int)Math.floor(z));
+    }
     public boolean damage(Entity attacker, int amount) {
         if (mcc$modern instanceof org.kylepitcock.legacyconnector.vb1_7_3.B173EntityHost host) return host.baseDamage(attacker, amount);
         if (mcc$modern == null) return false;
@@ -190,6 +272,29 @@ public abstract class Entity {
         return damaged;
     }
     public void onPlayerInteraction(legacyconnector.vb1_7_3.net.minecraft.entity.player.PlayerEntity player) {}
+    /** Full original entity envelope; custom entity payload stays virtual through writeNbt/readNbt. */
+    public void write(legacyconnector.vb1_7_3.net.minecraft.nbt.NbtCompound tag){
+        tag.put("Pos",toNbtList(x,y+cameraOffset,z));
+        tag.put("Motion",toNbtList(velocityX,velocityY,velocityZ));
+        tag.put("Rotation",toNbtList(yaw,pitch));
+        tag.putFloat("FallDistance",fallDistance);tag.putShort("Fire",(short)fireTicks);
+        tag.putShort("Air",(short)air);tag.putBoolean("OnGround",onGround);
+        writeNbt(tag);
+    }
+    public void read(legacyconnector.vb1_7_3.net.minecraft.nbt.NbtCompound tag){
+        var position=tag.getList("Pos");var motion=tag.getList("Motion");var rotation=tag.getList("Rotation");
+        velocityX=((legacyconnector.vb1_7_3.net.minecraft.nbt.NbtDouble)motion.get(0)).value;
+        velocityY=((legacyconnector.vb1_7_3.net.minecraft.nbt.NbtDouble)motion.get(1)).value;
+        velocityZ=((legacyconnector.vb1_7_3.net.minecraft.nbt.NbtDouble)motion.get(2)).value;
+        if(Math.abs(velocityX)>10)velocityX=0;if(Math.abs(velocityY)>10)velocityY=0;if(Math.abs(velocityZ)>10)velocityZ=0;
+        prevX=lastTickX=x=((legacyconnector.vb1_7_3.net.minecraft.nbt.NbtDouble)position.get(0)).value;
+        prevY=lastTickY=y=((legacyconnector.vb1_7_3.net.minecraft.nbt.NbtDouble)position.get(1)).value;
+        prevZ=lastTickZ=z=((legacyconnector.vb1_7_3.net.minecraft.nbt.NbtDouble)position.get(2)).value;
+        prevYaw=yaw=((legacyconnector.vb1_7_3.net.minecraft.nbt.NbtFloat)rotation.get(0)).value;
+        prevPitch=pitch=((legacyconnector.vb1_7_3.net.minecraft.nbt.NbtFloat)rotation.get(1)).value;
+        fallDistance=tag.getFloat("FallDistance");fireTicks=tag.getShort("Fire");air=tag.getShort("Air");onGround=tag.getBoolean("OnGround");
+        setPosition(x,y,z);setRotation(yaw,pitch);readNbt(tag);
+    }
     public void writeNbt(legacyconnector.vb1_7_3.net.minecraft.nbt.NbtCompound tag) {
         tag.putFloat("FallDistance", fallDistance);tag.putShort("Fire", (short)fireTicks);
         tag.putShort("Air", (short)air);tag.putBoolean("OnGround", onGround);
@@ -227,6 +332,9 @@ public abstract class Entity {
         var item=new legacyconnector.vb1_7_3.net.minecraft.entity.ItemEntity(world,x,y,z,new legacyconnector.vb1_7_3.net.minecraft.item.ItemStack(id,count,0));
         item.pickupDelay=10;return world.spawnEntity(item)?item:null;
     }
+    public legacyconnector.vb1_7_3.net.minecraft.entity.ItemEntity dropItem(int id,int count,float offset){
+        return dropItem(new legacyconnector.vb1_7_3.net.minecraft.item.ItemStack(id,count,0),offset);
+    }
     public legacyconnector.vb1_7_3.net.minecraft.entity.ItemEntity dropItem(legacyconnector.vb1_7_3.net.minecraft.item.ItemStack stack,float offset){
         if(stack==null||stack.count<=0||world==null)return null;
         var item=new legacyconnector.vb1_7_3.net.minecraft.entity.ItemEntity(world,x,y+offset,z,stack);item.pickupDelay=10;
@@ -259,12 +367,12 @@ public abstract class Entity {
     }
 
     public void setPositionAndAnglesKeepPrevAngles(double x, double y, double z, float yaw, float pitch) {
-        setPosition(x,y,z);
-        this.prevX = this.x = x;
-        this.prevY = this.y = y;
-        this.prevZ = this.z = z;
+        this.lastTickX = this.prevX = this.x = x;
+        this.lastTickY = this.prevY = this.y = y + (double) standingEyeHeight;
+        this.lastTickZ = this.prevZ = this.z = z;
         this.yaw = yaw;
         this.pitch = pitch;
+        setPosition(this.x,this.y,this.z);
     }
 
     public float getDistance(Entity other) {
@@ -291,6 +399,11 @@ public abstract class Entity {
     }
 
     /** MCP {@code getLookVec}: none for a plain entity. */
+    /** Beta's {@code Entity.getPosition(partial)}: the position between the last tick's and this tick's. */
+    public legacyconnector.vb1_7_3.net.minecraft.util.math.Vec3d getPosition(float partial) {
+        if (partial == 1.0F) return legacyconnector.vb1_7_3.net.minecraft.util.math.Vec3d.create(x, y, z);
+        return legacyconnector.vb1_7_3.net.minecraft.util.math.Vec3d.create(prevX + (x - prevX) * partial, prevY + (y - prevY) * partial, prevZ + (z - prevZ) * partial);
+    }
     public legacyconnector.vb1_7_3.net.minecraft.util.math.Vec3d getLookVector() {
         return null;
     }

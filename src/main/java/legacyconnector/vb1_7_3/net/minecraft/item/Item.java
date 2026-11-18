@@ -29,6 +29,11 @@ public class Item {
     public Object mcc$owner;
 
     protected Item(int id) {
+        this(id,false);
+    }
+    /** Complete vanilla API proxies do not register content or borrow the active mod owner. */
+    protected Item(int id,boolean vanillaView) {
+        if(vanillaView){this.id=id;return;}
         this.id = 256 + id;
         if (ITEMS[256 + id] != null) System.out.println("CONFLICT @ " + id);
         ITEMS[256 + id] = this;
@@ -80,6 +85,8 @@ public class Item {
         return stack;
     }
 
+    public void useOnEntity(ItemStack stack, legacyconnector.vb1_7_3.net.minecraft.entity.LivingEntity target) {}
+
     /** Forge's metadata-aware mining speed. */
     public float getStrVsBlock(ItemStack stack, Block block, int meta) {
         return getMiningSpeedMultiplier(stack, block);
@@ -118,6 +125,9 @@ public class Item {
     public boolean isSuitableFor(Block block) {
         return false;
     }
+
+    /** Beta returns total melee damage, including the player's one point of base damage. */
+    public int getAttackDamage(legacyconnector.vb1_7_3.net.minecraft.entity.Entity target) { return 1; }
 
     public boolean postHit(ItemStack stack, legacyconnector.vb1_7_3.net.minecraft.entity.LivingEntity target,
             legacyconnector.vb1_7_3.net.minecraft.entity.LivingEntity attacker) { return false; }
@@ -170,7 +180,11 @@ public class Item {
             legacyconnector.vb1_7_3.net.minecraft.entity.player.PlayerEntity player) {}
 
     public String getTranslatedName() {
-        return ContentB173.translate(getTranslationKey() + ".name");
+        String key = getTranslationKey();
+        String name = key == null ? null : ContentB173.translate(key + ".name");
+        // a base-game view has no Beta language entry here: the native name is the one the player sees
+        if ((name == null || name.equals(key + ".name")) && mcc$modern != null) return mcc$modern.getDescription().getString();
+        return name == null ? "" : name;
     }
 
     public int getColorMultiplier(int meta) {

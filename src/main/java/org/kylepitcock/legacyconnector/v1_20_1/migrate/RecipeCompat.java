@@ -48,6 +48,12 @@ public final class RecipeCompat {
         return found.stream().map(RecipeHolder::value).toList();
     }
 
+    /** {@code getAllRecipesFor(type)}: 1.21.1 lists {@code RecipeHolder}s, 1.20.1 listed the recipes (the erased list type is the same: a cast failed in the mod). */
+    public static List getAllRecipesFor(RecipeManager manager, RecipeType type) {
+        List<RecipeHolder> found = manager.getAllRecipesFor(type);
+        return found.stream().map(RecipeHolder::value).toList();
+    }
+
     public static boolean contains(net.minecraft.stats.ServerRecipeBook book, Recipe recipe) {
         if (book == null || recipe == null) return false;
         net.minecraft.resources.ResourceLocation id = getId(recipe);
@@ -57,9 +63,21 @@ public final class RecipeCompat {
     /** {@code Recipe.getId()}: recipes do not know their id in 1.21.1; it is found through the server's recipe manager (null for a recipe it does not hold). */
     public static net.minecraft.resources.ResourceLocation getId(net.minecraft.world.item.crafting.Recipe<?> recipe) {
         net.minecraft.server.MinecraftServer server = net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
-        if (server == null) return null;
-        for (net.minecraft.world.item.crafting.RecipeHolder<?> h : server.getRecipeManager().getRecipes()) if (h.value() == recipe) return h.id();
+        if (server != null) {
+            for (net.minecraft.world.item.crafting.RecipeHolder<?> h : server.getRecipeManager().getRecipes()) if (h.value() == recipe) return h.id();
+        }
+        if (net.neoforged.fml.loading.FMLEnvironment.dist == net.neoforged.api.distmarker.Dist.CLIENT) { net.minecraft.resources.ResourceLocation id = ClientIds.find(recipe); return id != null ? id : UNKNOWN_ID; }
         return null;
+    }
+
+    /** The client's own recipe manager (a mod's info book reads recipes on the render thread, before or without an integrated server being current). */
+    private static final class ClientIds {
+        static net.minecraft.resources.ResourceLocation find(net.minecraft.world.item.crafting.Recipe<?> recipe) {
+            net.minecraft.client.multiplayer.ClientLevel level = net.minecraft.client.Minecraft.getInstance().level;
+            if (level == null) return null;
+            for (net.minecraft.world.item.crafting.RecipeHolder<?> h : level.getRecipeManager().getRecipes()) if (h.value() == recipe) return h.id();
+            return null;
+        }
     }
 
     // ---- recipe serializers: 1.20.1 JSON / FriendlyByteBuf form bridged to the codec pair of 1.21.1 -------------------------------
@@ -129,9 +147,12 @@ public final class RecipeCompat {
                         String k = ops.getStringValue(p.getFirst()).result().orElse(null);
                         if (k != null) obj.add(k, ops.convertTo(com.mojang.serialization.JsonOps.INSTANCE, p.getSecond()));
                     });
-                    return com.mojang.serialization.DataResult.success((Recipe) invoke(m, serializer, UNKNOWN_ID, obj));
+                    Recipe made = (Recipe) invoke(m, serializer, UNKNOWN_ID, obj);
+                    // 1.20.1 skipped a recipe the serializer returned null for (a condition that does not hold); 1.21.1 would keep a holder of null and crash
+                    return made == null ? com.mojang.serialization.DataResult.error(() -> "The recipe serializer returned no recipe") : com.mojang.serialization.DataResult.success(made);
                 } catch (RuntimeException e) {
-                    return com.mojang.serialization.DataResult.error(() -> String.valueOf(e.getMessage()));
+                    StackTraceElement top = e.getStackTrace().length > 0 ? e.getStackTrace()[0] : null;
+                    return com.mojang.serialization.DataResult.error(() -> e.getMessage() != null ? e.getMessage() : e + (top == null ? "" : " at " + top));
                 }
             }
 
@@ -146,16 +167,57 @@ public final class RecipeCompat {
     public static net.minecraft.network.codec.StreamCodec streamCodec(Object serializer) {
         var to = legacy(serializer, "toNetwork", net.minecraft.network.FriendlyByteBuf.class, Recipe.class);
         var from = legacy(serializer, "fromNetwork", net.minecraft.resources.ResourceLocation.class, net.minecraft.network.FriendlyByteBuf.class);
+        // a subclass of a vanilla serializer (SimpleCookingSerializer...) inherits its 1.20.1 toNetwork/fromNetwork, which 1.21.1's vanilla class no longer has:
+        // the stream codec the vanilla superclass holds in a field does that job
+        net.minecraft.network.codec.StreamCodec inherited = to == null || from == null ? inheritedField(serializer, net.minecraft.network.codec.StreamCodec.class) : null;
         return new net.minecraft.network.codec.StreamCodec<net.minecraft.network.RegistryFriendlyByteBuf, Recipe>() {
             @Override
             public Recipe decode(net.minecraft.network.RegistryFriendlyByteBuf buf) {
+                if (from == null) return (Recipe) requireInherited(inherited, serializer).decode(buf);
                 return (Recipe) invoke(from, serializer, UNKNOWN_ID, buf);
             }
 
             @Override
             public void encode(net.minecraft.network.RegistryFriendlyByteBuf buf, Recipe recipe) {
-                invoke(to, serializer, buf, recipe);
+                if (to != null) invoke(to, serializer, buf, recipe);
+                else if (from != null && recipe instanceof net.minecraft.world.item.crafting.AbstractCookingRecipe cooking) cookingToNetwork(buf, cooking);
+                else requireInherited(inherited, serializer).encode(buf, recipe);
             }
         };
+    }
+
+    /**
+     * The 1.20.1 vanilla {@code SimpleCookingSerializer.toNetwork} (a mod's subclass inherited it, 1.21.1's class has none), which the subclass's own {@code fromNetwork}
+     * reads back: group, category, ingredient, result, experience, cooking time.
+     */
+    private static void cookingToNetwork(net.minecraft.network.RegistryFriendlyByteBuf buf, net.minecraft.world.item.crafting.AbstractCookingRecipe r) {
+        buf.writeUtf(r.getGroup());
+        buf.writeEnum(r.category());
+        MiscCompat.ingredientToNetwork(r.getIngredients().get(0), buf);
+        MiscCompat.writeItem(buf, r.getResultItem(null));
+        buf.writeFloat(r.getExperience());
+        buf.writeVarInt(r.getCookingTime());
+    }
+
+    private static net.minecraft.network.codec.StreamCodec requireInherited(net.minecraft.network.codec.StreamCodec codec, Object serializer) {
+        if (codec == null) throw new UnsupportedOperationException("The recipe serializer " + serializer.getClass().getName() + " has no toNetwork/fromNetwork and no inherited stream codec");
+        return codec;
+    }
+
+    /** The value of the first field of the given type declared by a superclass of the serializer (the codecs a vanilla serializer holds), or null. */
+    private static <T> T inheritedField(Object serializer, Class<T> type) {
+        for (Class<?> c = serializer.getClass().getSuperclass(); c != null && c != Object.class; c = c.getSuperclass()) {
+            for (java.lang.reflect.Field f : c.getDeclaredFields()) {
+                if (!type.isAssignableFrom(f.getType()) || java.lang.reflect.Modifier.isStatic(f.getModifiers())) continue;
+                try {
+                    f.setAccessible(true);
+                    Object v = f.get(serializer);
+                    if (type.isInstance(v)) return type.cast(v);
+                } catch (ReflectiveOperationException | RuntimeException ignored) {
+                    // next field
+                }
+            }
+        }
+        return null;
     }
 }

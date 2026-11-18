@@ -1,6 +1,7 @@
 **[Home](Home.md)**
 
 - [Architecture](Architecture.md)
+- [Coremods](Coremods.md)
 - [Bridges](Bridges.md)
 - [Library candidates](Library-Candidates.md)
 - [World generation](World-Generation.md)
@@ -18,3 +19,8 @@
 - [Addon API](Addon-API.md)
 - [Legacy 1.20.1 estimate](Legacy-1.20.1-Estimate.md)
 - [Legacy b1.7.3](Legacy-b1.7.3.md)
+- [Mixin audit](Mixin-Audit.md)
+- [Legacy 1.20.1 client events](Legacy-1.20.1-Client-Events.md)
+- [Legacy 1.2.5](Legacy-1.2.5.md)
+- [Legacy 1.2.5 corpus](Legacy-1.2.5-Corpus.md)
+- [Version roadmap](Version-Roadmap.md)

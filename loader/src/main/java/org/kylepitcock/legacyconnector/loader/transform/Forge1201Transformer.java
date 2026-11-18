@@ -172,7 +172,27 @@ public final class Forge1201Transformer {
         return name;
     }
 
+    /**
+     * A table rename that would fold two classes of the jar being translated into one name: the 1.20.1 build of a library that the table maps to its
+     * 1.21.1 shape (GeckoLib 4.8's {@code CoreGeoModel}, an interface the model class implements, is {@code GeoModel} in 4.9) translated as the fallback
+     * when the pack has no 1.21.1 build. Renaming there made {@code GeoModel} implement itself, which the JVM rejects with a ClassCircularityError when
+     * the class is defined. The jar keeps both names (its own classes agree with each other); the OTHER jars' references still follow the table.
+     */
+    static boolean mergesOwnClasses(Set<String> own, String from, String to) {
+        return own.contains(from) && own.contains(to);
+    }
+
     private final class Mapper extends Remapper {
+        private final Set<String> own;
+
+        Mapper() {
+            this(ownClasses);
+        }
+
+        Mapper(Set<String> own) {
+            this.own = own;
+        }
+
         @Override
         public String map(String internalName) {
             String moved = plan.isEmpty() ? null : plan.mapClass(VER, internalName);
@@ -180,7 +200,7 @@ public final class Forge1201Transformer {
             String r = mapClass(internalName);
             // mc-classes.tsv is keyed by the name after the Forge renames (a NeoForge class that has no counterpart in 1.21.1 maps on to a stand-in)
             String mc = Mc1201Tables.get().classes.get(r);
-            return mc != null ? mc : r;
+            return mc != null && !mergesOwnClasses(own, r, mc) ? mc : r;
         }
 
         @Override
@@ -221,8 +241,50 @@ public final class Forge1201Transformer {
 
     // ---- the jar --------------------------------------------------------------------------------------------------------------
 
+    /**
+     * Structure of a jar's classes for the translation of the OTHER jars of the set ({@link Mc1201Hierarchy#peers}): class names after the Forge renames,
+     * supertypes, and the declared methods whose name a migration table mentions (the old-signature overrides a subclass in another jar may call or override).
+     * Cheap: method bodies are skipped, everything else is dropped.
+     */
+    public List<org.kylepitcock.legacyconnector.loader.shim.ClassInfo> scan(LegacyJar jar) throws IOException {
+        Set<String> watched = Mc1201Tables.get().watchedMethodNames();
+        List<org.kylepitcock.legacyconnector.loader.shim.ClassInfo> out = new ArrayList<>();
+        try (ZipFile zip = new ZipFile(jar.existing().toFile())) {
+            Set<String> names = new HashSet<>();
+            for (Enumeration<? extends ZipEntry> en = zip.entries(); en.hasMoreElements(); ) {
+                String n = en.nextElement().getName();
+                if (n.endsWith(".class") && !n.startsWith("META-INF/")) names.add(n.substring(0, n.length() - 6));
+            }
+            Mapper mapper = new Mapper(names);
+            for (Enumeration<? extends ZipEntry> en = zip.entries(); en.hasMoreElements(); ) {
+                ZipEntry e = en.nextElement();
+                String name = e.getName();
+                if (e.isDirectory() || !name.endsWith(".class") || name.startsWith("META-INF/")) continue;
+                try (InputStream in = zip.getInputStream(e)) {
+                    ClassNode node = new ClassNode();
+                    new ClassReader(in.readAllBytes()).accept(new ClassRemapper(node, mapper), ClassReader.SKIP_CODE | ClassReader.SKIP_DEBUG | ClassReader.SKIP_FRAMES);
+                    var info = new org.kylepitcock.legacyconnector.loader.shim.ClassInfo(node.name, node.superName, List.copyOf(node.interfaces), node.access);
+                    for (MethodNode m : node.methods) if (watched.contains(m.name) || m.name.equals("getCapability")) info.methods.put(m.name + m.desc, m.access);
+                    out.add(info);
+                } catch (RuntimeException ex) {
+                    // reported when the jar itself is translated
+                }
+            }
+        }
+        return out;
+    }
+
     public LegacyJarTransformer.Result transform(LegacyJar jar, Path output) throws IOException {
+        return transform(jar, output, Map.of());
+    }
+
+    /** The peers of the jar being translated: a nested jar is translated against them as well (Thermal Core's items extend CoFH Core's). */
+    private Map<String, org.kylepitcock.legacyconnector.loader.shim.ClassInfo> currentPeers = Map.of();
+
+    /** @param peers the classes of the other jars of the set (see {@link #scan}), by name */
+    public LegacyJarTransformer.Result transform(LegacyJar jar, Path output, Map<String, org.kylepitcock.legacyconnector.loader.shim.ClassInfo> peers) throws IOException {
         LegacyJarTransformer.Result result = new LegacyJarTransformer.Result();
+        this.currentPeers = peers;
         Map<String, byte[]> classes = new LinkedHashMap<>();
         Map<String, byte[]> other = new LinkedHashMap<>();
         Manifest manifest = null;
@@ -250,7 +312,7 @@ public final class Forge1201Transformer {
         int stringsMapped = 0;
         int rewrites = 0;
         List<ClassNode> nodes = new ArrayList<>();
-        Mc1201Hierarchy hierarchy = new Mc1201Hierarchy();
+        Mc1201Hierarchy hierarchy = new Mc1201Hierarchy().peers(peers);
         java.util.Set<String> serializable = SerialUids.serializable(classes);
         for (var e : classes.entrySet()) {
             ClassNode node = new ClassNode();
@@ -267,13 +329,25 @@ public final class Forge1201Transformer {
         if (datagen.classes + datagen.methods > 0) result.notes.add("Data generation code dropped (dead in a running game): " + datagen);
         Mc1201Migration.Counts mc = new Mc1201Migration.Counts();
         Mixin1201.Stats mixinStats = new Mixin1201.Stats();
+        mixinStats.refmaps = org.kylepitcock.legacyconnector.loader.transform.mixin1201.Refmaps.parse(other);
         Set<String> jarClasses = new HashSet<>();
         Set<String> compoundSubclasses = new HashSet<>();
         for (ClassNode node : nodes) {
             jarClasses.add(node.name);
             if (CallRewrites1201.COMPOUND.equals(node.superName)) compoundSubclasses.add(node.name);
         }
+        java.util.function.Predicate<String> modEvents = n -> jarClasses.contains(n) && hierarchy.isSubclassOf(n, "net/neoforged/bus/api/Event");
+        Map<String, ClassNode> nodeByName = new java.util.HashMap<>();
+        for (ClassNode node : nodes) nodeByName.put(node.name, node);
+        // super.getCapability(...) naming a class of the jar that does not declare it (nor an ancestor of the jar): Minecraft's parent has none either
+        java.util.Set<String> peerNames = peers == null ? java.util.Set.of() : peers.keySet();
+        java.util.function.BiPredicate<String, String> baseIsMinecraft = (owner, desc) -> {
+            if (!nodeByName.containsKey(owner) && !peerNames.contains(owner)) return false;
+            // no class of this jar or of the other jars of the set declares it: Minecraft's parent has none either (an unknown class above is no answer)
+            return hierarchy.declaredIn(owner, "getCapability", desc) == Mc1201Hierarchy.Origin.MINECRAFT;
+        };
         Map<ClassNode, Integer> migrated = new java.util.IdentityHashMap<>();
+        ClassShape1201 shape = new ClassShape1201();
         SoftLink1201 soft = softLinkEnabled() ? new SoftLink1201(nodes, hierarchy) : null;
         int palladiumKubejsChanges = 0;
         int palladiumKubejsClassesDropped = 0;
@@ -333,9 +407,11 @@ public final class Forge1201Transformer {
             palladiumKubejsChanges += palladiumChanges;
             int palladiumAddonPackChange = PalladiumAddonPackManager1201.apply(node);
             palladiumAddonPackChanges += palladiumAddonPackChange;
-            viaCalls += ForgeApiRewrites1201.apply(node);
+            viaCalls += ForgeApiRewrites1201.apply(node, modEvents, baseIsMinecraft, hierarchy);
+            if (modEvents.test(node.name) && ForgeApiRewrites1201.markCancelable(node)) viaCalls++;
             viaCalls += AttachGuards1201.apply(node, jarClasses);
             if (ForgeApiRewrites1201.markProviders(node)) viaCalls++;
+            if (ForgeApiRewrites1201.fixBurnTime(node)) viaCalls++;
             rewrites += viaCalls;
             // Replace the removed SkinTextureCallback API before the generic soft-link pass.
             int palladiumPlayerSkinFetcherChange = PalladiumPlayerSkinFetcher1201.apply(node);
@@ -346,6 +422,11 @@ public final class Forge1201Transformer {
             palladiumPlayerSkinChanges += palladiumPlayerSkinChange;
             Mc1201Migration.Counts changed = Mc1201Migration.apply(node, hierarchy);
             mc.add(changed);
+            viaCalls += shape.apply(node);
+            int forgeBusDefaults = ForgeBusDefault1201.apply(node, hierarchy, shim);
+            int vertexBridges = VertexConsumerBridge1201.apply(node);
+            rewrites += RegistryBufBridge1201.apply(node, hierarchy);
+            if (forgeBusDefaults > 0) result.notes.add(node.name.replace('/', '.') + ": " + forgeBusDefaults + " handler(s) of mod bus events on the default (FORGE) bus of @Mod.EventBusSubscriber never ran in Forge 1.20.1 and are inert here too");
             int palladiumFlightHandlerChange = PalladiumFlightHandler1201.apply(node);
             palladiumFlightHandlerChanges += palladiumFlightHandlerChange;
             int palladiumFlightTakeoffGraceChange = PalladiumFlightHandler1201.applyGroundTakeoffGrace(node);
@@ -381,8 +462,8 @@ public final class Forge1201Transformer {
             palladiumPowersScreenChanges += palladiumPowersScreenChange;
             int palladiumSelectionListChange = PalladiumSelectionLists1201.apply(node);
             palladiumSelectionListChanges += palladiumSelectionListChange;
-            Mixin1201.apply(node, srg, hierarchy, Mc1201Tables.get(), mixinStats);
-            migrated.put(node, viaCalls + changed.total() + palladiumChanges + palladiumAddonPackChange
+            int mixinResigned = Mixin1201.apply(node, srg, hierarchy, Mc1201Tables.get(), mixinStats);
+            migrated.put(node, vertexBridges + mixinResigned + viaCalls + changed.total() + palladiumChanges + palladiumAddonPackChange
                     + palladiumWidgetButtonChange + palladiumMixinChange + palladiumLootChange
                     + palladiumAccessoryScreenChange + palladiumAdvancementWidgetChange + palladiumPowersScreenChange
                     + palladiumSelectionListChange + palladiumSuitStandChange
@@ -461,15 +542,22 @@ public final class Forge1201Transformer {
                 }
             }
         }
+        int modConfigSubclasses = ModConfigSubclass1201.apply(nodes);
+        if (modConfigSubclasses > 0) result.notes.add("Subclass of ModConfig (final in NeoForge 1.21.1): " + modConfigSubclasses + " class(es) moved to LegacyModConfig; a getHandler override has no effect");
+        ModConstructors1201.rememberInstances(nodes);
         int modCtors = ModConstructors1201.apply(nodes);
         if (modCtors > 0) result.notes.add("@Mod constructor taking FMLJavaModLoadingContext: a (IEventBus, ModContainer) constructor was generated for NeoForge");
         int subscribersMoved = Subscribers1201.apply(nodes);
         if (subscribersMoved > 0) result.notes.add("Event subscriber classes with instance handlers: " + subscribersMoved + " registered by the main class for their static handlers (Forge ignored the instance ones)");
+        Mixin1201.redirectStandIns(nodes, mixinStats);
         if (!plan.isEmpty()) for (ClassNode node : nodes) isolate(node);
         if (ownUnit) for (ClassNode node : nodes) renameInjectorHandlers(node, VER.id().replaceAll("[^a-z0-9]", ""));
         // the soft link runs when every class of the jar has been migrated: references to the mod's own members are judged by their final declarations
         for (ClassNode node : nodes) {
             if (PalladiumKubeJS1201.dropLegacyKubejsClass(node.name)) continue;
+            dropDuplicateBridges(node, result);
+            // two classes renamed onto one (TextureStitchEvent and its Post): the inner class entry would name the class as its own outer class, which the JVM rejects
+            if (node.innerClasses != null) node.innerClasses.removeIf(ic -> ic.name.equals(ic.outerName));
             int softened = soft == null ? 0 : soft.apply(node);
             byte[] bytes;
             if (migrated.get(node) > 0 || softened == 2) {
@@ -495,11 +583,19 @@ public final class Forge1201Transformer {
             outClasses.put(node.name + ".class", bytes);
             result.classes++;
         }
+        for (String standIn : mc.itemPredicateStandIns) {
+            if (outClasses.putIfAbsent(standIn + ".class", ItemPredicateStandIn1201.generate(standIn)) == null) result.classes++;
+        }
         if (soft != null && soft.stats.symbols() > 0) {
             result.notes.add("Soft link: " + soft.stats.summary() + " that 1.21.1 lacks were replaced by stand-ins (the mod loads, only the features using them fail; experimental.forge1201.softlink=false turns this off)");
             result.notes.addAll(soft.stats.lines());
             result.softLinked = soft.stats.symbols();
             result.softSymbols.addAll(soft.stats.symbolList());
+            result.softMixinSymbols.addAll(soft.stats.mixinSymbols);
+            if (!soft.stats.mixinSymbols.isEmpty()) {
+                result.notes.add("Mixin warning: " + soft.stats.mixinSymbols.size() + " reference(s) inside mixin handler bodies do not exist in 1.21.1 and were replaced by stand-ins (that handler misbehaves or throws when it runs): "
+                        + String.join(", ", soft.stats.mixinSymbols.stream().limit(12).map(x -> x.replace('/', '.')).toList()));
+            }
         }
         if (soft != null) for (String u : soft.unfixable) result.notes.add("Soft link: class " + u.replace('/', '.') + " does not exist in 1.21.1; a mod class extending it cannot be stood in for and will not load");
         if (mc.total() > 0) result.notes.add("Minecraft 1.20.1 to 1.21.1 migration: " + mc);
@@ -509,6 +605,7 @@ public final class Forge1201Transformer {
         }
         if (mixinStats.mixinClasses > 0) result.notes.add("Mixins: " + mixinStats.summary());
         for (String d : mixinStats.dropped) result.notes.add("Mixin dropped, its target no longer exists in Minecraft 1.21.1: " + d);
+        result.notes.addAll(mixinStats.repair.notes);
         if (rewrites > 0) result.notes.add(rewrites + " call site(s) rewritten for changed 1.21.1 signatures (ResourceLocation factories, event bus post, PalladiumCore renderer lookup, inventory entity preview)");
         if (stringsMapped > 0) result.notes.add(stringsMapped + " reflection string(s) with SRG names now use Mojang names");
 
@@ -594,8 +691,13 @@ public final class Forge1201Transformer {
                     data = jarJarMetadata(new String(data, StandardCharsets.UTF_8)).getBytes(StandardCharsets.UTF_8);
                 }
             }
-            if (name.equals("META-INF/mods.toml")) {
-                String toml = modsToml(new String(data, StandardCharsets.UTF_8), mixinConfigs(manifest));
+            // a jar that ships both files (Terralith) is converted from mods.toml; a data pack with only neoforge.mods.toml pinning 1.20.x goes the same way
+            if (name.equals("META-INF/neoforge.mods.toml") && other.containsKey("META-INF/mods.toml")) continue;
+            if (name.equals("META-INF/mods.toml") || name.equals("META-INF/neoforge.mods.toml")) {
+                // a manifest may list a config that lives in ANOTHER jar (Cataclysm lists the Lionfish API one): registering it here would register it twice
+                List<String> ownConfigs = new ArrayList<>(mixinConfigs(manifest));
+                ownConfigs.removeIf(c -> !other.containsKey(c));
+                String toml = modsToml(new String(data, StandardCharsets.UTF_8), ownConfigs);
                 if (!plan.isEmpty()) {
                     for (var c : cfgRename.entrySet()) toml = toml.replace("\"" + c.getKey() + "\"", "\"" + c.getValue() + "\"");
                     // a dependent that lists the library's mixin config in its manifest (Alex's Caves: MixinConfigs=citadel.mixins.json,...) must not register it
@@ -628,6 +730,20 @@ public final class Forge1201Transformer {
             if (ownUnit) result.notes.add("Side-by-side library: mod id(s) " + ownIds + " load as separate unit(s), packages relocated under " + SideBySide.prefix(VER));
             else result.notes.add("Side-by-side: references to isolated libraries " + plan.units().stream().filter(u -> u.version() == VER).map(SideBySide.Unit::modId).toList() + " link to their relocated copies");
         }
+        java.util.Set<String> openedMembers = PrivateAccess1201.lines(nodes, hierarchy);
+        for (String c : shape.opened) openedMembers.add("public-f " + c);
+        if (shape.converted > 0) result.notes.add("Class shape: " + shape.converted + " class(es) implementing BlockSource (a record in 1.21.1) now extend it and answer through their own getters");
+        for (String u : shape.unconverted) result.notes.add("Class shape: " + u + " implements BlockSource (a record in 1.21.1) and extends another class; it cannot be converted and will not load");
+        if (!openedMembers.isEmpty()) {
+            byte[] existing = outResources.get("META-INF/accesstransformer.cfg");
+            String text = existing == null ? "" : new String(existing, StandardCharsets.UTF_8);
+            StringBuilder at = new StringBuilder(text);
+            if (!text.isEmpty() && !text.endsWith("\n")) at.append('\n');
+            at.append("# private game members this jar's code uses (Forge 1.20.1 opened them with its own transformers)\n");
+            for (String line : openedMembers) at.append(line).append('\n');
+            outResources.put("META-INF/accesstransformer.cfg", at.toString().getBytes(StandardCharsets.UTF_8));
+            result.notes.add("Access transformer: " + openedMembers.size() + " private game member(s) or final game class(es) used by the code opened");
+        }
         int alienEvoResourceChanges = PalladiumResourceCompat1201.apply(outResources);
         if (alienEvoResourceChanges > 0) {
             result.notes.add("AlienEvo resources migrate legacy ResourceLocation and typed SoundEvent/SoundSource arguments for 8-argument Level.playSound calls, persistent NBT integer/string values, Quick Change playlist/slot NBT integer access, playlist-cycle NBT integer reads/writes and the ten-playlist bound, KubeJS 7 NetworkEvents.dataReceived player access for jump/palette/nickname packets and redeclarable injected Java aliases across shared script contexts; preserve Omnitrix layout scoreboard state when moving DNA into/out of the prototype core, armor guards, Omnitrix tab comparisons and KubeJS 7 server/player access; normalize stat-ability modifier IDs and legacy Attribute_Mod operation names, migrate Slam gravity modifier operation names to 1.21.1 enums and track Cannonbolt descent/landing with unconditional gravity/effect cleanup on impact, water, or timeout, convert Cannonbolt block-particle arguments to 1.21.1 block_state/item syntax, migrate Entity.setSecondsOnFire to igniteForSeconds across rolling/directional/entity/area damage scripts, remove the obsolete EditBox.tick call, normalize the color editor's HEX prefix without invoking Java String.replace with a JavaScript regex, route Diamondhead crystal-block tick listeners into a SERVER data script while keeping ticker setup in STARTUP, and repair inspected Diamond Shard/AFOMNI particle texture IDs: "
@@ -649,6 +765,9 @@ public final class Forge1201Transformer {
         DataConverter1201.Stats dataStats = new DataConverter1201.Stats();
         outResources = new LinkedHashMap<>(DataConverter1201.convertAll(outResources, dataStats));
         if (dataStats.total() > 0) result.notes.add("Data and resources converted to the 1.21.1 formats: " + dataStats);
+        int[] shaderFiles = {0};
+        outResources = new LinkedHashMap<>(Shaders1201.convertAll(outResources, shaderFiles));
+        if (shaderFiles[0] > 0) result.notes.add("Core shaders given the 1.20.1 fog_distance overload: " + shaderFiles[0] + " file(s)");
         FunctionConverter1201.Stats functionStats = new FunctionConverter1201.Stats();
         outResources = new LinkedHashMap<>(FunctionConverter1201.convertAll(outResources, functionStats));
         if (functionStats.changedFiles > 0) {
@@ -674,6 +793,30 @@ public final class Forge1201Transformer {
     private static final String SUBSCRIBER_DESC = "Lnet/neoforged/fml/common/Mod$EventBusSubscriber;";
 
     /** Relocates string constants and annotation values that name isolated classes, and swaps the mod id of an isolated library's own annotations. */
+    /**
+     * Two classes of the old API that 1.21.1 merged (or a renamed return type) turn covariant bridge methods of a mod class into duplicates
+     * ({@code CoreGeoBone getParent()} and {@code GeoBone getParent()} both became {@code GeoBone getParent()}): the JVM rejects the class
+     * ("Duplicate method name ... with signature"). A synthetic/bridge duplicate is dropped, the declared method stays.
+     */
+    private static void dropDuplicateBridges(ClassNode node, LegacyJarTransformer.Result result) {
+        int flags = org.objectweb.asm.Opcodes.ACC_BRIDGE | org.objectweb.asm.Opcodes.ACC_SYNTHETIC;
+        java.util.Map<String, MethodNode> seen = new java.util.HashMap<>();
+        java.util.List<MethodNode> drop = new java.util.ArrayList<>();
+        for (MethodNode m : node.methods) {
+            MethodNode first = seen.putIfAbsent(m.name + m.desc, m);
+            if (first == null) continue;
+            if ((m.access & flags) != 0 || (first.access & flags) == 0) {
+                drop.add(m);
+            } else {
+                drop.add(first);
+                seen.put(m.name + m.desc, m);
+            }
+        }
+        if (drop.isEmpty()) return;
+        node.methods.removeAll(drop);
+        result.notes.add("Class " + node.name.replace('/', '.') + ": " + drop.size() + " duplicate bridge method(s) left by a renamed return type were dropped");
+    }
+
     private void isolate(ClassNode node) {
         for (MethodNode m : node.methods) {
             if (m.instructions != null) {
@@ -820,7 +963,7 @@ public final class Forge1201Transformer {
             Files.write(in, data);
             LegacyJar nested = LegacyJarInspector.inspect(in);
             if (nested == null || nested.version != LegacyVersion.V1_20_1) return data;
-            new Forge1201Transformer(shim).sideBySide(plan).transform(nested, out);
+            new Forge1201Transformer(shim).sideBySide(plan).transform(nested, out, currentPeers);
             result.notes.add("Translated nested " + path.substring(path.lastIndexOf('/') + 1));
             return Files.readAllBytes(out);
         } finally {
@@ -882,7 +1025,79 @@ public final class Forge1201Transformer {
         return modsToml(text, List.of());
     }
 
+    private static final Pattern INLINE_OWNER = Pattern.compile("^\\s*[\"']?([A-Za-z0-9_.\\-]+)[\"']?\\s*=\\s*\\[(.*)$");
+
+    /**
+     * The inline form {@code [dependencies]  "owner" = [ { modId = "forge", ... }, ... ]} (some jars write it) as the usual
+     * {@code [[dependencies.owner]]} tables, which the retargeting below understands.
+     */
+    static String expandInlineDependencies(String text) {
+        String[] lines = text.split("\\R", -1);
+        StringBuilder out = new StringBuilder();
+        int i = 0;
+        while (i < lines.length) {
+            String line = lines[i];
+            if (!line.strip().equals("[dependencies]")) {
+                out.append(line).append('\n');
+                i++;
+                continue;
+            }
+            // the section runs to the next table header at the start of a line
+            int j = i + 1;
+            while (j < lines.length && !lines[j].strip().startsWith("[")) j++;
+            StringBuilder body = new StringBuilder();
+            for (int k = i + 1; k < j; k++) body.append(lines[k]).append('\n');
+            StringBuilder converted = new StringBuilder();
+            boolean ok = true;
+            String owner = null;
+            for (String l : body.toString().split("\n")) {
+                String s = l.strip();
+                if (s.isEmpty() || s.startsWith("#")) continue;
+                Matcher o = INLINE_OWNER.matcher(l);
+                if (owner == null && o.matches()) {
+                    owner = o.group(1);
+                    s = o.group(2).strip();
+                }
+                if (owner == null) { ok = false; break; }
+                Matcher tables = Pattern.compile("\\{([^{}]*)\\}").matcher(s);
+                while (tables.find()) {
+                    converted.append("[[dependencies.").append(owner).append("]]\n");
+                    for (String kv : splitTopLevel(tables.group(1))) if (!kv.isBlank()) converted.append(kv.strip()).append('\n');
+                }
+                if (s.contains("]") && !s.contains("{") || s.matches(".*}\\s*,?\\s*\\].*")) owner = null;
+            }
+            if (ok) {
+                out.append(converted);
+            } else {
+                for (int k = i; k < j; k++) out.append(lines[k]).append('\n'); // not the shape we know: untouched
+            }
+            i = j;
+        }
+        return out.toString();
+    }
+
+    private static List<String> splitTopLevel(String s) {
+        List<String> parts = new ArrayList<>();
+        StringBuilder cur = new StringBuilder();
+        char quote = 0;
+        for (char c : s.toCharArray()) {
+            if (quote != 0) {
+                cur.append(c);
+                if (c == quote) quote = 0;
+            } else if (c == '"' || c == '\'') {
+                quote = c;
+                cur.append(c);
+            } else if (c == ',') {
+                parts.add(cur.toString());
+                cur.setLength(0);
+            } else cur.append(c);
+        }
+        parts.add(cur.toString());
+        return parts;
+    }
+
     static String modsToml(String text, List<String> mixinConfigs) {
+        if (text.contains("[dependencies]")) text = expandInlineDependencies(text);
         // Repair dependency table owners for single-mod Forge jars that mistakenly name the owner "examplemod".
         String soleDeclaredModId = soleDeclaredModId(text);
         StringBuilder out = new StringBuilder("# Generated by Legacy Connector from the Forge 1.20.1 mods.toml\n");
@@ -926,7 +1141,13 @@ public final class Forge1201Transformer {
             out.append(line).append('\n');
         }
         flushDependency(out, block, inDependency);
-        for (String config : mixinConfigs) out.append("\n[[mixins]]\nconfig=\"").append(config).append("\"\n");
+        // a Forge mods.toml may already declare its [[mixins]] (NeoForge reads the table too): a second entry fails with "Decoration with key 'fabric-modId' already exists"
+        Set<String> declared = new HashSet<>();
+        Matcher declaredMixins = Pattern.compile("\\[\\[mixins\\]\\][^\\[]*?config\\s*=\\s*[\"']([^\"']+)[\"']", Pattern.DOTALL).matcher(text);
+        while (declaredMixins.find()) declared.add(declaredMixins.group(1));
+        for (String config : mixinConfigs) {
+            if (!declared.contains(config)) out.append("\n[[mixins]]\nconfig=\"").append(config).append("\"\n");
+        }
         return out.toString();
     }
 
@@ -999,11 +1220,40 @@ public final class Forge1201Transformer {
         StringBuilder out = new StringBuilder();
         for (String line : text.split("\\R", -1)) {
             Matcher m = AT_LINE.matcher(line);
-            if (m.matches() && srg.containsKey(m.group(2))) out.append(m.group(1)).append(srg.get(m.group(2))).append(m.group(3));
-            else out.append(line);
-            out.append('\n');
+            if (m.matches() && srg.containsKey(m.group(2))) line = m.group(1) + srg.get(m.group(2)) + m.group(3);
+            String gone = removedMember(line);
+            if (gone != null) {
+                AT_LOG.info("Dropped access transformer line for a member 1.21.1 no longer has: {}", gone);
+                out.append("# dropped (no such member in 1.21.1): ").append(line.strip()).append('\n');
+                continue;
+            }
+            out.append(line).append('\n');
         }
         return out.toString();
+    }
+
+    private static final org.slf4j.Logger AT_LOG = org.slf4j.LoggerFactory.getLogger("Legacy Connector");
+
+    private static final Pattern AT_MEMBER = Pattern.compile("^\\s*(?:public|protected|private|default)(?:[-+]f)?\\s+([\\w.$]+)\\s+([^\\s#]+)\\s*(?:#.*)?$");
+
+    /**
+     * "class.member" of an access transformer line naming a member that the 1.21.1 class (known to the member index) does not declare, else null.
+     * A line for a member the host lacks cannot be applied (NeoForge refuses it), and the mod's code that needed it cannot work either; the
+     * code's own references are reported separately. Wildcards, class lines and classes the index does not know are kept.
+     */
+    static String removedMember(String line) {
+        Matcher m = AT_MEMBER.matcher(line);
+        if (!m.matches()) return null;
+        String owner = m.group(1).replace('.', '/');
+        String member = m.group(2);
+        if (member.equals("*") || member.equals("*()") || member.startsWith("<")) return null;
+        McMembers1201.Members known = McMembers1201.get(owner);
+        if (known == null) return null;
+        int paren = member.indexOf('(');
+        boolean present;
+        if (paren >= 0) present = known.methods().contains(member);
+        else present = known.fields().stream().anyMatch(f -> f.startsWith(member + ":"));
+        return present ? null : m.group(1) + "." + member;
     }
 
     private static boolean looksLikeMixinConfig(byte[] data) {

@@ -132,11 +132,26 @@ public final class Models1122 {
     /** The model the game has under a legacy location (the missing model if none). */
     public static IBakedModel legacyModel(ModelResourceLocation location) {
         var manager = Minecraft.getInstance().getModelManager();
+        BakedModel missing = missingModern();
         for (var modern : modernLocations(location)) {
             BakedModel model = manager.getModel(modern);
-            if (model != manager.getMissingModel()) return legacy(model);
+            if (model != null && model != missing) return legacy(model);
         }
-        return legacy(manager.getMissingModel());
+        return legacy(missing);
+    }
+
+    /**
+     * The game's missing model; during the first bake (ModelEvent.ModifyBakingResult, where mods' IModel.bake runs) the manager has none yet and
+     * answers null for every location, so the one being baked stands in (a null baked model made Botania's special flowers and Astral Sorcery's
+     * item colorization throw).
+     */
+    public static BakedModel missingModern() {
+        BakedModel missing = Minecraft.getInstance().getModelManager().getMissingModel();
+        if (missing == null) {
+            var baking = CustomModels1122.baking();
+            if (baking != null) missing = baking.get(net.minecraft.client.resources.model.ModelBakery.MISSING_MODEL_VARIANT);
+        }
+        return missing;
     }
 
     /** Whether a baked model is a copy of the missing model (a cube of missing-texture faces, baked for a location whose json failed to load). */
@@ -234,8 +249,12 @@ public final class Models1122 {
             }
         }
         for (var item : ItemBridge1122.modItems()) {
+            var subtypes = ItemBridge1122.variants(item);
             for (int meta = 0; meta < 16; meta++) {
-                var modern = ItemBridge1122.modern(item, meta);
+                // a model registered for a subtype belongs to that subtype's modern item; an item with several subtypes has no stand-in for the
+                // ones it does not list (the base subtype's item would take the model of every unlisted metadata: BuildCraft's engines showed
+                // the model put last, whichever type it was meant for)
+                var modern = subtypes.size() > 1 ? subtypes.get(meta) : ItemBridge1122.modern(item, meta);
                 if (modern == null) continue;
                 var mrl = legacyconnector.v1_12_2.net.minecraftforge.client.model.ModelLoader.mcc$model(item, meta);
                 String key = mrl != null ? mrl.toString() : item.getRegistryName() == null ? null : item.getRegistryName() + "#inventory";
@@ -268,7 +287,7 @@ public final class Models1122 {
      */
     public static IBakedModel stateModel(IBlockState state) {
         if (locations == null) locations = buildLocations();
-        var target = stateLocations.get(state);
+        var target = stateLocations.get(StatesBridge1122.canonical(state));
         if (target == null) return null;
         var manager = Minecraft.getInstance().getModelManager();
         BakedModel model = manager.getModel(target);

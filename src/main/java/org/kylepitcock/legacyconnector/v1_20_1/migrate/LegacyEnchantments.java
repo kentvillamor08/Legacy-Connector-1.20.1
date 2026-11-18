@@ -31,6 +31,8 @@ public final class LegacyEnchantments {
     public static final ResourceKey<Registry<LegacyEnchantment>> KEY = ResourceKey.createRegistryKey(ResourceLocation.fromNamespaceAndPath("legacyconnector", "legacy_enchantment"));
     public static final Registry<LegacyEnchantment> REGISTRY = new RegistryBuilder<>(KEY).sync(false).create();
 
+    private static boolean traced;
+
     private LegacyEnchantments() {}
 
     /** Mod bus listener of the runtime. */
@@ -70,6 +72,7 @@ public final class LegacyEnchantments {
                 if (e.isDiscoverable()) discoverable.add(s);
             } catch (RuntimeException | LinkageError ex) {
                 LOG.warn("enchantment {} could not be converted to a data pack entry: {}", id, ex.toString());
+                if (!traced) { traced = true; LOG.warn("first failure", ex); }
             }
         }
         tag(out, "in_enchanting_table", inTable);
@@ -157,6 +160,18 @@ public final class LegacyEnchantments {
     }
 
     // ------------------------------------------------------------------ conversions used by the migrated code
+
+    /** The entry of the enchantment registry (vanilla or another mod's) with that id as the legacy type, or null; reads the registries of the running reload or server. */
+    public static LegacyEnchantment lookupLegacy(ResourceLocation id) {
+        try {
+            net.minecraft.core.HolderLookup.Provider p = MigrateContext.provider();
+            return p.lookup(net.minecraft.core.registries.Registries.ENCHANTMENT)
+                    .flatMap(l -> l.get(ResourceKey.create(net.minecraft.core.registries.Registries.ENCHANTMENT, id)))
+                    .map(LegacyEnchantments::legacy).orElse(null);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
 
     /** A vanilla entry as the legacy type. */
     public static LegacyEnchantment legacy(net.minecraft.core.Holder<net.minecraft.world.item.enchantment.Enchantment> holder) {

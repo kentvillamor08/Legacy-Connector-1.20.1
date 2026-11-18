@@ -1,7 +1,7 @@
 package legacyconnector.v1_12_2.net.minecraft.server;
 
 import com.google.common.util.concurrent.ListenableFuture;
-import legacyconnector.v1_12_2.net.minecraft.command.CommandHandler;
+import legacyconnector.v1_12_2.net.minecraft.command.ServerCommandManager;
 import legacyconnector.v1_12_2.net.minecraft.command.ICommandManager;
 
 /**
@@ -14,8 +14,8 @@ public class MinecraftServer implements legacyconnector.v1_12_2.net.minecraft.co
     private static final MinecraftServer INSTANCE = net.neoforged.fml.loading.FMLEnvironment.dist == net.neoforged.api.distmarker.Dist.DEDICATED_SERVER
             ? new legacyconnector.v1_12_2.net.minecraft.server.dedicated.DedicatedServer()
             : new legacyconnector.v1_12_2.net.minecraft.server.integrated.IntegratedServer();
-    public final ICommandManager commandManager = new CommandHandler();
-    private final legacyconnector.v1_12_2.net.minecraft.server.management.PlayerList playerList =
+    public final ICommandManager commandManager = new ServerCommandManager();
+    private legacyconnector.v1_12_2.net.minecraft.server.management.PlayerList playerList =
             new legacyconnector.v1_12_2.net.minecraft.server.management.PlayerList(this);
     private final legacyconnector.v1_12_2.net.minecraft.server.management.PlayerProfileCache profileCache =
             new legacyconnector.v1_12_2.net.minecraft.server.management.PlayerProfileCache();
@@ -27,8 +27,22 @@ public class MinecraftServer implements legacyconnector.v1_12_2.net.minecraft.co
     public long[] tickTimeArray;
     @Deprecated
     public java.io.File anvilFile;
+    /** The server's player-name cache file (1.12: {@code usercache.json} in the server directory). */
+    public static final java.io.File USER_CACHE_FILE = new java.io.File("usercache.json");
     @Deprecated
     public java.util.Hashtable<Integer, long[]> worldTickTimes;
+
+    public MinecraftServer() {
+    }
+
+    /**
+     * 1.12's constructor (world folder, proxy, data fixer, authentication services, profile cache): a mod's own server class extends this one;
+     * the game runs the real server, so the arguments are not used.
+     */
+    public MinecraftServer(java.io.File anvilFileIn, java.net.Proxy proxyIn, legacyconnector.v1_12_2.net.minecraft.util.datafix.DataFixer dataFixerIn,
+            com.mojang.authlib.yggdrasil.YggdrasilAuthenticationService authServiceIn, com.mojang.authlib.minecraft.MinecraftSessionService sessionServiceIn,
+            com.mojang.authlib.GameProfileRepository profileRepoIn, legacyconnector.v1_12_2.net.minecraft.server.management.PlayerProfileCache profileCacheIn) {
+    }
 
     public static MinecraftServer mcc$instance() {
         return INSTANCE;
@@ -80,6 +94,17 @@ public class MinecraftServer implements legacyconnector.v1_12_2.net.minecraft.co
 
     public legacyconnector.v1_12_2.net.minecraft.server.management.PlayerList getPlayerList() {
         return playerList;
+    }
+
+    /** Replaces the player list the mods see (a mod's own list class; the game keeps its own list for the real work). */
+    public void setPlayerList(legacyconnector.v1_12_2.net.minecraft.server.management.PlayerList list) {
+        if (list != null) this.playerList = list;
+    }
+
+    /** Reloads the data packs (resources, recipes, functions) of the running server, like /reload. */
+    public void reload() {
+        var m = modern();
+        if (m != null) m.reloadResources(m.getPackRepository().getSelectedIds());
     }
 
     public legacyconnector.v1_12_2.net.minecraft.server.management.PlayerProfileCache getPlayerProfileCache() {
@@ -192,6 +217,11 @@ public class MinecraftServer implements legacyconnector.v1_12_2.net.minecraft.co
     public void setAllowPvp(boolean allowPvp) {
         var m = modern();
         if (m != null) m.setPvpAllowed(allowPvp);
+    }
+
+    public void setOnlineMode(boolean online) {
+        var m = modern();
+        if (m != null) m.setUsesAuthentication(online);
     }
 
     public boolean isServerInOnlineMode() {
@@ -436,7 +466,100 @@ public class MinecraftServer implements legacyconnector.v1_12_2.net.minecraft.co
         if (server != null) server.halt(false);
     }
 
+    /** The largest world size (border radius) the server allows: the modern server limit. */
+    public int getMaxWorldSize() {
+        var server = mcc$modern();
+        return server == null ? 29999984 : server.getAbsoluteMaxWorldSize();
+    }
+
+    /** Packets over this many bytes are compressed (-1: never). */
+    public int getNetworkCompressionThreshold() {
+        var server = mcc$modern();
+        return server == null ? 256 : server.getCompressionThreshold();
+    }
+
+    /** Minutes without input before a player is kicked (0: never). */
+    public void setPlayerIdleTimeout(int idleTimeout) {
+        var server = mcc$modern();
+        if (server != null) server.setPlayerIdleTimeout(idleTimeout);
+    }
+
+    public int getMaxPlayerIdleMinutes() {
+        var server = mcc$modern();
+        return server == null ? 0 : server.getPlayerIdleTimeout();
+    }
+
+    private String mcc$resourcePack = "";
+    private String mcc$resourcePackHash = "";
+
+    /** Remembers the resource pack the server would offer; the modern server reads its own setting. */
+    public void setResourcePack(String url, String hash) {
+        this.mcc$resourcePack = url == null ? "" : url;
+        this.mcc$resourcePackHash = hash == null ? "" : hash;
+    }
+
+    public String getResourcePackUrl() {
+        return mcc$resourcePack;
+    }
+
+    public String getResourcePackHash() {
+        return mcc$resourcePackHash;
+    }
+
+    /** Stops the server (the modern server finishes its tick and saves first). */
+    public void stopServer() {
+        initiateShutdown();
+    }
+
     public String getServerVersion() {
         return "1.12.2";
+    }
+
+    public void setMOTD(String motd) {
+        var server = mcc$modern();
+        if (server != null && motd != null) server.setMotd(motd);
+    }
+
+    /** The build height limit (the overworld's maximum build height). */
+    public int getBuildLimit() {
+        var server = mcc$modern();
+        return server == null ? 256 : server.overworld().getMaxBuildHeight();
+    }
+
+    /** 1.12 stored a server-wide build limit; the modern game's is the dimension's height, so only mods' own reads of it are kept. */
+    public void setBuildLimit(int maxBuildHeight) {
+        mcc$buildLimit = Math.max(64, Math.min(256, maxBuildHeight));
+    }
+
+    private int mcc$buildLimit = 256;
+    private static boolean mcc$spawnAnimals = true;
+
+    /** Spawning of animals and npcs: the modern level's spawn settings (monsters keep the difficulty's setting). */
+    public void setCanSpawnAnimals(boolean spawnAnimals) {
+        mcc$spawnAnimals = spawnAnimals;
+        var server = mcc$modern();
+        if (server == null) return;
+        for (var level : server.getAllLevels()) {
+            level.setSpawnSettings(level.getDifficulty() != net.minecraft.world.Difficulty.PEACEFUL, spawnAnimals);
+        }
+    }
+
+    public boolean getCanSpawnAnimals() {
+        return mcc$spawnAnimals;
+    }
+
+    /** Villagers (npcs) spawn with the animals in the modern level's settings. */
+    public void setCanSpawnNPCs(boolean spawnNpcs) {
+        setCanSpawnAnimals(spawnNpcs);
+    }
+
+    public boolean getCanSpawnNPCs() {
+        return mcc$spawnAnimals;
+    }
+
+    public legacyconnector.v1_12_2.net.minecraft.world.GameType getGameType() {
+        var server = mcc$modern();
+        return server == null ? legacyconnector.v1_12_2.net.minecraft.world.GameType.SURVIVAL
+                : legacyconnector.v1_12_2.net.minecraft.world.GameType.mcc$of(server.getDefaultGameType());
     }
 }

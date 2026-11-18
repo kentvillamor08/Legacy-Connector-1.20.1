@@ -53,6 +53,17 @@ public final class ForgeRegistryWrapper<V> extends ForgeRegistry<V> {
         throw new IllegalStateException("The registry " + key.location() + " is data driven and no world is loaded yet");
     }
 
+    /** Handles of one registry are equal (mods key maps by registry handle: SuperMartijn642 corelib's {@code Registries.fromUnderlying}; RegisterEvent.getForgeRegistry creates a new handle per call). */
+    @Override
+    public boolean equals(Object o) {
+        return o instanceof ForgeRegistryWrapper<?> w && w.key.equals(key);
+    }
+
+    @Override
+    public int hashCode() {
+        return key.hashCode();
+    }
+
     private Registry<V> registryOrNull() {
         try {
             return mcc$registry();
@@ -92,13 +103,23 @@ public final class ForgeRegistryWrapper<V> extends ForgeRegistry<V> {
     @Override
     public V getValue(ResourceLocation k) {
         Registry<V> r = registryOrNull();
-        return r == null ? null : r.get(k);
+        V v = r == null ? null : r.get(k);
+        if (v == null && ((Object) key) == org.kylepitcock.legacyconnector.v1_20_1.migrate.LegacyEnchantments.KEY) {
+            // a vanilla or native enchantment: data-driven in 1.21.1, read from the registries of the running reload (recipes parse before any server exists)
+            @SuppressWarnings("unchecked")
+            V found = (V) org.kylepitcock.legacyconnector.v1_20_1.migrate.LegacyEnchantments.lookupLegacy(k);
+            return found;
+        }
+        return v;
     }
 
     @Override
     public ResourceLocation getKey(V value) {
         Registry<V> r = registryOrNull();
-        return r == null ? null : r.getKey(value);
+        ResourceLocation id = r == null ? null : r.getKey(value);
+        // a wrapper of a data-driven (vanilla or native) enchantment is not an entry of the legacy registry: its own id answers
+        if (id == null && value instanceof org.kylepitcock.legacyconnector.v1_20_1.migrate.LegacyEnchantment e) return e.wrappedId();
+        return id;
     }
 
     @Override
@@ -156,8 +177,37 @@ public final class ForgeRegistryWrapper<V> extends ForgeRegistry<V> {
 
     @Override
     public void register(ResourceLocation k, V value) {
-        if (mcc$registry() instanceof WritableRegistry<V> w) Registry.register(w, k, value);
-        else throw new UnsupportedOperationException("The registry " + key.location() + " cannot be written directly");
+        if (mcc$registry() instanceof WritableRegistry<V> w) {
+            // Forge's registry ignores the same object registered twice under one name (AE2 registers the menu types its addons build, the addon registers them too)
+            if (w.containsKey(k) && w.get(k) == value) return;
+            try {
+                Registry.register(w, k, value);
+            } catch (IllegalStateException frozen) {
+                // Forge's registries are open while mods construct; NeoForge's are frozen until RegisterEvent: queue the entry for that event
+                if (!String.valueOf(frozen.getMessage()).contains("frozen")) throw frozen;
+                synchronized (DEFERRED) {
+                    DEFERRED.computeIfAbsent(key, x -> new java.util.ArrayList<>()).add(new Object[] {k, value});
+                }
+            }
+        } else throw new UnsupportedOperationException("The registry " + key.location() + " cannot be written directly");
+    }
+
+    private static final Map<ResourceKey<?>, java.util.List<Object[]>> DEFERRED = new java.util.HashMap<>();
+
+    /** Writes the entries a mod registered directly while its registry was frozen (called from the RegisterEvent of that registry). */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public static void flushDeferred(net.neoforged.neoforge.registries.RegisterEvent event) {
+        java.util.List<Object[]> list;
+        synchronized (DEFERRED) {
+            list = DEFERRED.remove(event.getRegistryKey());
+        }
+        if (list == null) return;
+        event.register((ResourceKey) event.getRegistryKey(), helper -> {
+            for (Object[] e : list) {
+                if (event.getRegistry().containsKey((ResourceLocation) e[0]) && event.getRegistry().get((ResourceLocation) e[0]) == e[1]) continue;
+                helper.register((ResourceLocation) e[0], e[1]);
+            }
+        });
     }
 
     @Override

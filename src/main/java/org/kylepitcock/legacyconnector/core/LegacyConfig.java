@@ -43,6 +43,13 @@ public final class LegacyConfig {
             deepLayer.enabled = true
             # Comma separated class name prefixes of legacy world generators that must not run below y=0.
             deepLayer.excludeGenerators =
+            # How the deep layer is generated. shifted (default): each ore generator runs ONE extra full-height pass with legacy y=0 at the
+            # world bottom (-64), and the normal pass keeps everything but the ores, so a vein is never cut by a pass boundary. split: the
+            # older two-pass scheme (a pass for y>=0, one below it, ores of the shared band chosen per 8x8x8 cell).
+            deepLayer.mode = shifted
+            # Per-mod overrides, comma separated mod ids or generator class prefixes: these use the other mode than deepLayer.mode.
+            deepLayer.splitMods =
+            deepLayer.shiftedMods =
 
             # What legacy world generators build in place (shrines, towers, huts) is recorded as a modern structure where it is
             # built, so /locate structure <mod>:legacy/<name> finds the ones in chunks that have generated.
@@ -81,6 +88,9 @@ public final class LegacyConfig {
             legacy.autoSortMods = true
             # Forge 1.20.1 mods are remapped in place and loaded as NeoForge mods (alpha; read by the loader at startup).
             experimental.forge1201 = true
+            # Minecraft 1.2.5 mods (mods/1.2.5/; ModLoader and early Forge, translated to the 1.4.7 layer; alpha). false leaves such jars alone
+            # (read by the loader at startup; the older key experimental.minecraft125 is still read when this one is absent).
+            versions.minecraft125 = true
             # A reference to a missing Minecraft 1.21.1 class, method or field no longer keeps a Forge 1.20.1 mod from loading; the
             # stand-in throws only when it runs (read by the loader at startup).
             experimental.forge1201.softlink = true
@@ -118,6 +128,9 @@ public final class LegacyConfig {
             perf.sweepDeadViews = true
             # 1.12.2 item stack views without capabilities are held weakly (off: a tag kept without its stack could lose changes).
             perf.weakStackViews1122 = false
+            # 1.12.2 mods can read and change blocks below y=0 (down to the modern world bottom): a quarry mines the deepslate layers. Off: 1.12's world floor at y=0
+            # (a mod that indexes chunk sections with y>>4 then never sees a negative y).
+            legacy.deepWorld1122 = true
             # The loader drops its translation tables after mod discovery (read by the loader at startup).
             perf.releaseLoaderData = true
             # One loading warning listing translated mods with unresolved references or heavy stub use, shown once per set of mods.
@@ -238,6 +251,11 @@ public final class LegacyConfig {
     private static String string(String key, String fallback) {
         String v = values().getProperty(key);
         return v == null || v.isBlank() ? fallback : v.trim();
+    }
+
+    /** {@code legacy.deepWorld1122} (on): 1.12.2 code can access blocks below y=0 (see World.isOutsideBuildHeight). */
+    public static boolean deepWorld1122() {
+        return bool("legacy.deepWorld1122", true);
     }
 
     private static boolean bool(String key, boolean fallback) {
@@ -436,6 +454,27 @@ public final class LegacyConfig {
 
     public static boolean deepLayerEnabled() {
         return bool("deepLayer.enabled", true);
+    }
+
+    /** How a generator's deep layer is produced. */
+    public enum DeepMode { OFF, SPLIT, SHIFTED }
+
+    /** The deep layer mode of one generator (its mod id may be null): {@code deepLayer.mode} with the per-mod override lists applied. */
+    public static DeepMode deepLayerMode(String modId, String generatorClass) {
+        if (!deepLayerEnabled() || !deepLayerAllows(generatorClass)) return DeepMode.OFF;
+        boolean shifted = !"split".equalsIgnoreCase(string("deepLayer.mode", "shifted").trim());
+        if (listed("deepLayer.splitMods", modId, generatorClass)) shifted = false;
+        else if (listed("deepLayer.shiftedMods", modId, generatorClass)) shifted = true;
+        return shifted ? DeepMode.SHIFTED : DeepMode.SPLIT;
+    }
+
+    private static boolean listed(String key, String modId, String generatorClass) {
+        for (String s : string(key, "").split(",")) {
+            s = s.trim();
+            if (s.isEmpty()) continue;
+            if (modId != null && s.equalsIgnoreCase(modId) || generatorClass.startsWith(s)) return true;
+        }
+        return false;
     }
 
     public static boolean deepLayerAllows(String generatorClass) {

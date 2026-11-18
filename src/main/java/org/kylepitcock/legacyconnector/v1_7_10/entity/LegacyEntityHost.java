@@ -61,6 +61,12 @@ public class LegacyEntityHost extends net.minecraft.world.entity.Entity implemen
         if (accessor == WATCHER && legacy != null && level().isClientSide()) legacy.mcc$dataWatcher().mcc$fromTag(entityData.get(WATCHER));
     }
 
+    @Override
+    public void remove(net.minecraft.world.entity.Entity.RemovalReason reason) {
+        legacyconnector.v1_7_10.net.minecraft.entity.EntityTracker.mcc$noteRemoved(legacy, level());
+        super.remove(reason);
+    }
+
     // ------------------------------------------------------------------ ticking
 
     @Override
@@ -79,14 +85,20 @@ public class LegacyEntityHost extends net.minecraft.world.entity.Entity implemen
 
     private int failedTicks;
 
+    private static final ThreadLocal<Boolean> NAMING = ThreadLocal.withInitial(() -> false);
+
     @Override
     protected net.minecraft.network.chat.Component getTypeName() {
         var name = LegacyHosts.displayName(getType());
         if (name != null) return name;
         // an entity no mod registered under a name (a visual trail spawned straight into the world): the legacy name or class, not the shared type's raw key
         if (legacy != null) {
+            // the shim's default getCommandSenderName asks this entity for its name again: answer the class on that re-entry (a StackOverflowError otherwise)
             String own = null;
-            try { own = legacy.getCommandSenderName(); } catch (RuntimeException ignored) { }
+            if (!NAMING.get()) {
+                NAMING.set(true);
+                try { own = legacy.getCommandSenderName(); } catch (RuntimeException ignored) { } finally { NAMING.set(false); }
+            }
             if (own != null && !own.isBlank() && !own.startsWith("entity.")) return net.minecraft.network.chat.Component.literal(own);
             return net.minecraft.network.chat.Component.literal(legacy.getClass().getSimpleName());
         }
@@ -306,14 +318,16 @@ public class LegacyEntityHost extends net.minecraft.world.entity.Entity implemen
     @Override
     protected void addAdditionalSaveData(CompoundTag tag) {
         if (legacy != null) {
-            try {
+            // a throwing writeEntityToNBT must not fail the chunk save: the last good legacy keys are saved instead
+            lastGoodNbt = org.kylepitcock.legacyconnector.core.NbtSaveGuard.guardInPlace(tag, lastGoodNbt, () -> {
                 legacy.mcc$writeEntityToNBT(new NBTTagCompound(tag));
                 legacy.mcc$saveExtended(new NBTTagCompound(tag));
-            } catch (RuntimeException | LinkageError e) {
-                LegacyHosts.nbtFailure(this, "writing", e);
-            }
+            }, legacy, net.minecraft.core.registries.BuiltInRegistries.ENTITY_TYPE.getKey(getType()), blockPosition().toShortString());
         }
     }
+
+    /** The legacy keys of this entity's last successful save (see NbtSaveGuard). */
+    private CompoundTag lastGoodNbt;
 
     @Override
     public void writeSpawnData(RegistryFriendlyByteBuf buf) {

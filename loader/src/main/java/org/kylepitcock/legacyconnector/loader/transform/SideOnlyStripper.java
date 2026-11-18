@@ -41,6 +41,51 @@ public final class SideOnlyStripper {
         };
     }
 
+    /** Block.registerBlockIcons / Item.registerIcons (srg and mapped names): where a block or item fills its icon arrays. */
+    private static boolean registersIcons(MethodNode m) {
+        return switch (m.name) {
+            case "registerIcons", "registerBlockIcons", "func_94581_a", "func_149651_a" -> true;
+            default -> false;
+        };
+    }
+
+    /** True when the method calls and reads only java.*, this class and its superclass, and the shim's icon types: it runs on a server without client classes. */
+    private static boolean onlyTouchesCommonTypes(ClassNode node, MethodNode m, String shimPrefix) {
+        if (m.instructions == null) return false;
+        for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            String owner;
+            if (insn instanceof MethodInsnNode c) owner = c.owner;
+            else if (insn instanceof org.objectweb.asm.tree.FieldInsnNode f) owner = f.owner;
+            else if (insn instanceof InvokeDynamicInsnNode) return false;
+            else continue;
+            boolean ok = owner.startsWith("java/") || owner.startsWith("[") || owner.equals(node.name) || owner.equals(node.superName)
+                    || owner.equals(shimPrefix + "net/minecraft/util/IIcon") || owner.equals(shimPrefix + "net/minecraft/client/renderer/texture/IIconRegister");
+            if (!ok) return false;
+        }
+        return true;
+    }
+
+    /** name:desc of this class's own fields that {@code m} reads or writes. */
+    private static Set<String> ownFieldsUsed(ClassNode node, MethodNode m) {
+        Set<String> out = new HashSet<>();
+        for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+            if (insn instanceof org.objectweb.asm.tree.FieldInsnNode f && f.owner.equals(node.name)) out.add(f.name + ":" + f.desc);
+        }
+        return out;
+    }
+
+    /** name:desc of the fields of this class that its subtype-listing methods read or write. */
+    private static Set<String> listingFields(ClassNode node) {
+        Set<String> out = new HashSet<>();
+        for (MethodNode m : node.methods) {
+            if (!listsSubtypes(m) || m.instructions == null) continue;
+            for (AbstractInsnNode insn = m.instructions.getFirst(); insn != null; insn = insn.getNext()) {
+                if (insn instanceof org.objectweb.asm.tree.FieldInsnNode f && f.owner.equals(node.name)) out.add(f.name + ":" + f.desc);
+            }
+        }
+        return out;
+    }
+
     /** Orphaned synthetic lambda bodies removed so far (statistics, read by diagnostics and tests). */
     public static final AtomicInteger LAMBDAS_REMOVED = new AtomicInteger();
 
@@ -48,10 +93,23 @@ public final class SideOnlyStripper {
     public static int apply(ClassNode node, String shimPrefix, String side) {
         String desc = "L" + shimPrefix + "cpw/mods/fml/relauncher/SideOnly;";
         int before = node.fields.size() + node.methods.size();
-        node.fields.removeIf(f -> otherSide(f.visibleAnnotations, desc, side) || otherSide(f.invisibleAnnotations, desc, side));
+        // The subtype listing of a block or item often reads an icon array its client-only registerIcons fills ("for (i < icons.length)"): the
+        // dedicated server needs both to register the same subtypes (keys) as its clients, so the listing's own client-only fields stay, and
+        // with them the icon registration method that fills them (run against a detached register when the subtypes are discovered).
+        Set<String> keepMethods = new HashSet<>();
+        Set<String> keepFields = new HashSet<>(listingFields(node));
+        for (MethodNode m : node.methods) {
+            if (registersIcons(m) && onlyTouchesCommonTypes(node, m, shimPrefix)) {
+                keepMethods.add(m.name + m.desc);
+                keepFields.addAll(ownFieldsUsed(node, m));
+            }
+        }
+        node.fields.removeIf(f -> !keepFields.contains(f.name + ":" + f.desc)
+                && (otherSide(f.visibleAnnotations, desc, side) || otherSide(f.invisibleAnnotations, desc, side)));
         List<MethodNode> removed = new ArrayList<>();
         node.methods.removeIf(m -> {
-            boolean r = !listsSubtypes(m) && (otherSide(m.visibleAnnotations, desc, side) || otherSide(m.invisibleAnnotations, desc, side));
+            boolean r = !listsSubtypes(m) && !keepMethods.contains(m.name + m.desc)
+                    && (otherSide(m.visibleAnnotations, desc, side) || otherSide(m.invisibleAnnotations, desc, side));
             if (r) removed.add(m);
             return r;
         });

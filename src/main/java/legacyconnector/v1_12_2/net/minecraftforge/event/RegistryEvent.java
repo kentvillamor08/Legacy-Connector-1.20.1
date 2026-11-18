@@ -106,8 +106,34 @@ public class RegistryEvent<T extends IForgeRegistryEntry<T>> extends GenericEven
             this.registry = registry;
         }
 
+        /** The 1.12.0 form: the registry's name is given (the name is derived from the registry type, as in {@link #getName()}). */
+        public Register(legacyconnector.v1_12_2.net.minecraft.util.ResourceLocation name, IForgeRegistry<T> registry) {
+            this(registry);
+        }
+
         public IForgeRegistry<T> getRegistry() {
             return registry;
+        }
+
+        /** The name of the registry being filled (Forge: {@code minecraft:blocks}, {@code minecraft:entities}, ...); mods switch on it. */
+        public legacyconnector.v1_12_2.net.minecraft.util.ResourceLocation getName() {
+            Class<T> type = registry.getRegistrySuperType();
+            String simple = type == null ? "" : type.getSimpleName();
+            String path = switch (simple) {
+                case "Block" -> "blocks";
+                case "Item" -> "items";
+                case "Potion" -> "potions";
+                case "Biome" -> "biomes";
+                case "SoundEvent" -> "soundevents";
+                case "PotionType" -> "potiontypes";
+                case "Enchantment" -> "enchantments";
+                case "VillagerProfession" -> "villagerprofessions";
+                case "EntityEntry" -> "entities";
+                case "IRecipe" -> "recipes";
+                case "DataSerializerEntry" -> "dataserializers";
+                default -> simple.toLowerCase(java.util.Locale.ROOT) + "s";
+            };
+            return new legacyconnector.v1_12_2.net.minecraft.util.ResourceLocation("minecraft", path);
         }
     }
 }
