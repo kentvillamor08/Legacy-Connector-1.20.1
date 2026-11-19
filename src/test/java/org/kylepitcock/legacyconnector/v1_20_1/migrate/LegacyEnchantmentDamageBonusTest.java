@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test;
 class LegacyEnchantmentDamageBonusTest {
     @Test
     void stackAwareDefaultDelegatesToLegacyTwoArgumentOverride() {
-        LegacyEnchantment enchantment = new LegacyEnchantment(LegacyEnchantment.Rarity.COMMON, null) {
+        LegacyEnchantment enchantment = new LegacyEnchantment(LegacyEnchantment.Rarity.COMMON, null, new net.minecraft.world.entity.EquipmentSlot[0]) {
             @Override
             public float getDamageBonus(int level, LegacyMobType type) {
                 return level * 0.75F;
@@ -23,7 +23,7 @@ class LegacyEnchantmentDamageBonusTest {
     void stackAwareOverrideReceivesTheExactEnchantedStack() {
         ItemStack expectedStack = ItemStack.EMPTY;
         ItemStack[] observedStack = new ItemStack[1];
-        LegacyEnchantment enchantment = new LegacyEnchantment(LegacyEnchantment.Rarity.COMMON, null) {
+        LegacyEnchantment enchantment = new LegacyEnchantment(LegacyEnchantment.Rarity.COMMON, null, new net.minecraft.world.entity.EquipmentSlot[0]) {
             @Override
             public float getDamageBonus(int level, LegacyMobType type, ItemStack stack) {
                 observedStack[0] = stack;
