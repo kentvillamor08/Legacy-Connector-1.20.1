@@ -327,7 +327,8 @@ public final class ApiCompat {
         } else if (type == LegacyMobType.ARTHROPOD) {
             bonus += stack.getEnchantments().getLevel(enchantments.getOrThrow(net.minecraft.world.item.enchantment.Enchantments.BANE_OF_ARTHROPODS)) * 2.5f;
         }
-        return bonus;
+        // The old helper also dispatched the stack-aware hook on every mod enchantment.
+        return bonus + LegacyEnchantments.legacyDamageBonus(stack.getEnchantments(), stack, type);
     }
 
     /** {@code EnchantmentHelper.doPostDamageEffects(attacker, target)}: the post attack effects of the attacker's gear. */

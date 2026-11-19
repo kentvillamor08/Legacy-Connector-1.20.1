@@ -150,6 +150,16 @@ public class LegacyEnchantment {
         return 0.0F;
     }
 
+    /**
+     * Forge 1.20.1's stack-aware {@code IForgeEnchantment#getDamageBonus} hook.
+     * The default delegates to the legacy two-argument method so existing
+     * subclasses keep their behavior, while subclasses may override this
+     * overload to inspect the exact enchanted stack.
+     */
+    public float getDamageBonus(int level, LegacyMobType type, ItemStack stack) {
+        return getDamageBonus(level, type);
+    }
+
     public final boolean isCompatibleWith(LegacyEnchantment other) {
         return checkCompatibility(other) && other.checkCompatibility(this);
     }

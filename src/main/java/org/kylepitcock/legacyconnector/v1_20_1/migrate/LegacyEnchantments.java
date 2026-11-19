@@ -16,6 +16,7 @@ import net.minecraft.server.packs.PackType;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.enchantment.ItemEnchantments;
 import net.neoforged.neoforge.registries.NewRegistryEvent;
 import net.neoforged.neoforge.registries.RegistryBuilder;
 import org.slf4j.Logger;
@@ -164,5 +165,29 @@ public final class LegacyEnchantments {
             LegacyEnchantment mine = REGISTRY.get(k.location());
             return mine != null ? mine : LegacyEnchantment.of(holder);
         }).orElseGet(() -> LegacyEnchantment.of(holder));
+    }
+
+    /**
+     * Sum only connector-managed legacy enchantment hooks from the stack's stored enchantment component.
+     * Native 1.21.1 enchantment effects are handled by NeoForge's normal damage pipeline and must not be
+     * added here a second time. Legacy data-pack entries intentionally have empty target effects, so their
+     * old Java hook is evaluated exactly once through this path.
+     */
+    static float legacyDamageBonus(ItemEnchantments enchantments, ItemStack stack, LegacyMobType type) {
+        float bonus = 0.0F;
+        for (var entry : enchantments.entrySet()) {
+            LegacyEnchantment legacy = entry.getKey().unwrapKey()
+                    .map(key -> REGISTRY.get(key.location()))
+                    .orElse(null);
+            if (legacy != null) {
+                bonus += legacy.getDamageBonus(entry.getIntValue(), type, stack);
+            }
+        }
+        return bonus;
+    }
+
+    /** Legacy-only melee bonus used beside, not instead of, NeoForge's native enchantment damage pipeline. */
+    public static float legacyDamageBonus(ItemStack stack, LegacyMobType type) {
+        return legacyDamageBonus(stack.getEnchantments(), stack, type);
     }
 }

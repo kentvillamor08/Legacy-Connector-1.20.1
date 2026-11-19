@@ -26,6 +26,7 @@
     "EntityTypeLegacySpawnNbtMixin",
     "ItemStackLegacyNbtMixin",
     "MobBucketItemLegacyNbtMixin",
+    "PlayerLegacyEnchantmentDamageMixin",
     "JigsawStructureLegacyVillageMixin",
     "ServerLevelBlockFamilyMixin",
     "LevelChunkBlockFamilyMixin",
