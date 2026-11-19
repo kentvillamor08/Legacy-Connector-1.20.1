@@ -28,6 +28,23 @@ public class LegacyProtectionEnchantment extends LegacyEnchantment {
 
     public final Type type;
 
+    /**
+     * Forge 1.20.1's public static {@code ProtectionEnchantment.getFireAfterDampener}
+     * compatibility surface. In 1.21.1, Fire Protection is a data-driven enchantment
+     * identified by a ResourceKey rather than a ProtectionEnchantment instance.
+     */
+    public static int getFireAfterDampener(net.minecraft.world.entity.LivingEntity entity, int ticks) {
+        var enchantments = entity.level().registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT);
+        var fireProtection = enchantments.getOrThrow(net.minecraft.world.item.enchantment.Enchantments.FIRE_PROTECTION);
+        int level = net.minecraft.world.item.enchantment.EnchantmentHelper.getEnchantmentLevel(fireProtection, entity);
+        return dampenedFireTicks(ticks, level);
+    }
+
+    static int dampenedFireTicks(int ticks, int level) {
+        if (level <= 0) return ticks;
+        return ticks - net.minecraft.util.Mth.floor((float) ticks * (float) level * 0.15F);
+    }
+
     public LegacyProtectionEnchantment(Rarity rarity, Type type, EquipmentSlot... slots) {
         super(rarity, type == Type.FALL ? LegacyEnchantmentCategory.ARMOR_FEET : LegacyEnchantmentCategory.ARMOR, slots);
         this.type = type;
