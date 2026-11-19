@@ -42,7 +42,9 @@ public class LegacyProtectionEnchantment extends LegacyEnchantment {
 
     static int dampenedFireTicks(int ticks, int level) {
         if (level <= 0) return ticks;
-        return ticks - net.minecraft.util.Mth.floor((float) ticks * (float) level * 0.15F);
+        // Preserve the source bytecode's float operation order: level * 0.15F first, then ticks * that result.
+        float reductionPerTick = (float) level * 0.15F;
+        return ticks - net.minecraft.util.Mth.floor((float) ticks * reductionPerTick);
     }
 
     public LegacyProtectionEnchantment(Rarity rarity, Type type, EquipmentSlot... slots) {
