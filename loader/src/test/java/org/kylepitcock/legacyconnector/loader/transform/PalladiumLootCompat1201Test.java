@@ -11,6 +11,8 @@ import org.objectweb.asm.tree.*;
 class PalladiumLootCompat1201Test implements Opcodes {
     private static final String MANAGER = PalladiumLootCompat1201.MANAGER;
     private static final String DESERIALIZERS = "net/minecraft/world/level/storage/loot/Deserializers";
+    private static final String LEGACY_DESERIALIZERS =
+            "org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyLootDeserializers";
     private static final String GSON_BUILDER = "com/google/gson/GsonBuilder";
     private static final String GSON = "com/google/gson/Gson";
     private static final String JSON_ELEMENT = "com/google/gson/JsonElement";
@@ -46,6 +48,32 @@ class PalladiumLootCompat1201Test implements Opcodes {
     }
 
     @Test
+    void preservesCodecBackedFactoryWhenDeserializersWasAlreadyRemapped() {
+        ClassNode node = managerNode(true);
+
+        assertEquals(1, PalladiumLootCompat1201.apply(node));
+
+        MethodNode initializer = find(node, "<clinit>", "()V");
+        assertTrue(hasCall(initializer, INVOKESTATIC, LEGACY_DESERIALIZERS,
+                "createLootTableSerializer", "()L" + GSON_BUILDER + ";"));
+        assertFalse(hasTypeInsn(initializer, NEW, GSON_BUILDER),
+                "the migrated factory already returns the codec-configured builder");
+        assertFalse(hasCall(initializer, INVOKESPECIAL, GSON_BUILDER, "<init>", "()V"),
+                "do not replace the codec-backed builder with a plain GsonBuilder");
+        assertTrue(hasCall(initializer, INVOKEVIRTUAL, GSON_BUILDER,
+                "create", "()Lcom/google/gson/Gson;"));
+
+        MethodNode consumer = find(node, "lambda$apply$0",
+                "(Ljava/util/concurrent/atomic/AtomicInteger;Lnet/minecraft/resources/ResourceLocation;"
+                        + "L" + MODIFICATION + ";L" + JSON_ELEMENT + ";)V");
+        assertTrue(hasCall(consumer, INVOKESTATIC, HELPER, "decodeLootPool",
+                "(L" + GSON + ";L" + JSON_ELEMENT + ";Ljava/lang/Class;)L" + LOOT_POOL + ";"));
+        assertTrue(hasOpcode(consumer, IFNONNULL),
+                "a condition-filtered pool must not be added as null");
+        assertClassCanBeSerialized(node);
+    }
+
+    @Test
     void leavesUnrelatedClassesUntouched() {
         ClassNode node = managerNode();
         node.name = "example/OtherLootManager";
@@ -71,6 +99,10 @@ class PalladiumLootCompat1201Test implements Opcodes {
     }
 
     private static ClassNode managerNode() {
+        return managerNode(false);
+    }
+
+    private static ClassNode managerNode(boolean deserializersAlreadyMapped) {
         ClassNode node = new ClassNode();
         node.version = V21;
         node.access = ACC_PUBLIC;
@@ -80,8 +112,12 @@ class PalladiumLootCompat1201Test implements Opcodes {
         MethodNode initializer = new MethodNode(ACC_STATIC, "<clinit>", "()V", null, null);
         initializer.instructions.add(new InsnNode(ICONST_0));
         initializer.instructions.add(new FieldInsnNode(PUTSTATIC, MANAGER, "OVERRIDE_FORGE_NAME_LOGIC", "Z"));
-        initializer.instructions.add(new MethodInsnNode(INVOKESTATIC, DESERIALIZERS,
-                "m_78800_", "()L" + GSON_BUILDER + ";", false));
+        initializer.instructions.add(new MethodInsnNode(
+                INVOKESTATIC,
+                deserializersAlreadyMapped ? LEGACY_DESERIALIZERS : DESERIALIZERS,
+                deserializersAlreadyMapped ? "createLootTableSerializer" : "m_78800_",
+                "()L" + GSON_BUILDER + ";",
+                false));
         initializer.instructions.add(new MethodInsnNode(INVOKEVIRTUAL, GSON_BUILDER,
                 "create", "()Lcom/google/gson/Gson;", false));
         initializer.instructions.add(new FieldInsnNode(PUTSTATIC, MANAGER, "GSON", "L" + GSON + ";"));

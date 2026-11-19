@@ -19,6 +19,9 @@ final class PalladiumLootCompat1201 implements Opcodes {
 
     private static final String DESERIALIZERS =
             "net/minecraft/world/level/storage/loot/Deserializers";
+    /** Class remap in mc-classes.tsv: the legacy Deserializers API is already a codec-backed helper by this pass. */
+    private static final String LEGACY_DESERIALIZERS =
+            "org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyLootDeserializers";
     private static final String GSON_BUILDER = "com/google/gson/GsonBuilder";
     private static final String GSON = "com/google/gson/Gson";
     private static final String JSON_ELEMENT = "com/google/gson/JsonElement";
@@ -51,29 +54,39 @@ final class PalladiumLootCompat1201 implements Opcodes {
         }
 
         MethodInsnNode oldFactory = null;
+        boolean factoryAlreadyMapped = false;
         for (AbstractInsnNode instruction : initializer.instructions) {
             if (instruction instanceof MethodInsnNode call
                     && call.getOpcode() == INVOKESTATIC
-                    && DESERIALIZERS.equals(call.owner)
+                    && (DESERIALIZERS.equals(call.owner) || LEGACY_DESERIALIZERS.equals(call.owner))
                     && ("m_78800_".equals(call.name) || "createLootTableSerializer".equals(call.name))
                     && FACTORY_DESC.equals(call.desc)) {
                 if (oldFactory != null) {
-                    throw new IllegalStateException("Palladium loot manager invokes the removed Gson factory more than once");
+                    throw new IllegalStateException("Palladium loot manager invokes the loot Gson factory more than once");
                 }
                 oldFactory = call;
+                factoryAlreadyMapped = LEGACY_DESERIALIZERS.equals(call.owner);
             }
         }
         if (oldFactory == null) {
-            throw new IllegalStateException("Palladium loot manager no longer calls Deserializers.createLootTableSerializer()");
+            throw new IllegalStateException(
+                    "Palladium loot manager no longer calls Deserializers.createLootTableSerializer() "
+                            + "or its LegacyLootDeserializers migration helper");
         }
 
-        InsnList gsonBuilder = new InsnList();
-        gsonBuilder.add(new TypeInsnNode(NEW, GSON_BUILDER));
-        gsonBuilder.add(new InsnNode(DUP));
-        gsonBuilder.add(new MethodInsnNode(INVOKESPECIAL, GSON_BUILDER, "<init>", "()V", false));
-        initializer.instructions.insertBefore(oldFactory, gsonBuilder);
-        initializer.instructions.remove(oldFactory);
-        initializer.maxStack = Math.max(initializer.maxStack, 2);
+        if (!factoryAlreadyMapped) {
+            // In the original class shape the call still targets the removed Minecraft class.
+            // Supply a plain builder only for that unmigrated shape. When mc-classes.tsv has
+            // already redirected it to LegacyLootDeserializers, preserve that builder: it carries
+            // the codec-backed adapters for LootTable, LootPool, functions, conditions and entries.
+            InsnList gsonBuilder = new InsnList();
+            gsonBuilder.add(new TypeInsnNode(NEW, GSON_BUILDER));
+            gsonBuilder.add(new InsnNode(DUP));
+            gsonBuilder.add(new MethodInsnNode(INVOKESPECIAL, GSON_BUILDER, "<init>", "()V", false));
+            initializer.instructions.insertBefore(oldFactory, gsonBuilder);
+            initializer.instructions.remove(oldFactory);
+            initializer.maxStack = Math.max(initializer.maxStack, 2);
+        }
 
         MethodInsnNode oldPoolParse = null;
         for (AbstractInsnNode instruction : poolConsumer.instructions) {
