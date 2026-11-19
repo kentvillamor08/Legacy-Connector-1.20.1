@@ -61,8 +61,30 @@ public final class MiscCompat {
         entity.onEquippedItemBroken(entity.getItemBySlot(slot).getItem(), slot);
     }
 
+    /**
+     * Preserve Forge 1.20.1's {@code Entity.setSecondsOnFire(int)} semantics.
+     *
+     * <p>The old method reduced requested fire ticks by Fire Protection before applying them. In 1.21.1
+     * the ProtectionEnchantment class is gone and enchantments are data-driven, so resolve the vanilla
+     * Fire Protection holder from this entity's own level registry and use the modern holder-based helper.
+     * Apply the final integer tick count through igniteForTicks, not igniteForSeconds, to avoid a second
+     * conversion/rounding step and retain virtual setRemainingFireTicks dispatch.</p>
+     */
     public static void setSecondsOnFire(Entity entity, int seconds) {
-        entity.igniteForSeconds(seconds);
+        int ticks = seconds * 20;
+        if (entity instanceof LivingEntity living) {
+            var enchantments = living.level().registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENCHANTMENT);
+            var fireProtection = enchantments.getOrThrow(net.minecraft.world.item.enchantment.Enchantments.FIRE_PROTECTION);
+            int level = net.minecraft.world.item.enchantment.EnchantmentHelper.getEnchantmentLevel(fireProtection, living);
+            ticks = fireProtectionDampenedTicks(ticks, level);
+        }
+        entity.igniteForTicks(ticks);
+    }
+
+    /** The exact 1.20.1 Fire Protection duration formula, kept pure for exhaustive unit testing. */
+    static int fireProtectionDampenedTicks(int ticks, int level) {
+        if (level <= 0) return ticks;
+        return ticks - net.minecraft.util.Mth.floor((float) ticks * (float) level * 0.15F);
     }
 
     public static int getMaxDamage(Item item) {
