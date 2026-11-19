@@ -22,6 +22,12 @@ class FireProtectionDurationCompatTest {
     }
 
     @Test
+    void preservesForgeFloatMultiplicationOrderAtRoundingBoundary() {
+        // Source bytecode evaluates (level * 0.15F) before multiplying by ticks.
+        assertEquals(-24030, LegacyProtectionEnchantment.dampenedFireTicks(480599, 7));
+    }
+
+    @Test
     void leavesTicksUnchangedWhenFireProtectionLevelIsNotPositive() {
         assertEquals(101, LegacyProtectionEnchantment.dampenedFireTicks(101, 0));
         assertEquals(101, LegacyProtectionEnchantment.dampenedFireTicks(101, -1));
