@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.item.ItemStack;
@@ -19,6 +21,18 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 class Forge1201EventResultCompatibilityTest {
+    private record PickupDirective(Event$Result result, boolean canceled) {}
+
+    private static final AtomicReference<PickupDirective> NEXT_PICKUP_DIRECTIVE = new AtomicReference<>();
+    private static final AtomicInteger PICKUP_EVENT_POSTS = new AtomicInteger();
+
+    private static void applyPickupDirective(EntityItemPickupEvent event) {
+        PICKUP_EVENT_POSTS.incrementAndGet();
+        PickupDirective directive = NEXT_PICKUP_DIRECTIVE.getAndSet(null);
+        if (directive == null) return;
+        event.setResult(directive.result());
+        if (directive.canceled()) event.setCanceled(true);
+    }
     @BeforeAll
     static void bootstrapMinecraft() throws Exception {
         var dist = net.neoforged.fml.loading.FMLLoader.class.getDeclaredField("dist");
@@ -28,6 +42,9 @@ class Forge1201EventResultCompatibilityTest {
                 List.of(), List.of(), List.of(), List.of(), java.util.Map.of());
         net.minecraft.SharedConstants.tryDetectVersion();
         net.minecraft.server.Bootstrap.bootStrap();
+        net.neoforged.neoforge.common.NeoForge.EVENT_BUS.addListener(
+                EntityItemPickupEvent.class,
+                Forge1201EventResultCompatibilityTest::applyPickupDirective);
     }
 
     @legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$HasResult
@@ -62,6 +79,27 @@ class Forge1201EventResultCompatibilityTest {
         assertEquals(true, ForgeApi1201.eventHasResult(critical));
         assertEquals(true, ForgeApi1201.eventHasResult(bonemeal));
         assertEquals(true, ForgeApi1201.eventHasResult(sapling));
+    }
+
+    @Test
+    void onItemPickupPostsLegacyEventAndReturnsForgeFactoryContract() {
+        int postsBefore = PICKUP_EVENT_POSTS.get();
+
+        for (Event$Result result : List.of(Event$Result.DEFAULT, Event$Result.DENY, Event$Result.ALLOW)) {
+            NEXT_PICKUP_DIRECTIVE.set(new PickupDirective(result, false));
+            int expected = result == Event$Result.ALLOW ? 1 : 0;
+            assertEquals(expected, ForgeApiTail1201.onItemPickup(null, null), "result=" + result);
+            assertEquals(null, NEXT_PICKUP_DIRECTIVE.get(), "the event bus should consume the probe directive");
+        }
+
+        // Cancellation is independent of Result and takes precedence for every Result value.
+        for (Event$Result result : List.of(Event$Result.DEFAULT, Event$Result.DENY, Event$Result.ALLOW)) {
+            NEXT_PICKUP_DIRECTIVE.set(new PickupDirective(result, true));
+            assertEquals(-1, ForgeApiTail1201.onItemPickup(null, null), "canceled result=" + result);
+            assertEquals(null, NEXT_PICKUP_DIRECTIVE.get(), "the event bus should consume the probe directive");
+        }
+
+        assertEquals(postsBefore + 6, PICKUP_EVENT_POSTS.get(), "each helper call must post the legacy shim");
     }
 
     @Test

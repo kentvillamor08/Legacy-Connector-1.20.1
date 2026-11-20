@@ -121,6 +121,29 @@ class ForgeApiRewrites1201Test {
     }
 
     @Test
+    void legacyItemPickupFactoryCallRewritesToTheForgeResultHelper() {
+        String owner = "net/neoforged/neoforge/event/EventHooks";
+        String descriptor = "(Lnet/minecraft/world/entity/item/ItemEntity;Lnet/minecraft/world/entity/player/Player;)I";
+        ClassNode node = new ClassNode();
+        node.version = Opcodes.V21;
+        node.name = "test/LegacyPickupFactoryCall";
+        node.superName = "java/lang/Object";
+        MethodNode method = new MethodNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "pickup", "()I", null, null);
+        method.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.ACONST_NULL));
+        method.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.ACONST_NULL));
+        method.instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, owner, "onItemPickup", descriptor, false));
+        method.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.IRETURN));
+        node.methods.add(method);
+
+        assertEquals(1, ForgeApiRewrites1201.apply(node));
+        MethodInsnNode rewritten = (MethodInsnNode) method.instructions.get(2);
+        assertEquals(Opcodes.INVOKESTATIC, rewritten.getOpcode());
+        assertEquals(ForgeApiRewrites1201.TAIL, rewritten.owner);
+        assertEquals("onItemPickup", rewritten.name);
+        assertEquals(descriptor, rewritten.desc);
+    }
+
+    @Test
     void parentAndFieldlessChildCancellationAccessorsRewriteToTypedTailOverloads() {
         List<Expected> expected = List.of(
                 new Expected(EVENT, "getCancellationResult", GET_DESC,

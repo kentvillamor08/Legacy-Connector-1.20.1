@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
 import org.junit.jupiter.api.Test;
+import org.kylepitcock.legacyconnector.loader.shim.ClassInfo;
 import org.kylepitcock.legacyconnector.loader.shim.ShimIndex;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.ClassNode;
@@ -60,6 +61,21 @@ class Forge1201ApiTest {
         assertEquals(
                 "dev/latvian/mods/kubejs/util/LogType",
                 transformer.mapClass("dev/latvian/mods/kubejs/util/LogType"));
+    }
+
+    @Test
+    void legacyPlayerPickupNotificationShimOverridesGeneratedNativePostRename() {
+        String source = "net/minecraftforge/event/entity/player/PlayerEvent$ItemPickupEvent";
+        String facade = "legacyconnector/v1_20_1/" + source;
+        ShimIndex shim = new ShimIndex(Map.of(
+                facade,
+                new ClassInfo(facade,
+                        "net/neoforged/neoforge/event/entity/player/PlayerEvent",
+                        List.of(),
+                        Opcodes.ACC_PUBLIC)));
+        Forge1201Transformer transformer = new Forge1201Transformer(shim);
+
+        assertEquals(facade, transformer.mapClass(source));
     }
 
     @Test

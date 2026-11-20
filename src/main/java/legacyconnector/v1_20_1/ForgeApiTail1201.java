@@ -386,6 +386,22 @@ public final class ForgeApiTail1201 {
         return 0;
     }
 
+    /**
+     * Forge 1.20.1's legacy pickup decision hook. This deliberately posts the
+     * connector-owned Forge event instead of NeoForge's native ItemEntityPickupEvent.Pre:
+     * their result and cancellation contracts are not equivalent.
+     *
+     * @return -1 when canceled, 1 only for ALLOW, and 0 for DEFAULT or DENY.
+     */
+    public static int onItemPickup(net.minecraft.world.entity.item.ItemEntity entityItem,
+            net.minecraft.world.entity.player.Player player) {
+        var event = new legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.EntityItemPickupEvent(player, entityItem);
+        net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(event);
+        if (event.isCanceled()) return -1;
+        return event.getResult()
+                == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW ? 1 : 0;
+    }
+
     /** Forge's bucket event could replace the result; no handler means null (the vanilla use goes on). */
     public static net.minecraft.world.InteractionResultHolder<net.minecraft.world.item.ItemStack> onBucketUse(net.minecraft.world.entity.player.Player player,
             net.minecraft.world.level.Level level, net.minecraft.world.item.ItemStack stack, net.minecraft.world.phys.HitResult target) {
