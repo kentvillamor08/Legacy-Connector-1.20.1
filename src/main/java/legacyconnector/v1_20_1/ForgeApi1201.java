@@ -568,6 +568,14 @@ public final class ForgeApi1201 {
             fillBucket.setResult(result);
             return;
         }
+        if (event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.SleepingLocationCheckEvent sleepingLocation) {
+            sleepingLocation.setResult(result);
+            return;
+        }
+        if (event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.SleepingTimeCheckEvent sleepingTime) {
+            sleepingTime.setResult(result);
+            return;
+        }
         if (event instanceof net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable e) {
             e.setResult(mobEffectResult(result));
             return;
@@ -636,6 +644,12 @@ public final class ForgeApi1201 {
         }
         if (event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.FillBucketEvent fillBucket) {
             return fillBucket.getResult();
+        }
+        if (event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.SleepingLocationCheckEvent sleepingLocation) {
+            return sleepingLocation.getResult();
+        }
+        if (event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.SleepingTimeCheckEvent sleepingTime) {
+            return sleepingTime.getResult();
         }
         if (event instanceof net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable e) {
             return resultFromMobEffect(e.getResult());
