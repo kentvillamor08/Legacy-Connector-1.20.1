@@ -409,6 +409,25 @@ public final class ForgeApiTail1201 {
                 == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW ? 1 : 0;
     }
 
+    /**
+     * Forge's successful pickup notification, kept separate from NeoForge's native Post event.
+     * Forge also emits this with a zero-count stack when the legacy decision result was ALLOW.
+     */
+    public static void firePlayerItemPickupEvent(net.minecraft.world.entity.player.Player player,
+            net.minecraft.world.entity.item.ItemEntity originalEntity, net.minecraft.world.item.ItemStack pickedUp) {
+        firePlayerItemPickupEvent(net.neoforged.neoforge.common.NeoForge.EVENT_BUS, player, originalEntity, pickedUp);
+    }
+
+    /** Shared dispatch body for deterministic tests; the runtime entry point uses NeoForge.EVENT_BUS. */
+    static void firePlayerItemPickupEvent(net.neoforged.bus.api.IEventBus eventBus,
+            net.minecraft.world.entity.player.Player player,
+            net.minecraft.world.entity.item.ItemEntity originalEntity,
+            net.minecraft.world.item.ItemStack pickedUp) {
+        var event = new legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.PlayerEvent$ItemPickupEvent(
+                player, originalEntity, pickedUp);
+        eventBus.post(event);
+    }
+
     /** Forge's bucket event could replace the result; no handler means null (the vanilla use goes on). */
     public static net.minecraft.world.InteractionResultHolder<net.minecraft.world.item.ItemStack> onBucketUse(net.minecraft.world.entity.player.Player player,
             net.minecraft.world.level.Level level, net.minecraft.world.item.ItemStack stack, net.minecraft.world.phys.HitResult target) {

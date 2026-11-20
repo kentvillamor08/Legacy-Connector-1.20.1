@@ -3,12 +3,14 @@ package legacyconnector.v1_20_1;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.core.BlockPos;
@@ -98,6 +100,25 @@ class Forge1201EventResultCompatibilityTest {
         }
 
         assertEquals(6, eventPosts.get(), "each helper call must post the legacy shim");
+    }
+
+    @Test
+    void legacyPlayerItemPickupNotificationIsPostedOnTheSuppliedEventBus() {
+        var bus = net.neoforged.bus.api.BusBuilder.builder().build();
+        var captured = new AtomicReference<legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.PlayerEvent$ItemPickupEvent>();
+        bus.addListener(
+                legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.PlayerEvent$ItemPickupEvent.class,
+                captured::set);
+
+        var originalEntity = (net.minecraft.world.entity.item.ItemEntity) null;
+        var zeroDeltaStack = net.minecraft.world.item.ItemStack.EMPTY;
+        ForgeApiTail1201.firePlayerItemPickupEvent(bus, null, originalEntity, zeroDeltaStack);
+
+        var posted = captured.get();
+        assertNotNull(posted, "the legacy notification shim must be posted");
+        assertSame(originalEntity, posted.getOriginalEntity());
+        assertSame(zeroDeltaStack, posted.getStack());
+        assertEquals(0, posted.getStack().getCount(), "the ALLOW notification can carry zero transferred items");
     }
 
     @Test
