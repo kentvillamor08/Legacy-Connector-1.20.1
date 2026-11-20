@@ -120,11 +120,82 @@ public final class ForgeApiTail1201 {
         e.setUseItem(toTri(r));
     }
 
-    /** Forge's base event carried the cancellation result; only the right-click events do now (for the others the result is the vanilla default). */
-    public static void interactSetCancellationResult(net.neoforged.neoforge.event.entity.player.PlayerInteractEvent e, net.minecraft.world.InteractionResult result) {
-        if (e instanceof net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.RightClickBlock b) b.setCancellationResult(result);
-        else if (e instanceof net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.RightClickItem i) i.setCancellationResult(result);
-        else if (e instanceof net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.EntityInteract x) x.setCancellationResult(result);
+    /**
+     * 1.20.1 stored cancellationResult on PlayerInteractEvent itself. 1.21.1 moved
+     * storage to four concrete right-click/entity-interaction subclasses; other
+     * subclasses and translated custom descendants retain the legacy value here.
+     *
+     * <p>Weak identity keys prevent this compatibility state from extending the
+     * lifetime of posted events. A sentinel preserves the source setter's ability
+     * to store null.</p>
+     */
+    private static final Object NULL_INTERACTION_CANCELLATION_RESULT = new Object();
+    private static final java.util.Map<Object, Object> INTERACTION_CANCELLATION_RESULTS =
+            new com.google.common.collect.MapMaker().weakKeys().makeMap();
+
+    public static net.minecraft.world.InteractionResult interactGetCancellationResult(
+            net.neoforged.neoforge.event.entity.player.PlayerInteractEvent e) {
+        java.util.Objects.requireNonNull(e, "event");
+        if (e instanceof net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.RightClickBlock b) return b.getCancellationResult();
+        if (e instanceof net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.RightClickItem i) return i.getCancellationResult();
+        if (e instanceof net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.EntityInteract x) return x.getCancellationResult();
+        if (e instanceof net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.EntityInteractSpecific x) return x.getCancellationResult();
+        Object stored = INTERACTION_CANCELLATION_RESULTS.get(e);
+        if (stored == null) return net.minecraft.world.InteractionResult.PASS;
+        return stored == NULL_INTERACTION_CANCELLATION_RESULT ? null : (net.minecraft.world.InteractionResult) stored;
+    }
+
+    /** Restores the old parent-owned getter for target subclasses without native storage. */
+    public static net.minecraft.world.InteractionResult interactGetCancellationResult(
+            net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.LeftClickBlock e) {
+        return interactGetCancellationResult((net.neoforged.neoforge.event.entity.player.PlayerInteractEvent) e);
+    }
+
+    public static net.minecraft.world.InteractionResult interactGetCancellationResult(
+            net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.RightClickEmpty e) {
+        return interactGetCancellationResult((net.neoforged.neoforge.event.entity.player.PlayerInteractEvent) e);
+    }
+
+    public static net.minecraft.world.InteractionResult interactGetCancellationResult(
+            net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.LeftClickEmpty e) {
+        return interactGetCancellationResult((net.neoforged.neoforge.event.entity.player.PlayerInteractEvent) e);
+    }
+
+    /** Restores the old parent-owned setter and keeps target-specific storage where it exists. */
+    public static void interactSetCancellationResult(
+            net.neoforged.neoforge.event.entity.player.PlayerInteractEvent e,
+            net.minecraft.world.InteractionResult result) {
+        java.util.Objects.requireNonNull(e, "event");
+        if (e instanceof net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.RightClickBlock b) {
+            b.setCancellationResult(result);
+        } else if (e instanceof net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.RightClickItem i) {
+            i.setCancellationResult(result);
+        } else if (e instanceof net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.EntityInteract x) {
+            x.setCancellationResult(result);
+        } else if (e instanceof net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.EntityInteractSpecific x) {
+            x.setCancellationResult(result);
+        } else {
+            INTERACTION_CANCELLATION_RESULTS.put(e,
+                    result == null ? NULL_INTERACTION_CANCELLATION_RESULT : result);
+        }
+    }
+
+    public static void interactSetCancellationResult(
+            net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.LeftClickBlock e,
+            net.minecraft.world.InteractionResult result) {
+        interactSetCancellationResult((net.neoforged.neoforge.event.entity.player.PlayerInteractEvent) e, result);
+    }
+
+    public static void interactSetCancellationResult(
+            net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.RightClickEmpty e,
+            net.minecraft.world.InteractionResult result) {
+        interactSetCancellationResult((net.neoforged.neoforge.event.entity.player.PlayerInteractEvent) e, result);
+    }
+
+    public static void interactSetCancellationResult(
+            net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.LeftClickEmpty e,
+            net.minecraft.world.InteractionResult result) {
+        interactSetCancellationResult((net.neoforged.neoforge.event.entity.player.PlayerInteractEvent) e, result);
     }
 
     // ---- attributes
