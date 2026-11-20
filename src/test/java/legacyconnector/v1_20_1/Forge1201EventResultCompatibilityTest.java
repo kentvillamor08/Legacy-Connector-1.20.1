@@ -2,6 +2,7 @@ package legacyconnector.v1_20_1;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.util.Arrays;
 import java.util.List;
@@ -138,6 +139,18 @@ class Forge1201EventResultCompatibilityTest {
         ForgeApi1201.eventSetResult(event, Event$Result.ALLOW);
         assertEquals(false, event.isCanceled());
         assertSame(Event$Result.ALLOW, ForgeApi1201.eventGetResult(event));
+    }
+
+    @Test
+    void saplingGrowTreeRetainsSourceNonCancelableSemantics() {
+        var event = new net.neoforged.neoforge.event.level.BlockGrowFeatureEvent(
+                null, RandomSource.create(), BlockPos.ZERO, null);
+
+        assertEquals(false, ForgeApi1201.eventIsCancelable(event));
+        assertEquals(false, ForgeApi1201.eventIsCanceled(event));
+        assertThrows(UnsupportedOperationException.class,
+                () -> ForgeApi1201.eventSetCanceled(event, true));
+        assertEquals(false, event.isCanceled());
     }
 
     @Test
