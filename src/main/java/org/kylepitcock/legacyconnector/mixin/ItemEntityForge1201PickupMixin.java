@@ -62,7 +62,7 @@ public abstract class ItemEntityForge1201PickupMixin {
             @Share(PICKUP_CONTEXT) LocalRef<Forge1201ItemPickupContext> contextRef
     ) {
         Forge1201ItemPickupContext context =
-                new Forge1201ItemPickupContext(!this.level().isClientSide, this.pickupDelay);
+                new Forge1201ItemPickupContext(!((ItemEntity) (Object) this).level().isClientSide, this.pickupDelay);
         contextRef.set(context);
         try {
             original.call(player);
