@@ -60,7 +60,7 @@ public final class Forge1201ItemPickupRuntimeSelfTest {
             runCase(failures, listeners, player, "native Pre FALSE vetoes before the legacy decision", () -> {
                 Scenario scenario = new Scenario();
                 scenario.nativePre = TriState.FALSE;
-                scenario.legacyResult = Result.ALLOW;
+                scenario.legacyResult = Event$Result.ALLOW;
                 ItemEntity item = createItem(level, player, listeners, scenario, new ItemStack(Items.APPLE, 2), 0);
                 item.playerTouch(player);
 
@@ -76,7 +76,7 @@ public final class Forge1201ItemPickupRuntimeSelfTest {
             runCase(failures, listeners, player, "native Pre TRUE preserves target override with positive entry delay", () -> {
                 Scenario scenario = new Scenario();
                 scenario.nativePre = TriState.TRUE;
-                scenario.legacyResult = Result.ALLOW;
+                scenario.legacyResult = Event$Result.ALLOW;
                 ItemEntity item = createItem(level, player, listeners, scenario, new ItemStack(Items.APPLE, 1), 20);
                 item.playerTouch(player);
 
@@ -102,12 +102,12 @@ public final class Forge1201ItemPickupRuntimeSelfTest {
                 require(scenario.legacyNotificationCount == 0, "legacy notification fired after cancellation");
             });
 
-            verifyOrdinaryInsertion(failures, listeners, player, level, Result.DEFAULT, "legacy DEFAULT retains real insertion");
-            verifyOrdinaryInsertion(failures, listeners, player, level, Result.DENY, "legacy DENY retains real insertion");
+            verifyOrdinaryInsertion(failures, listeners, player, level, Event$Result.DEFAULT, "legacy DEFAULT retains real insertion");
+            verifyOrdinaryInsertion(failures, listeners, player, level, Event$Result.DENY, "legacy DENY retains real insertion");
 
             runCase(failures, listeners, player, "legacy ALLOW skips insertion and emits zero-delta notification", () -> {
                 Scenario scenario = new Scenario();
-                scenario.legacyResult = Result.ALLOW;
+                scenario.legacyResult = Event$Result.ALLOW;
                 ItemEntity item = createItem(level, player, listeners, scenario, new ItemStack(Items.APPLE, 2), 0);
                 item.playerTouch(player);
 
@@ -177,7 +177,7 @@ public final class Forge1201ItemPickupRuntimeSelfTest {
             runCase(failures, listeners, player, "nested pickup invocations keep independent contexts", () -> {
                 Scenario outer = new Scenario();
                 Scenario inner = new Scenario();
-                inner.legacyResult = Result.ALLOW;
+                inner.legacyResult = Event$Result.ALLOW;
                 ItemEntity outerItem = createItem(level, player, listeners, outer, new ItemStack(Items.APPLE, 1), 0);
                 ItemEntity innerItem = createItem(level, player, listeners, inner, new ItemStack(Items.APPLE, 1), 0);
                 outer.nestedItem = innerItem;
@@ -212,7 +212,7 @@ public final class Forge1201ItemPickupRuntimeSelfTest {
             ProbeListeners listeners,
             FakePlayer player,
             ServerLevel level,
-            Result result,
+            Event$Result result,
             String name
     ) {
         runCase(failures, listeners, player, name, () -> {
@@ -297,7 +297,7 @@ public final class Forge1201ItemPickupRuntimeSelfTest {
 
     private static final class Scenario {
         private TriState nativePre;
-        private Result legacyResult = Result.DEFAULT;
+        private Result legacyResult = Event$Result.DEFAULT;
         private boolean cancelLegacyDecision;
         private Integer mutatePickupDelay;
         private UUID mutateTarget;
