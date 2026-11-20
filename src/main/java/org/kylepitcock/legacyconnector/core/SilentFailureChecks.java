@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.server.level.ServerLevel;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.attributes.Attribute;
@@ -41,14 +42,14 @@ public final class SilentFailureChecks {
         if (!Boolean.getBoolean("legacyconnector.entitySelfTest")) return;
         NeoForge.EVENT_BUS.addListener((ServerStartedEvent e) -> {
             try {
-                new SilentFailureChecks().runAll();
+                new SilentFailureChecks().runAll(e.getServer().overworld());
             } catch (RuntimeException | LinkageError ex) {
                 LOG.error("SILENT FAILURE CHECKS: the checks themselves threw", ex);
             }
         });
     }
 
-    private void runAll() {
+    private void runAll(ServerLevel testLevel) {
         check("attributes: legacy living-entity hosts", this::hostAttributes);
         check("attributes: player", () -> attributesOf(EntityType.PLAYER, "minecraft:player", false));
         check("network: no login/configuration-phase payload registrations", this::networkPhases);
@@ -57,6 +58,9 @@ public final class SilentFailureChecks {
         check("registry: non-vanilla blocks, items, sounds resolve", this::registrySanity);
         if (Boolean.getBoolean("legacyconnector.itemPickupMixinSelfTest")) {
             check("mixin target: ItemEntity.playerTouch class loads", this::itemEntityPickupMixinTarget);
+        }
+        if (Boolean.getBoolean("legacyconnector.itemPickupBehaviorSelfTest")) {
+            check("pickup: ItemEntity.playerTouch transaction behavior", () -> Forge1201ItemPickupRuntimeSelfTest.run(testLevel));
         }
         LOG.info("SILENT FAILURE CHECKS: {} passed, {} failed", passed, failures.size());
         for (String f : failures) LOG.error("SILENT FAILURE CHECK FAILED: {}", f);
