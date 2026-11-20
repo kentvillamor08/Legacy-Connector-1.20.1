@@ -29,7 +29,7 @@ class ForgeApiRewrites1201Test {
                 null,
                 null);
         method.instructions.add(new InsnNode(Opcodes.ACONST_NULL));
-        boolean getter = expected.name().equals("getCancellationResult");
+        boolean getter = expected.name().startsWith("get");
         if (!getter) method.instructions.add(new InsnNode(Opcodes.ACONST_NULL));
         method.instructions.add(new MethodInsnNode(
                 Opcodes.INVOKEVIRTUAL,
@@ -42,6 +42,47 @@ class ForgeApiRewrites1201Test {
         method.maxStack = 2;
         method.maxLocals = 0;
         node.methods.add(method);
+    }
+
+
+    @Test
+    void saplingFeatureMethodsRewriteToTailAdapters() {
+        String owner = "net/neoforged/neoforge/event/level/BlockGrowFeatureEvent";
+        String randomSource = "net/minecraft/util/RandomSource";
+        String holder = "net/minecraft/core/Holder";
+        String resourceKey = "net/minecraft/resources/ResourceKey";
+        List<Expected> expected = List.of(
+                new Expected(owner, "getRandomSource", "()L" + randomSource + ";",
+                        "(L" + owner + ";)L" + randomSource + ";"),
+                new Expected(owner, "setFeature", "(L" + holder + ";)V",
+                        "(L" + owner + ";L" + holder + ";)V"),
+                new Expected(owner, "setFeature", "(L" + resourceKey + ";)V",
+                        "(L" + owner + ";L" + resourceKey + ";)V")
+        );
+
+        ClassNode node = new ClassNode();
+        node.version = Opcodes.V21;
+        node.name = "test/SaplingFeatureCalls";
+        node.superName = "java/lang/Object";
+        for (int i = 0; i < expected.size(); i++) addCall(node, expected.get(i), i);
+
+        assertEquals(expected.size(), ForgeApiRewrites1201.apply(node));
+
+        List<MethodInsnNode> calls = new ArrayList<>();
+        for (MethodNode method : node.methods) {
+            for (var instruction : method.instructions) {
+                if (instruction instanceof MethodInsnNode call) calls.add(call);
+            }
+        }
+        assertEquals(expected.size(), calls.size());
+        List<String> helperNames = List.of("blockGrowGetRandom", "blockGrowSetFeature", "blockGrowSetFeatureKey");
+        for (int i = 0; i < expected.size(); i++) {
+            MethodInsnNode call = calls.get(i);
+            assertEquals(Opcodes.INVOKESTATIC, call.getOpcode());
+            assertEquals(ForgeApiRewrites1201.TAIL, call.owner);
+            assertEquals(helperNames.get(i), call.name);
+            assertEquals(expected.get(i).helperDescriptor(), call.desc);
+        }
     }
 
     @Test
