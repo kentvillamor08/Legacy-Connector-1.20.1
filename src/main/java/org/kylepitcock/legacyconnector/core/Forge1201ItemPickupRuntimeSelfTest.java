@@ -133,7 +133,7 @@ public final class Forge1201ItemPickupRuntimeSelfTest {
                 require(scenario.legacyDecisionCount == 1, "legacy decision count was " + scenario.legacyDecisionCount);
             });
 
-            runCase(failures, listeners, player, "partial insertion reports only the transferred delta", () -> {
+            runCase(failures, listeners, player, "partial insertion that returns false retains remainder and skips success notifications", () -> {
                 fillMainInventory(player.getInventory(), Items.DIAMOND, 64);
                 player.getInventory().setItem(0, new ItemStack(Items.GOLD_INGOT, 63));
                 Scenario scenario = new Scenario();
@@ -142,9 +142,10 @@ public final class Forge1201ItemPickupRuntimeSelfTest {
 
                 require(count(player.getInventory(), Items.GOLD_INGOT) == 64, "inventory gold count was " + count(player.getInventory(), Items.GOLD_INGOT));
                 require(item.getItem().getCount() == 9, "item remainder was " + item.getItem().getCount());
-                require(scenario.nativePostCount == 1, "native Post count was " + scenario.nativePostCount);
-                require(scenario.legacyNotificationCount == 1, "legacy notification count was " + scenario.legacyNotificationCount);
-                require(scenario.notificationStackCount == 1, "notification delta was " + scenario.notificationStackCount);
+                require(scenario.nativePostCount == 0, "native Post fired after partial insertion returned false");
+                require(scenario.legacyNotificationCount == 0, "legacy notification fired after partial insertion returned false");
+                require(scenario.order.equals(List.of("native-pre", "legacy-decision")),
+                        "unexpected partial-failure order " + scenario.order);
             });
 
             runCase(failures, listeners, player, "legacy listener pickup-delay mutation remains visible to native gate", () -> {
