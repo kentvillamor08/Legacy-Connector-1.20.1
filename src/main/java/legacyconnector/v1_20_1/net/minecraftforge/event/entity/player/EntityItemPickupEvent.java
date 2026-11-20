@@ -17,7 +17,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
  * event. Only cancellation vetoes pickup; {@code ALLOW} skips inventory
  * insertion after Forge's pickup-delay and target checks.</p>
  */
-@HasResult
+@Event$HasResult
 public class EntityItemPickupEvent extends PlayerEvent
         implements ICancellableEvent, Forge1201EventCompat, Forge1201CancelableEventMarker {
     private final ItemEntity item;
