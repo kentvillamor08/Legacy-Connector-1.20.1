@@ -110,14 +110,13 @@ class Forge1201EventResultCompatibilityTest {
 
     @Test
     void fluidSourceResultProjectsToNativeBooleanWithoutLosingDefault() {
-        var event = new net.neoforged.neoforge.event.level.block.CreateFluidSourceEvent(
-                null, BlockPos.ZERO, Blocks.AIR.defaultBlockState());
-        ForgeApi1201.eventSetResult(event, Event$Result.ALLOW);
-        assertEquals(true, event.canConvert());
-        assertSame(Event$Result.ALLOW, ForgeApi1201.eventGetResult(event));
-        ForgeApi1201.eventSetResult(event, Event$Result.DENY);
-        assertEquals(false, event.canConvert());
-        assertSame(Event$Result.DENY, ForgeApi1201.eventGetResult(event));
+        assertEquals(true, ForgeApi1201.fluidSourceValue(true, Event$Result.ALLOW));
+        assertEquals(true, ForgeApi1201.fluidSourceValue(false, Event$Result.ALLOW));
+        assertEquals(false, ForgeApi1201.fluidSourceValue(true, Event$Result.DENY));
+        assertEquals(false, ForgeApi1201.fluidSourceValue(false, Event$Result.DENY));
+        assertEquals(true, ForgeApi1201.fluidSourceValue(true, Event$Result.DEFAULT));
+        assertEquals(false, ForgeApi1201.fluidSourceValue(false, Event$Result.DEFAULT));
+        assertEquals(false, ForgeApi1201.fluidSourceValue(true, null));
     }
 
     @Test
