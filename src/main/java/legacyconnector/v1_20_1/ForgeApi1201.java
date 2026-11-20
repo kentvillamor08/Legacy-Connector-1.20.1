@@ -526,11 +526,17 @@ public final class ForgeApi1201 {
                 : legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DENY;
     }
 
+    static boolean fluidSourceValue(
+            boolean vanillaResult,
+            legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result) {
+        return result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW
+                || (result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT && vanillaResult);
+    }
+
     private static boolean fluidSourceValue(
             net.neoforged.neoforge.event.level.block.CreateFluidSourceEvent event,
             legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result) {
-        return result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW
-                || (result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT && event.getVanillaResult());
+        return fluidSourceValue(event.getVanillaResult(), result);
     }
 
     /** Bridges Forge Event.Result to the native, event-specific NeoForge result contracts where available. */
