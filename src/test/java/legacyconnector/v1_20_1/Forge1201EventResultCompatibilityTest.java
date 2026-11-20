@@ -68,15 +68,15 @@ class Forge1201EventResultCompatibilityTest {
     void entityItemPickupShimPreservesIndependentForgeResultAndCancelableContracts() {
         var event = new EntityItemPickupEvent(null, null);
 
-        assertSame(Result.DEFAULT, event.getResult());
-        assertSame(Result.DEFAULT, ForgeApi1201.eventGetResult(event));
+        assertSame(Event$Result.DEFAULT, event.getResult());
+        assertSame(Event$Result.DEFAULT, ForgeApi1201.eventGetResult(event));
         assertTrue(event.hasResult());
         assertTrue(ForgeApi1201.eventHasResult(event));
         assertTrue(ForgeApi1201.eventIsCancelable(event));
         assertFalse(ForgeApi1201.eventIsCanceled(event));
 
         // The source Event#setResult call sites are rewritten through these helpers.
-        for (Result result : List.of(Result.DEFAULT, Result.DENY, Result.ALLOW)) {
+        for (Event$Result result : List.of(Event$Result.DEFAULT, Event$Result.DENY, Event$Result.ALLOW)) {
             ForgeApi1201.eventSetResult(event, result);
             assertSame(result, event.getResult());
             assertSame(result, ForgeApi1201.eventGetResult(event));
@@ -85,16 +85,16 @@ class Forge1201EventResultCompatibilityTest {
         }
 
         // Direct compatibility methods and rewritten helper calls share the same event state.
-        event.setResult(Result.DENY);
-        assertSame(Result.DENY, ForgeApi1201.eventGetResult(event));
+        event.setResult(Event$Result.DENY);
+        assertSame(Event$Result.DENY, ForgeApi1201.eventGetResult(event));
         event.setCanceled(true);
         assertTrue(ForgeApi1201.eventIsCanceled(event));
         assertTrue(event.isCanceled());
-        assertSame(Result.DENY, ForgeApi1201.eventGetResult(event));
+        assertSame(Event$Result.DENY, ForgeApi1201.eventGetResult(event));
 
         ForgeApi1201.eventSetCanceled(event, false);
         assertFalse(ForgeApi1201.eventIsCanceled(event));
-        assertSame(Result.DENY, ForgeApi1201.eventGetResult(event));
+        assertSame(Event$Result.DENY, ForgeApi1201.eventGetResult(event));
     }
 
     @Test
