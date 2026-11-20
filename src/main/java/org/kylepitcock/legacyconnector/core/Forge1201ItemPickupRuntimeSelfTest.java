@@ -297,7 +297,7 @@ public final class Forge1201ItemPickupRuntimeSelfTest {
 
     private static final class Scenario {
         private TriState nativePre;
-        private Result legacyResult = Event$Result.DEFAULT;
+        private Event$Result legacyResult = Event$Result.DEFAULT;
         private boolean cancelLegacyDecision;
         private Integer mutatePickupDelay;
         private UUID mutateTarget;
