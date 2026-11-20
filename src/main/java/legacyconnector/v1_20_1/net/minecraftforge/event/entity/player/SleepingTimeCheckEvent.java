@@ -6,7 +6,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Player;
 import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 
-/** Forge 1.20.1's "may the player sleep at this time of day" event; posted from NeoForge's {@code CanContinueSleepingEvent} (ALLOW or DENY decides). */
+/** Forge 1.20.1's result-only check for whether a player may sleep at the current time of day. */
+@legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$HasResult
 public class SleepingTimeCheckEvent extends PlayerEvent {
     private final Optional<BlockPos> sleepingLocation;
     private Event$Result result = Event$Result.DEFAULT;
