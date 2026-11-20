@@ -13,7 +13,7 @@ class Forge1201EventResultCompatibilityTest {
     @Test
     void sourceResultFacadePreservesForgeConstantOrder() {
         assertEquals(List.of("DENY", "DEFAULT", "ALLOW"),
-                Arrays.stream(Result.values()).map(Result::name).toList());
+                Arrays.stream(Event$Result.values()).map(Event$Result::name).toList());
     }
 
     @Test
@@ -21,35 +21,35 @@ class Forge1201EventResultCompatibilityTest {
         Object first = new Object();
         Object second = new Object();
 
-        assertSame(Result.DEFAULT, ForgeApi1201.eventGetResult(first));
-        assertSame(Result.DEFAULT, ForgeApi1201.eventGetResult(second));
+        assertSame(Event$Result.DEFAULT, ForgeApi1201.eventGetResult(first));
+        assertSame(Event$Result.DEFAULT, ForgeApi1201.eventGetResult(second));
 
-        ForgeApi1201.eventSetResult(first, Result.DENY);
-        ForgeApi1201.eventSetResult(second, Result.ALLOW);
+        ForgeApi1201.eventSetResult(first, Event$Result.DENY);
+        ForgeApi1201.eventSetResult(second, Event$Result.ALLOW);
 
-        assertSame(Result.DENY, ForgeApi1201.eventGetResult(first));
-        assertSame(Result.ALLOW, ForgeApi1201.eventGetResult(second));
+        assertSame(Event$Result.DENY, ForgeApi1201.eventGetResult(first));
+        assertSame(Event$Result.ALLOW, ForgeApi1201.eventGetResult(second));
     }
 
     @Test
     void forgeResultMapsToTriStateByNamedValues() {
-        assertSame(TriState.FALSE, ForgeApi1201.toTri(Result.DENY));
-        assertSame(TriState.DEFAULT, ForgeApi1201.toTri(Result.DEFAULT));
-        assertSame(TriState.TRUE, ForgeApi1201.toTri(Result.ALLOW));
+        assertSame(TriState.FALSE, ForgeApi1201.toTri(Event$Result.DENY));
+        assertSame(TriState.DEFAULT, ForgeApi1201.toTri(Event$Result.DEFAULT));
+        assertSame(TriState.TRUE, ForgeApi1201.toTri(Event$Result.ALLOW));
 
-        assertSame(TriState.FALSE, ForgeApiTail1201.toTri(Result.DENY));
-        assertSame(TriState.DEFAULT, ForgeApiTail1201.toTri(Result.DEFAULT));
-        assertSame(TriState.TRUE, ForgeApiTail1201.toTri(Result.ALLOW));
+        assertSame(TriState.FALSE, ForgeApiTail1201.toTri(Event$Result.DENY));
+        assertSame(TriState.DEFAULT, ForgeApiTail1201.toTri(Event$Result.DEFAULT));
+        assertSame(TriState.TRUE, ForgeApiTail1201.toTri(Event$Result.ALLOW));
     }
 
     @Test
     void triStateMapsBackToForgeResultByNamedValues() {
-        assertSame(Result.DENY, ForgeApi1201.fromTri(TriState.FALSE));
-        assertSame(Result.DEFAULT, ForgeApi1201.fromTri(TriState.DEFAULT));
-        assertSame(Result.ALLOW, ForgeApi1201.fromTri(TriState.TRUE));
+        assertSame(Event$Result.DENY, ForgeApi1201.fromTri(TriState.FALSE));
+        assertSame(Event$Result.DEFAULT, ForgeApi1201.fromTri(TriState.DEFAULT));
+        assertSame(Event$Result.ALLOW, ForgeApi1201.fromTri(TriState.TRUE));
 
-        assertSame(Result.DENY, ForgeApiTail1201.fromTri(TriState.FALSE));
-        assertSame(Result.DEFAULT, ForgeApiTail1201.fromTri(TriState.DEFAULT));
-        assertSame(Result.ALLOW, ForgeApiTail1201.fromTri(TriState.TRUE));
+        assertSame(Event$Result.DENY, ForgeApiTail1201.fromTri(TriState.FALSE));
+        assertSame(Event$Result.DEFAULT, ForgeApiTail1201.fromTri(TriState.DEFAULT));
+        assertSame(Event$Result.ALLOW, ForgeApiTail1201.fromTri(TriState.TRUE));
     }
 }
