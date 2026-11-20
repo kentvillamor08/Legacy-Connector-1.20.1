@@ -62,6 +62,10 @@ public final class SilentFailureChecks {
         if (Boolean.getBoolean("legacyconnector.itemPickupBehaviorSelfTest")) {
             check("pickup: ItemEntity.playerTouch transaction behavior", () -> Forge1201ItemPickupRuntimeSelfTest.run(testLevel));
         }
+        if (Boolean.getBoolean("legacyconnector.bucketFillBehaviorSelfTest")) {
+            check("bucket: BucketItem.use FillBucketEvent transaction behavior",
+                    () -> Forge1201BucketFillRuntimeSelfTest.run(testLevel));
+        }
         LOG.info("SILENT FAILURE CHECKS: {} passed, {} failed", passed, failures.size());
         for (String f : failures) LOG.error("SILENT FAILURE CHECK FAILED: {}", f);
         if (Boolean.getBoolean("legacyconnector.selfTestFailFast") && !failures.isEmpty()) {
