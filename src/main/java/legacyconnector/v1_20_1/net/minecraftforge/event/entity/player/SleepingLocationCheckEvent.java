@@ -6,9 +6,10 @@ import net.minecraft.world.entity.LivingEntity;
 import net.neoforged.neoforge.event.entity.living.LivingEvent;
 
 /**
- * Forge 1.20.1's "is the entity's sleeping position still valid" event (mods let players sleep on hammocks and sleeping bags). Posted from NeoForge's
- * {@code CanContinueSleepingEvent}; ALLOW keeps the entity asleep, DENY wakes it.
+ * Forge 1.20.1's result-only check that an entity's current sleeping position remains valid.
+ * ALLOW accepts the position, DENY rejects it, and DEFAULT retains the target bed-state result.
  */
+@legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$HasResult
 public class SleepingLocationCheckEvent extends LivingEvent {
     private final BlockPos sleepingLocation;
     private Event$Result result = Event$Result.DEFAULT;
