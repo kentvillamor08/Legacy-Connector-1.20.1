@@ -684,7 +684,8 @@ public final class ForgeApi1201 {
     }
 
     public static boolean eventIsCancelable(Object event) {
-        return event instanceof net.neoforged.bus.api.ICancellableEvent;
+        java.util.Objects.requireNonNull(event, "event");
+        return sourceEventIsCancelable(event);
     }
 
     // ---- registries ---------------------------------------------------------------------------------------------------------
