@@ -13,11 +13,14 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result;
 import legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.EntityItemPickupEvent;
+import legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.FillBucketEvent;
 import net.neoforged.neoforge.common.util.TriState;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -151,6 +154,67 @@ class Forge1201EventResultCompatibilityTest {
         ForgeApi1201.eventSetCanceled(event, false);
         assertFalse(ForgeApi1201.eventIsCanceled(event));
         assertSame(Event$Result.DENY, ForgeApi1201.eventGetResult(event));
+    }
+
+    @Test
+    void fillBucketShimPreservesIndependentForgeResultAndCancelableContracts() {
+        var event = new FillBucketEvent(null, new ItemStack(Items.BUCKET), null, null);
+
+        assertSame(Event$Result.DEFAULT, event.getResult());
+        assertSame(Event$Result.DEFAULT, ForgeApi1201.eventGetResult(event));
+        assertTrue(event.hasResult());
+        assertTrue(ForgeApi1201.eventHasResult(event));
+        assertTrue(ForgeApi1201.eventIsCancelable(event));
+        assertFalse(ForgeApi1201.eventIsCanceled(event));
+
+        for (Event$Result result : List.of(Event$Result.DEFAULT, Event$Result.DENY, Event$Result.ALLOW)) {
+            ForgeApi1201.eventSetResult(event, result);
+            assertSame(result, event.getResult());
+            assertSame(result, ForgeApi1201.eventGetResult(event));
+            assertFalse(ForgeApi1201.eventIsCanceled(event),
+                    "FillBucketEvent.Result must not implicitly cancel the event");
+        }
+
+        ForgeApi1201.eventSetCanceled(event, true);
+        assertTrue(ForgeApi1201.eventIsCanceled(event));
+        assertSame(Event$Result.ALLOW, ForgeApi1201.eventGetResult(event));
+        ForgeApi1201.eventSetCanceled(event, false);
+        assertFalse(ForgeApi1201.eventIsCanceled(event));
+        assertSame(Event$Result.ALLOW, ForgeApi1201.eventGetResult(event));
+    }
+
+    @Test
+    void fillBucketFactoryPostsEventAndKeepsDefaultAndDenyOnVanillaPath() {
+        record Directive(Event$Result result, boolean canceled) {}
+
+        var bus = net.neoforged.bus.api.BusBuilder.builder().build();
+        var next = new AtomicReference<Directive>();
+        var posts = new AtomicInteger();
+        bus.addListener(FillBucketEvent.class, event -> {
+            posts.incrementAndGet();
+            Directive directive = next.getAndSet(null);
+            if (directive == null) return;
+            event.setResult(directive.result());
+            if (directive.canceled()) event.setCanceled(true);
+        });
+
+        for (Event$Result result : List.of(Event$Result.DEFAULT, Event$Result.DENY)) {
+            next.set(new Directive(result, false));
+            assertNull(ForgeApiTail1201.onBucketUse(
+                    bus, null, null, new ItemStack(Items.BUCKET), null),
+                    "result=" + result + " must defer to vanilla BucketItem behavior");
+            assertNull(next.get(), "the event bus should consume the probe directive");
+        }
+
+        next.set(new Directive(Event$Result.ALLOW, true));
+        ItemStack heldBucket = new ItemStack(Items.BUCKET);
+        InteractionResultHolder<ItemStack> canceled = ForgeApiTail1201.onBucketUse(
+                bus, null, null, heldBucket, null);
+        assertNotNull(canceled);
+        assertSame(net.minecraft.world.InteractionResult.FAIL, canceled.getResult());
+        assertSame(heldBucket, canceled.getObject());
+        assertNull(next.get(), "the event bus should consume the cancellation directive");
+        assertEquals(3, posts.get(), "every invocation must post one FillBucketEvent");
     }
 
     @Test

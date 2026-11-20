@@ -564,6 +564,10 @@ public final class ForgeApi1201 {
             pickup.setResult(result);
             return;
         }
+        if (event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.FillBucketEvent fillBucket) {
+            fillBucket.setResult(result);
+            return;
+        }
         if (event instanceof net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable e) {
             e.setResult(mobEffectResult(result));
             return;
@@ -629,6 +633,9 @@ public final class ForgeApi1201 {
         java.util.Objects.requireNonNull(event, "event");
         if (event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.EntityItemPickupEvent pickup) {
             return pickup.getResult();
+        }
+        if (event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.FillBucketEvent fillBucket) {
+            return fillBucket.getResult();
         }
         if (event instanceof net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable e) {
             return resultFromMobEffect(e.getResult());

@@ -428,10 +428,55 @@ public final class ForgeApiTail1201 {
         eventBus.post(event);
     }
 
-    /** Forge's bucket event could replace the result; no handler means null (the vanilla use goes on). */
-    public static net.minecraft.world.InteractionResultHolder<net.minecraft.world.item.ItemStack> onBucketUse(net.minecraft.world.entity.player.Player player,
-            net.minecraft.world.level.Level level, net.minecraft.world.item.ItemStack stack, net.minecraft.world.phys.HitResult target) {
-        return null;
+    /**
+     * Forge's FillBucketEvent runs after the view ray trace and before BucketItem
+     * handles MISS/BLOCK results. A null return preserves the native NeoForge path.
+     */
+    public static net.minecraft.world.InteractionResultHolder<net.minecraft.world.item.ItemStack> onBucketUse(
+            net.minecraft.world.entity.player.Player player,
+            net.minecraft.world.level.Level level,
+            net.minecraft.world.item.ItemStack stack,
+            net.minecraft.world.phys.HitResult target) {
+        return onBucketUse(net.neoforged.neoforge.common.NeoForge.EVENT_BUS, player, level, stack, target);
+    }
+
+    /** Package-private bus seam for isolated result/cancellation contract tests. */
+    static net.minecraft.world.InteractionResultHolder<net.minecraft.world.item.ItemStack> onBucketUse(
+            net.neoforged.bus.api.IEventBus eventBus,
+            net.minecraft.world.entity.player.Player player,
+            net.minecraft.world.level.Level level,
+            net.minecraft.world.item.ItemStack stack,
+            net.minecraft.world.phys.HitResult target) {
+        var event = new legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.FillBucketEvent(
+                player, stack, level, target);
+        eventBus.post(event);
+
+        if (event.isCanceled()) {
+            return new net.minecraft.world.InteractionResultHolder<>(
+                    net.minecraft.world.InteractionResult.FAIL, stack);
+        }
+        if (event.getResult()
+                != legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW) {
+            return null;
+        }
+
+        if (player.getAbilities().instabuild) {
+            return new net.minecraft.world.InteractionResultHolder<>(
+                    net.minecraft.world.InteractionResult.SUCCESS, stack);
+        }
+
+        stack.shrink(1);
+        if (stack.isEmpty()) {
+            return new net.minecraft.world.InteractionResultHolder<>(
+                    net.minecraft.world.InteractionResult.SUCCESS, event.getFilledBucket());
+        }
+
+        net.minecraft.world.item.ItemStack filledBucket = event.getFilledBucket();
+        if (!player.getInventory().add(filledBucket)) {
+            player.drop(filledBucket, false);
+        }
+        return new net.minecraft.world.InteractionResultHolder<>(
+                net.minecraft.world.InteractionResult.SUCCESS, stack);
     }
 
     /** Brewing recipes are registered through RegisterBrewingRecipesEvent now; recipes added the old way are accepted and not brewed. */

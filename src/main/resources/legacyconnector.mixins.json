@@ -26,6 +26,7 @@
     "EntityTypeLegacySpawnNbtMixin",
     "ItemStackLegacyNbtMixin",
     "ItemEntityForge1201PickupMixin",
+    "BucketItemForge1201FillBucketMixin",
     "MobBucketItemLegacyNbtMixin",
     "PlayerLegacyEnchantmentDamageMixin",
     "JigsawStructureLegacyVillageMixin",
