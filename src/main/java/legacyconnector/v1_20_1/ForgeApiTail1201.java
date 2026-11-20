@@ -479,6 +479,72 @@ public final class ForgeApiTail1201 {
                 net.minecraft.world.InteractionResult.SUCCESS, stack);
     }
 
+    /**
+     * Forge 1.20.1's sleeping-location result check. The default bed-state check is
+     * evaluated after listeners run, matching ForgeEventFactory.fireSleepingLocationCheck.
+     */
+    public static boolean onSleepingLocationCheck(
+            net.minecraft.world.entity.LivingEntity sleeper,
+            net.minecraft.core.BlockPos sleepingLocation) {
+        return onSleepingLocationCheck(
+                net.neoforged.neoforge.common.NeoForge.EVENT_BUS, sleeper, sleepingLocation);
+    }
+
+    /** Package-private bus seam for deterministic result and event-context tests. */
+    static boolean onSleepingLocationCheck(
+            net.neoforged.bus.api.IEventBus eventBus,
+            net.minecraft.world.entity.LivingEntity sleeper,
+            net.minecraft.core.BlockPos sleepingLocation) {
+        var event = new legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.SleepingLocationCheckEvent(
+                sleeper, sleepingLocation);
+        eventBus.post(event);
+
+        var result = event.getResult();
+        if (result != legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT) {
+            return sleepingCheckResult(result, false);
+        }
+
+        return sleeper.getSleepingPos()
+                .map(pos -> sleeper.level().getBlockState(pos).isBed(sleeper.level(), pos, sleeper))
+                .orElse(false);
+    }
+
+    /**
+     * Forge 1.20.1's time-of-day result check. DEFAULT is evaluated after listeners run,
+     * so changes to the level's day state made by a listener retain the source behavior.
+     */
+    public static boolean onSleepingTimeCheck(
+            net.minecraft.world.entity.player.Player player,
+            java.util.Optional<net.minecraft.core.BlockPos> sleepingLocation) {
+        return onSleepingTimeCheck(
+                net.neoforged.neoforge.common.NeoForge.EVENT_BUS, player, sleepingLocation);
+    }
+
+    /** Package-private bus seam for deterministic result and event-context tests. */
+    static boolean onSleepingTimeCheck(
+            net.neoforged.bus.api.IEventBus eventBus,
+            net.minecraft.world.entity.player.Player player,
+            java.util.Optional<net.minecraft.core.BlockPos> sleepingLocation) {
+        var event = new legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.SleepingTimeCheckEvent(
+                player, sleepingLocation);
+        eventBus.post(event);
+
+        var result = event.getResult();
+        if (result != legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT) {
+            return sleepingCheckResult(result, false);
+        }
+        return !player.level().isDay();
+    }
+
+    /** Applies Forge's three-state result to a vanilla fallback; null behaves like a non-ALLOW result. */
+    static boolean sleepingCheckResult(
+            legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result,
+            boolean vanillaResult) {
+        return result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW
+                || (result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT
+                        && vanillaResult);
+    }
+
     /** Brewing recipes are registered through RegisterBrewingRecipesEvent now; recipes added the old way are accepted and not brewed. */
     public static boolean brewAddRecipe(net.minecraft.world.item.crafting.Ingredient ingredient, net.minecraft.world.item.crafting.Ingredient input, net.minecraft.world.item.ItemStack output) {
         return true;
