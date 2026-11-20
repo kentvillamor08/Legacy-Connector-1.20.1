@@ -85,6 +85,30 @@ class Forge1201EventResultCompatibilityTest {
     }
 
     @Test
+    void cropGrowResultUsesNativeNamedResultValues() {
+        var event = new net.neoforged.neoforge.event.level.block.CropGrowEvent.Pre(
+                null, BlockPos.ZERO, Blocks.WHEAT.defaultBlockState());
+        ForgeApi1201.eventSetResult(event, Event$Result.DENY);
+        assertEquals(net.neoforged.neoforge.event.level.block.CropGrowEvent.Pre.Result.DO_NOT_GROW, event.getResult());
+        assertSame(Event$Result.DENY, ForgeApi1201.eventGetResult(event));
+        ForgeApi1201.eventSetResult(event, Event$Result.ALLOW);
+        assertEquals(net.neoforged.neoforge.event.level.block.CropGrowEvent.Pre.Result.GROW, event.getResult());
+        assertSame(Event$Result.ALLOW, ForgeApi1201.eventGetResult(event));
+    }
+
+    @Test
+    void fluidSourceResultProjectsToNativeBooleanWithoutLosingDefault() {
+        var event = new net.neoforged.neoforge.event.level.block.CreateFluidSourceEvent(
+                null, BlockPos.ZERO, Blocks.AIR.defaultBlockState());
+        ForgeApi1201.eventSetResult(event, Event$Result.ALLOW);
+        assertEquals(true, event.canConvert());
+        assertSame(Event$Result.ALLOW, ForgeApi1201.eventGetResult(event));
+        ForgeApi1201.eventSetResult(event, Event$Result.DENY);
+        assertEquals(false, event.canConvert());
+        assertSame(Event$Result.DENY, ForgeApi1201.eventGetResult(event));
+    }
+
+    @Test
     void criticalHitResultProjectsToCriticalHitFlagWithoutCancellation() {
         var event = new net.neoforged.neoforge.event.entity.player.CriticalHitEvent(null, null, 1.0F, false);
         ForgeApi1201.eventSetResult(event, Event$Result.ALLOW);

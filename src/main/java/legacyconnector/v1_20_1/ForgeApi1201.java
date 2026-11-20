@@ -358,13 +358,16 @@ public final class ForgeApi1201 {
      */
     private static final java.util.Set<String> NATIVE_HAS_RESULT_EVENT_TYPES = java.util.Set.of(
             "net.neoforged.neoforge.event.entity.EntityMobGriefingEvent",
+            "net.neoforged.neoforge.event.entity.living.MobDespawnEvent",
             "net.neoforged.neoforge.event.entity.living.MobEffectEvent$Applicable",
             "net.neoforged.neoforge.event.entity.living.MobSpawnEvent$SpawnPlacementCheck",
             "net.neoforged.neoforge.event.entity.living.MobSpawnEvent$PositionCheck",
             "net.neoforged.neoforge.event.entity.player.BonemealEvent",
             "net.neoforged.neoforge.event.entity.player.CriticalHitEvent",
             "net.neoforged.neoforge.event.entity.player.PlayerSpawnPhantomsEvent",
-            "net.neoforged.neoforge.event.level.BlockGrowFeatureEvent"
+            "net.neoforged.neoforge.event.level.BlockGrowFeatureEvent",
+            "net.neoforged.neoforge.event.level.block.CreateFluidSourceEvent",
+            "net.neoforged.neoforge.event.level.block.CropGrowEvent$Pre"
     );
 
     private record BooleanEventResultState(
@@ -467,6 +470,68 @@ public final class ForgeApi1201 {
         };
     }
 
+    private static legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result resultFromMobDespawn(
+            net.neoforged.neoforge.event.entity.living.MobDespawnEvent.Result result) {
+        if (result == null) return null;
+        return switch (result) {
+            case ALLOW -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW;
+            case DEFAULT -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT;
+            case DENY -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DENY;
+        };
+    }
+
+    private static net.neoforged.neoforge.event.entity.living.MobDespawnEvent.Result mobDespawnResult(
+            legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result) {
+        if (result == null) return null;
+        return switch (result) {
+            case ALLOW -> net.neoforged.neoforge.event.entity.living.MobDespawnEvent.Result.ALLOW;
+            case DEFAULT -> net.neoforged.neoforge.event.entity.living.MobDespawnEvent.Result.DEFAULT;
+            case DENY -> net.neoforged.neoforge.event.entity.living.MobDespawnEvent.Result.DENY;
+        };
+    }
+
+    private static legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result resultFromCropGrow(
+            net.neoforged.neoforge.event.level.block.CropGrowEvent.Pre.Result result) {
+        if (result == null) return null;
+        return switch (result) {
+            case GROW -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW;
+            case DEFAULT -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT;
+            case DO_NOT_GROW -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DENY;
+        };
+    }
+
+    private static net.neoforged.neoforge.event.level.block.CropGrowEvent.Pre.Result cropGrowResult(
+            legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result) {
+        if (result == null) return null;
+        return switch (result) {
+            case ALLOW -> net.neoforged.neoforge.event.level.block.CropGrowEvent.Pre.Result.GROW;
+            case DEFAULT -> net.neoforged.neoforge.event.level.block.CropGrowEvent.Pre.Result.DEFAULT;
+            case DENY -> net.neoforged.neoforge.event.level.block.CropGrowEvent.Pre.Result.DO_NOT_GROW;
+        };
+    }
+
+    private static legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result resultFromFluidSource(
+            net.neoforged.neoforge.event.level.block.CreateFluidSourceEvent event) {
+        if (hasStoredEventResult(event)) {
+            Object stored = RESULTS.get(event);
+            if (stored instanceof BooleanEventResultState state && event.canConvert() == state.projectedValue()) {
+                return state.sourceResult();
+            }
+        }
+        if (event.canConvert() == event.getVanillaResult()) {
+            return legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT;
+        }
+        return event.canConvert() ? legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW
+                : legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DENY;
+    }
+
+    private static boolean fluidSourceValue(
+            net.neoforged.neoforge.event.level.block.CreateFluidSourceEvent event,
+            legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result) {
+        return result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW
+                || (result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT && event.getVanillaResult());
+    }
+
     /** Bridges Forge Event.Result to the native, event-specific NeoForge result contracts where available. */
     public static void eventSetResult(Object event, legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result) {
         java.util.Objects.requireNonNull(event, "event");
@@ -486,6 +551,26 @@ public final class ForgeApi1201 {
             e.setResult(phantomSpawnResult(result));
             return;
         }
+        if (event instanceof net.neoforged.neoforge.event.entity.living.MobDespawnEvent e) {
+            e.setResult(mobDespawnResult(result));
+            return;
+        }
+        if (event instanceof net.neoforged.neoforge.event.level.block.CropGrowEvent.Pre e) {
+            e.setResult(cropGrowResult(result));
+            return;
+        }
+        if (event instanceof net.neoforged.neoforge.event.level.block.CreateFluidSourceEvent e) {
+            boolean value = fluidSourceValue(e, result);
+            e.setCanConvert(value);
+            RESULTS.put(event, new BooleanEventResultState(result, value));
+            return;
+        }
+        if (event instanceof net.neoforged.neoforge.event.level.BlockGrowFeatureEvent e) {
+            ForgeApiTail1201.blockGrowSetResult(e, result);
+            storeEventResult(event, result);
+            return;
+        }
+
         if (event instanceof net.neoforged.neoforge.event.entity.EntityMobGriefingEvent e) {
             boolean value = result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW
                     || (result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT && e.isMobGriefingEnabled());
@@ -520,6 +605,16 @@ public final class ForgeApi1201 {
         if (event instanceof net.neoforged.neoforge.event.entity.player.PlayerSpawnPhantomsEvent e) {
             return resultFromPhantomSpawn(e.getResult());
         }
+        if (event instanceof net.neoforged.neoforge.event.entity.living.MobDespawnEvent e) {
+            return resultFromMobDespawn(e.getResult());
+        }
+        if (event instanceof net.neoforged.neoforge.event.level.block.CropGrowEvent.Pre e) {
+            return resultFromCropGrow(e.getResult());
+        }
+        if (event instanceof net.neoforged.neoforge.event.level.block.CreateFluidSourceEvent e) {
+            return resultFromFluidSource(e);
+        }
+
         if (event instanceof net.neoforged.neoforge.event.entity.EntityMobGriefingEvent e) {
             if (hasStoredEventResult(event)) {
                 Object stored = RESULTS.get(event);

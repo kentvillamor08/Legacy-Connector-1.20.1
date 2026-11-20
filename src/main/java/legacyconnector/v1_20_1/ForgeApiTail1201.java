@@ -198,6 +198,68 @@ public final class ForgeApiTail1201 {
         interactSetCancellationResult((net.neoforged.neoforge.event.entity.player.PlayerInteractEvent) e, result);
     }
 
+    // ---- sapling growth result projection
+
+    private static final Object NULL_BLOCK_GROW_FEATURE = new Object();
+    private static final java.util.Map<Object, Object> BLOCK_GROW_FEATURE_OVERRIDES =
+            new com.google.common.collect.MapMaker().weakKeys().makeMap();
+
+    private static void rememberBlockGrowFeature(
+            net.neoforged.neoforge.event.level.BlockGrowFeatureEvent event,
+            net.minecraft.core.Holder<net.minecraft.world.level.levelgen.feature.ConfiguredFeature<?, ?>> feature) {
+        BLOCK_GROW_FEATURE_OVERRIDES.put(event, feature == null ? NULL_BLOCK_GROW_FEATURE : feature);
+    }
+
+    private static void restoreBlockGrowFeature(
+            net.neoforged.neoforge.event.level.BlockGrowFeatureEvent event) {
+        if (!BLOCK_GROW_FEATURE_OVERRIDES.containsKey(event)) return;
+        Object feature = BLOCK_GROW_FEATURE_OVERRIDES.remove(event);
+        @SuppressWarnings("unchecked")
+        net.minecraft.core.Holder<net.minecraft.world.level.levelgen.feature.ConfiguredFeature<?, ?>> restored =
+                feature == NULL_BLOCK_GROW_FEATURE ? null
+                        : (net.minecraft.core.Holder<net.minecraft.world.level.levelgen.feature.ConfiguredFeature<?, ?>>) feature;
+        event.setFeature(restored);
+    }
+
+    public static void blockGrowSetResult(
+            net.neoforged.neoforge.event.level.BlockGrowFeatureEvent event,
+            legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result) {
+        if (result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DENY) {
+            if (!BLOCK_GROW_FEATURE_OVERRIDES.containsKey(event)) rememberBlockGrowFeature(event, event.getFeature());
+            event.setFeature(null);
+        } else {
+            restoreBlockGrowFeature(event);
+        }
+    }
+
+    /** Keep a later legacy setFeature call effective while a prior DENY result is pending. */
+    public static void blockGrowSetFeature(
+            net.neoforged.neoforge.event.level.BlockGrowFeatureEvent event,
+            net.minecraft.core.Holder<net.minecraft.world.level.levelgen.feature.ConfiguredFeature<?, ?>> feature) {
+        if (BLOCK_GROW_FEATURE_OVERRIDES.containsKey(event)) {
+            rememberBlockGrowFeature(event, feature);
+            event.setFeature(null);
+        } else {
+            event.setFeature(feature);
+        }
+    }
+
+    /** ResourceKey overload mirrors the source API and preserves a pending DENY. */
+    public static void blockGrowSetFeatureKey(
+            net.neoforged.neoforge.event.level.BlockGrowFeatureEvent event,
+            net.minecraft.resources.ResourceKey<net.minecraft.world.level.levelgen.feature.ConfiguredFeature<?, ?>> feature) {
+        event.setFeature(feature);
+        if (BLOCK_GROW_FEATURE_OVERRIDES.containsKey(event)) {
+            rememberBlockGrowFeature(event, event.getFeature());
+            event.setFeature(null);
+        }
+    }
+
+    public static net.minecraft.util.RandomSource blockGrowGetRandom(
+            net.neoforged.neoforge.event.level.BlockGrowFeatureEvent event) {
+        return event.getRandom();
+    }
+
     // ---- attributes
 
     private static net.minecraft.core.Holder<net.minecraft.world.entity.ai.attributes.Attribute> holder(net.minecraft.world.entity.ai.attributes.Attribute a) {
