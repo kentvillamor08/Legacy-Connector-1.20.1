@@ -350,20 +350,212 @@ public final class ForgeApi1201 {
         return event instanceof net.neoforged.bus.api.ICancellableEvent c && c.isCanceled();
     }
 
+    private static final Object NULL_EVENT_RESULT = new Object();
     private static final java.util.Map<Object, Object> RESULTS = new com.google.common.collect.MapMaker().weakKeys().makeMap();
 
-    /** Forge's {@code Event.setResult}: kept per event object; the events the layer posts itself read it, NeoForge's own events have their own result types. */
+    /**
+     * NeoForge does not retain the source Forge @HasResult marker on these mapped event classes.
+     */
+    private static final java.util.Set<String> NATIVE_HAS_RESULT_EVENT_TYPES = java.util.Set.of(
+            "net.neoforged.neoforge.event.entity.EntityMobGriefingEvent",
+            "net.neoforged.neoforge.event.entity.living.MobEffectEvent$Applicable",
+            "net.neoforged.neoforge.event.entity.living.MobSpawnEvent$SpawnPlacementCheck",
+            "net.neoforged.neoforge.event.entity.living.MobSpawnEvent$PositionCheck",
+            "net.neoforged.neoforge.event.entity.player.BonemealEvent",
+            "net.neoforged.neoforge.event.entity.player.CriticalHitEvent",
+            "net.neoforged.neoforge.event.entity.player.PlayerSpawnPhantomsEvent",
+            "net.neoforged.neoforge.event.level.BlockGrowFeatureEvent"
+    );
+
+    private record BooleanEventResultState(
+            legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result sourceResult,
+            boolean projectedValue) {}
+
+    private static void storeEventResult(
+            Object event, legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result) {
+        RESULTS.put(event, result == null ? NULL_EVENT_RESULT : result);
+    }
+
+    private static boolean hasStoredEventResult(Object event) {
+        return RESULTS.containsKey(event);
+    }
+
+    private static legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result storedEventResult(Object event) {
+        Object value = RESULTS.get(event);
+        if (value == NULL_EVENT_RESULT) return null;
+        if (value instanceof BooleanEventResultState state) return state.sourceResult();
+        return (legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result) value;
+    }
+
+    private static legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result resultFromMobEffect(
+            net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable.Result result) {
+        if (result == null) return null;
+        return switch (result) {
+            case APPLY -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW;
+            case DEFAULT -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT;
+            case DO_NOT_APPLY -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DENY;
+        };
+    }
+
+    private static net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable.Result mobEffectResult(
+            legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result) {
+        if (result == null) return null;
+        return switch (result) {
+            case ALLOW -> net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable.Result.APPLY;
+            case DEFAULT -> net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable.Result.DEFAULT;
+            case DENY -> net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable.Result.DO_NOT_APPLY;
+        };
+    }
+
+    private static legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result resultFromSpawnCheck(
+            net.neoforged.neoforge.event.entity.living.MobSpawnEvent.SpawnPlacementCheck.Result result) {
+        if (result == null) return null;
+        return switch (result) {
+            case SUCCEED -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW;
+            case DEFAULT -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT;
+            case FAIL -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DENY;
+        };
+    }
+
+    private static net.neoforged.neoforge.event.entity.living.MobSpawnEvent.SpawnPlacementCheck.Result spawnCheckResult(
+            legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result) {
+        if (result == null) return null;
+        return switch (result) {
+            case ALLOW -> net.neoforged.neoforge.event.entity.living.MobSpawnEvent.SpawnPlacementCheck.Result.SUCCEED;
+            case DEFAULT -> net.neoforged.neoforge.event.entity.living.MobSpawnEvent.SpawnPlacementCheck.Result.DEFAULT;
+            case DENY -> net.neoforged.neoforge.event.entity.living.MobSpawnEvent.SpawnPlacementCheck.Result.FAIL;
+        };
+    }
+
+    private static legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result resultFromPositionCheck(
+            net.neoforged.neoforge.event.entity.living.MobSpawnEvent.PositionCheck.Result result) {
+        if (result == null) return null;
+        return switch (result) {
+            case SUCCEED -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW;
+            case DEFAULT -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT;
+            case FAIL -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DENY;
+        };
+    }
+
+    private static net.neoforged.neoforge.event.entity.living.MobSpawnEvent.PositionCheck.Result positionCheckResult(
+            legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result) {
+        if (result == null) return null;
+        return switch (result) {
+            case ALLOW -> net.neoforged.neoforge.event.entity.living.MobSpawnEvent.PositionCheck.Result.SUCCEED;
+            case DEFAULT -> net.neoforged.neoforge.event.entity.living.MobSpawnEvent.PositionCheck.Result.DEFAULT;
+            case DENY -> net.neoforged.neoforge.event.entity.living.MobSpawnEvent.PositionCheck.Result.FAIL;
+        };
+    }
+
+    private static legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result resultFromPhantomSpawn(
+            net.neoforged.neoforge.event.entity.player.PlayerSpawnPhantomsEvent.Result result) {
+        if (result == null) return null;
+        return switch (result) {
+            case ALLOW -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW;
+            case DEFAULT -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT;
+            case DENY -> legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DENY;
+        };
+    }
+
+    private static net.neoforged.neoforge.event.entity.player.PlayerSpawnPhantomsEvent.Result phantomSpawnResult(
+            legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result) {
+        if (result == null) return null;
+        return switch (result) {
+            case ALLOW -> net.neoforged.neoforge.event.entity.player.PlayerSpawnPhantomsEvent.Result.ALLOW;
+            case DEFAULT -> net.neoforged.neoforge.event.entity.player.PlayerSpawnPhantomsEvent.Result.DEFAULT;
+            case DENY -> net.neoforged.neoforge.event.entity.player.PlayerSpawnPhantomsEvent.Result.DENY;
+        };
+    }
+
+    /** Bridges Forge Event.Result to the native, event-specific NeoForge result contracts where available. */
     public static void eventSetResult(Object event, legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result) {
-        RESULTS.put(event, result);
+        java.util.Objects.requireNonNull(event, "event");
+        if (event instanceof net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable e) {
+            e.setResult(mobEffectResult(result));
+            return;
+        }
+        if (event instanceof net.neoforged.neoforge.event.entity.living.MobSpawnEvent.SpawnPlacementCheck e) {
+            e.setResult(spawnCheckResult(result));
+            return;
+        }
+        if (event instanceof net.neoforged.neoforge.event.entity.living.MobSpawnEvent.PositionCheck e) {
+            e.setResult(positionCheckResult(result));
+            return;
+        }
+        if (event instanceof net.neoforged.neoforge.event.entity.player.PlayerSpawnPhantomsEvent e) {
+            e.setResult(phantomSpawnResult(result));
+            return;
+        }
+        if (event instanceof net.neoforged.neoforge.event.entity.EntityMobGriefingEvent e) {
+            boolean value = result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW
+                    || (result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT && e.isMobGriefingEnabled());
+            e.setCanGrief(value);
+            RESULTS.put(event, new BooleanEventResultState(result, value));
+            return;
+        }
+        if (event instanceof net.neoforged.neoforge.event.entity.player.CriticalHitEvent e) {
+            boolean value = result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW
+                    || (result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT && e.isVanillaCritical());
+            e.setCriticalHit(value);
+            RESULTS.put(event, new BooleanEventResultState(result, value));
+            return;
+        }
+        // BonemealEvent and BlockGrowFeatureEvent lack an equivalent three-state API.
+        // Preserve these values without altering target cancellation/listener-dispatch state.
+        storeEventResult(event, result);
     }
 
+    /** Reads the event-specific target result, converting by explicit enum names. */
     public static legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result eventGetResult(Object event) {
-        Object r = RESULTS.get(event);
-        return r == null ? legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT : (legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result) r;
+        java.util.Objects.requireNonNull(event, "event");
+        if (event instanceof net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable e) {
+            return resultFromMobEffect(e.getResult());
+        }
+        if (event instanceof net.neoforged.neoforge.event.entity.living.MobSpawnEvent.SpawnPlacementCheck e) {
+            return resultFromSpawnCheck(e.getResult());
+        }
+        if (event instanceof net.neoforged.neoforge.event.entity.living.MobSpawnEvent.PositionCheck e) {
+            return resultFromPositionCheck(e.getResult());
+        }
+        if (event instanceof net.neoforged.neoforge.event.entity.player.PlayerSpawnPhantomsEvent e) {
+            return resultFromPhantomSpawn(e.getResult());
+        }
+        if (event instanceof net.neoforged.neoforge.event.entity.EntityMobGriefingEvent e) {
+            if (hasStoredEventResult(event)) {
+                Object stored = RESULTS.get(event);
+                if (stored instanceof BooleanEventResultState state && e.canGrief() == state.projectedValue()) return state.sourceResult();
+            }
+            if (e.canGrief() == e.isMobGriefingEnabled()) return legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT;
+            return e.canGrief() ? legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW
+                    : legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DENY;
+        }
+        if (event instanceof net.neoforged.neoforge.event.entity.player.CriticalHitEvent e) {
+            if (hasStoredEventResult(event)) {
+                Object stored = RESULTS.get(event);
+                if (stored instanceof BooleanEventResultState state && e.isCriticalHit() == state.projectedValue()) return state.sourceResult();
+            }
+            if (e.isCriticalHit() == e.isVanillaCritical()) return legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT;
+            return e.isCriticalHit() ? legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW
+                    : legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DENY;
+        }
+        if (hasStoredEventResult(event)) return storedEventResult(event);
+        if (event instanceof net.neoforged.neoforge.event.entity.player.BonemealEvent e && e.isCanceled() && e.isSuccessful()) {
+            return legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW;
+        }
+        return legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DEFAULT;
     }
 
+    /**
+     * Recreates Forge's runtime @HasResult query. Transformed custom event classes carry
+     * the runtime annotation shim; mapped NeoForge event classes are recognized explicitly.
+     */
     public static boolean eventHasResult(Object event) {
-        return true;
+        java.util.Objects.requireNonNull(event, "event");
+        for (Class<?> type = event.getClass(); type != null && type != net.neoforged.bus.api.Event.class; type = type.getSuperclass()) {
+            if (type.isAnnotationPresent(legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$HasResult.class)
+                    || NATIVE_HAS_RESULT_EVENT_TYPES.contains(type.getName())) return true;
+        }
+        return false;
     }
 
     public static boolean eventIsCancelable(Object event) {

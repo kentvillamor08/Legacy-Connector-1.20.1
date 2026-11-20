@@ -279,11 +279,20 @@ public final class ForgeApiTail1201 {
     public static int onApplyBonemeal(net.minecraft.world.entity.player.Player player, net.minecraft.world.level.Level level, net.minecraft.core.BlockPos pos,
             net.minecraft.world.level.block.state.BlockState state, net.minecraft.world.item.ItemStack stack) {
         var event = net.neoforged.neoforge.event.EventHooks.fireBonemealEvent(player, level, pos, state, stack);
-        if (event.isCanceled()) return -1;
-        if (event.isSuccessful()) {
-            stack.shrink(1);
+        if (event.isCanceled()) {
+            if (event.isSuccessful()) {
+                if (!level.isClientSide) stack.shrink(1);
+                return 1;
+            }
+            return -1;
+        }
+        legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result = ForgeApi1201.eventGetResult(event);
+        if (result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW) {
+            if (!level.isClientSide) stack.shrink(1);
             return 1;
         }
+        // DENY means the legacy handler took the interaction without applying bonemeal;
+        // DEFAULT delegates to the block's normal bonemeal logic.
         return 0;
     }
 

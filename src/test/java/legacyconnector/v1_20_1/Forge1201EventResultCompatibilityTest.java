@@ -5,11 +5,114 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 
 import java.util.Arrays;
 import java.util.List;
+import net.minecraft.core.BlockPos;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.Blocks;
 import legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result;
 import net.neoforged.neoforge.common.util.TriState;
 import org.junit.jupiter.api.Test;
 
 class Forge1201EventResultCompatibilityTest {
+    @legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$HasResult
+    private static class AnnotatedEvent extends net.neoforged.bus.api.Event {}
+
+    private static class InheritedAnnotatedEvent extends AnnotatedEvent {}
+
+    private static class PlainEvent extends net.neoforged.bus.api.Event {}
+
+    @Test
+    void hasResultUsesRuntimeAnnotationAndSuperclassSearch() {
+        assertEquals(true, ForgeApi1201.eventHasResult(new AnnotatedEvent()));
+        assertEquals(true, ForgeApi1201.eventHasResult(new InheritedAnnotatedEvent()));
+        assertEquals(false, ForgeApi1201.eventHasResult(new PlainEvent()));
+        assertEquals(false, ForgeApi1201.eventHasResult(new Object()));
+    }
+
+    @Test
+    void mappedNativeResultEventsExposeForgeHasResultSemantics() {
+        var applicable = new net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable(null, null, null);
+        var placement = new net.neoforged.neoforge.event.entity.living.MobSpawnEvent.SpawnPlacementCheck(
+                null, null, null, BlockPos.ZERO, RandomSource.create(), true);
+        var phantoms = new net.neoforged.neoforge.event.entity.player.PlayerSpawnPhantomsEvent(null, 2);
+        var critical = new net.neoforged.neoforge.event.entity.player.CriticalHitEvent(null, null, 1.0F, false);
+        var bonemeal = new net.neoforged.neoforge.event.entity.player.BonemealEvent(
+                null, null, BlockPos.ZERO, Blocks.AIR.defaultBlockState(), ItemStack.EMPTY);
+        var sapling = new net.neoforged.neoforge.event.level.BlockGrowFeatureEvent(null, RandomSource.create(), BlockPos.ZERO, null);
+
+        assertEquals(true, ForgeApi1201.eventHasResult(applicable));
+        assertEquals(true, ForgeApi1201.eventHasResult(placement));
+        assertEquals(true, ForgeApi1201.eventHasResult(phantoms));
+        assertEquals(true, ForgeApi1201.eventHasResult(critical));
+        assertEquals(true, ForgeApi1201.eventHasResult(bonemeal));
+        assertEquals(true, ForgeApi1201.eventHasResult(sapling));
+    }
+
+    @Test
+    void mobEffectResultUsesNativeNamedResultValues() {
+        var event = new net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable(null, null, null);
+        ForgeApi1201.eventSetResult(event, Event$Result.DENY);
+        assertEquals(net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable.Result.DO_NOT_APPLY, event.getResult());
+        assertSame(Event$Result.DENY, ForgeApi1201.eventGetResult(event));
+        ForgeApi1201.eventSetResult(event, Event$Result.ALLOW);
+        assertEquals(net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable.Result.APPLY, event.getResult());
+        assertSame(Event$Result.ALLOW, ForgeApi1201.eventGetResult(event));
+    }
+
+    @Test
+    void mobSpawnPlacementResultUsesNativeNamedResultValues() {
+        var event = new net.neoforged.neoforge.event.entity.living.MobSpawnEvent.SpawnPlacementCheck(
+                null, null, null, BlockPos.ZERO, RandomSource.create(), true);
+        ForgeApi1201.eventSetResult(event, Event$Result.DENY);
+        assertEquals(net.neoforged.neoforge.event.entity.living.MobSpawnEvent.SpawnPlacementCheck.Result.FAIL, event.getResult());
+        assertEquals(false, event.getPlacementCheckResult());
+        assertSame(Event$Result.DENY, ForgeApi1201.eventGetResult(event));
+        ForgeApi1201.eventSetResult(event, Event$Result.ALLOW);
+        assertEquals(net.neoforged.neoforge.event.entity.living.MobSpawnEvent.SpawnPlacementCheck.Result.SUCCEED, event.getResult());
+        assertEquals(true, event.getPlacementCheckResult());
+        assertSame(Event$Result.ALLOW, ForgeApi1201.eventGetResult(event));
+    }
+
+    @Test
+    void phantomSpawnResultUsesNativeNamedResultValues() {
+        var event = new net.neoforged.neoforge.event.entity.player.PlayerSpawnPhantomsEvent(null, 2);
+        ForgeApi1201.eventSetResult(event, Event$Result.DENY);
+        assertEquals(net.neoforged.neoforge.event.entity.player.PlayerSpawnPhantomsEvent.Result.DENY, event.getResult());
+        assertSame(Event$Result.DENY, ForgeApi1201.eventGetResult(event));
+        ForgeApi1201.eventSetResult(event, Event$Result.ALLOW);
+        assertEquals(net.neoforged.neoforge.event.entity.player.PlayerSpawnPhantomsEvent.Result.ALLOW, event.getResult());
+        assertSame(Event$Result.ALLOW, ForgeApi1201.eventGetResult(event));
+    }
+
+    @Test
+    void criticalHitResultProjectsToCriticalHitFlagWithoutCancellation() {
+        var event = new net.neoforged.neoforge.event.entity.player.CriticalHitEvent(null, null, 1.0F, false);
+        ForgeApi1201.eventSetResult(event, Event$Result.ALLOW);
+        assertEquals(true, event.isCriticalHit());
+        assertEquals(false, event.isVanillaCritical());
+        assertSame(Event$Result.ALLOW, ForgeApi1201.eventGetResult(event));
+        ForgeApi1201.eventSetResult(event, Event$Result.DENY);
+        assertEquals(false, event.isCriticalHit());
+        assertSame(Event$Result.DENY, ForgeApi1201.eventGetResult(event));
+    }
+
+    @Test
+    void bonemealResultIsStoredSeparatelyFromTargetCancellation() {
+        var event = new net.neoforged.neoforge.event.entity.player.BonemealEvent(
+                null, null, BlockPos.ZERO, Blocks.AIR.defaultBlockState(), ItemStack.EMPTY);
+        ForgeApi1201.eventSetResult(event, Event$Result.ALLOW);
+        assertEquals(false, event.isCanceled());
+        assertSame(Event$Result.ALLOW, ForgeApi1201.eventGetResult(event));
+    }
+
+    @Test
+    void saplingResultIsStoredSeparatelyFromTargetCancellation() {
+        var event = new net.neoforged.neoforge.event.level.BlockGrowFeatureEvent(null, RandomSource.create(), BlockPos.ZERO, null);
+        ForgeApi1201.eventSetResult(event, Event$Result.DENY);
+        assertEquals(false, event.isCanceled());
+        assertSame(Event$Result.DENY, ForgeApi1201.eventGetResult(event));
+    }
+
     @Test
     void sourceResultFacadePreservesForgeConstantOrder() {
         assertEquals(List.of("DENY", "DEFAULT", "ALLOW"),
