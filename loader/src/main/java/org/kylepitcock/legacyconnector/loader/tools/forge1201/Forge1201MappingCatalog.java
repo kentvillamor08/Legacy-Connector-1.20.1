@@ -86,7 +86,8 @@ public final class Forge1201MappingCatalog {
             Map.entry("net/minecraftforge/network/PacketDistributor", "legacyconnector/v1_20_1/net/minecraftforge/network/PacketDistributor"),
             Map.entry("net/minecraftforge/network/PacketDistributor$PacketTarget", "legacyconnector/v1_20_1/net/minecraftforge/network/PacketDistributor$PacketTarget"),
             Map.entry("net/minecraftforge/network/simple/SimpleChannel", "legacyconnector/v1_20_1/net/minecraftforge/network/simple/SimpleChannel"),
-            Map.entry("net/minecraftforge/network/simple/SimpleChannel$MessageBuilder", "legacyconnector/v1_20_1/net/minecraftforge/network/simple/SimpleChannel$MessageBuilder")
+            Map.entry("net/minecraftforge/network/simple/SimpleChannel$MessageBuilder", "legacyconnector/v1_20_1/net/minecraftforge/network/simple/SimpleChannel$MessageBuilder"),
+            Map.entry("net/minecraftforge/event/entity/player/PlayerEvent$ItemPickupEvent", "legacyconnector/v1_20_1/net/minecraftforge/event/entity/player/PlayerEvent$ItemPickupEvent")
     );
 
     /**

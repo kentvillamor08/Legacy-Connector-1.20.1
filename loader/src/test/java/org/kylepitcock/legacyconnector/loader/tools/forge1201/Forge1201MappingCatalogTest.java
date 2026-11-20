@@ -124,7 +124,8 @@ final class Forge1201MappingCatalogTest {
                 java.util.Map.entry("net/minecraftforge/network/PacketDistributor", "legacyconnector/v1_20_1/net/minecraftforge/network/PacketDistributor"),
                 java.util.Map.entry("net/minecraftforge/network/PacketDistributor$PacketTarget", "legacyconnector/v1_20_1/net/minecraftforge/network/PacketDistributor$PacketTarget"),
                 java.util.Map.entry("net/minecraftforge/network/simple/SimpleChannel", "legacyconnector/v1_20_1/net/minecraftforge/network/simple/SimpleChannel"),
-                java.util.Map.entry("net/minecraftforge/network/simple/SimpleChannel$MessageBuilder", "legacyconnector/v1_20_1/net/minecraftforge/network/simple/SimpleChannel$MessageBuilder")
+                java.util.Map.entry("net/minecraftforge/network/simple/SimpleChannel$MessageBuilder", "legacyconnector/v1_20_1/net/minecraftforge/network/simple/SimpleChannel$MessageBuilder"),
+                java.util.Map.entry("net/minecraftforge/event/entity/player/PlayerEvent$ItemPickupEvent", "legacyconnector/v1_20_1/net/minecraftforge/event/entity/player/PlayerEvent$ItemPickupEvent")
         );
 
         assertEquals(replacements, Forge1201MappingCatalog.explicitTypeReplacements());
@@ -137,9 +138,20 @@ final class Forge1201MappingCatalogTest {
             assertNull(Forge1201MappingCatalog.manualAdapterReason(source), source);
         });
 
-        assertEquals(15, replacements.size());
+        assertEquals(16, replacements.size());
         org.junit.jupiter.api.Assertions.assertFalse(
                 Forge1201MappingCatalog.isNeoForgeRelocationTarget("java/util/function/Supplier"));
+    }
+
+    @Test
+    void mapsForgePlayerItemPickupNotificationToItsOwnLegacyShim() {
+        var decision = Forge1201MappingCatalog.classify(
+                "net/minecraftforge/event/entity/player/PlayerEvent$ItemPickupEvent");
+
+        assertEquals(Forge1201MappingCatalog.Kind.EXPLICIT_TYPE_REPLACEMENT, decision.kind());
+        assertEquals(
+                "legacyconnector/v1_20_1/net/minecraftforge/event/entity/player/PlayerEvent$ItemPickupEvent",
+                decision.targetInternalName());
     }
 
     @Test
