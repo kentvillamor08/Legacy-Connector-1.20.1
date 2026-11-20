@@ -30,7 +30,10 @@ class ForgeApiRewrites1201Test {
                 null);
         method.instructions.add(new InsnNode(Opcodes.ACONST_NULL));
         boolean getter = expected.name().startsWith("get");
-        if (!getter) method.instructions.add(new InsnNode(Opcodes.ACONST_NULL));
+        if (!getter) {
+            method.instructions.add(new InsnNode(expected.descriptor().equals("(I)V")
+                    ? Opcodes.ICONST_1 : Opcodes.ACONST_NULL));
+        }
         method.instructions.add(new MethodInsnNode(
                 Opcodes.INVOKEVIRTUAL,
                 expected.owner(),
@@ -76,6 +79,38 @@ class ForgeApiRewrites1201Test {
         }
         assertEquals(expected.size(), calls.size());
         List<String> helperNames = List.of("blockGrowGetRandom", "blockGrowSetFeature", "blockGrowSetFeatureKey");
+        for (int i = 0; i < expected.size(); i++) {
+            MethodInsnNode call = calls.get(i);
+            assertEquals(Opcodes.INVOKESTATIC, call.getOpcode());
+            assertEquals(ForgeApiRewrites1201.TAIL, call.owner);
+            assertEquals(helperNames.get(i), call.name);
+            assertEquals(expected.get(i).helperDescriptor(), call.desc);
+        }
+    }
+
+    @Test
+    void legacyPackSizeAccessorsRewriteToTailAdapters() {
+        String owner = "net/neoforged/neoforge/event/entity/living/SpawnClusterSizeEvent";
+        List<Expected> expected = List.of(
+                new Expected(owner, "getMaxPackSize", "()I", "(L" + owner + ";)I"),
+                new Expected(owner, "setMaxPackSize", "(I)V", "(L" + owner + ";I)V")
+        );
+
+        ClassNode node = new ClassNode();
+        node.version = Opcodes.V21;
+        node.name = "test/LegacyPackSizeCalls";
+        node.superName = "java/lang/Object";
+        for (int i = 0; i < expected.size(); i++) addCall(node, expected.get(i), i);
+
+        assertEquals(expected.size(), ForgeApiRewrites1201.apply(node));
+        List<MethodInsnNode> calls = new ArrayList<>();
+        for (MethodNode method : node.methods) {
+            for (var instruction : method.instructions) {
+                if (instruction instanceof MethodInsnNode call) calls.add(call);
+            }
+        }
+        assertEquals(expected.size(), calls.size());
+        List<String> helperNames = List.of("livingPackSizeGetMax", "livingPackSizeSetMax");
         for (int i = 0; i < expected.size(); i++) {
             MethodInsnNode call = calls.get(i);
             assertEquals(Opcodes.INVOKESTATIC, call.getOpcode());

@@ -82,6 +82,8 @@ net/neoforged/neoforge/event/entity/player/PlayerInteractEvent$RightClickBlock.g
 net/neoforged/neoforge/event/entity/player/PlayerInteractEvent$RightClickBlock.setUseBlock(Llegacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result;)V	rightClickSetUseBlock
 net/neoforged/neoforge/event/entity/player/PlayerInteractEvent$RightClickBlock.setUseItem(Llegacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result;)V	rightClickSetUseItem
 # tail adapters (ForgeApiTail1201): events whose getters changed shape
+net/neoforged/neoforge/event/entity/living/SpawnClusterSizeEvent.getMaxPackSize()I	Tail.livingPackSizeGetMax
+net/neoforged/neoforge/event/entity/living/SpawnClusterSizeEvent.setMaxPackSize(I)V	Tail.livingPackSizeSetMax
 net/neoforged/neoforge/event/level/BlockGrowFeatureEvent.getRandomSource()Lnet/minecraft/util/RandomSource;	Tail.blockGrowGetRandom
 net/neoforged/neoforge/event/level/BlockGrowFeatureEvent.setFeature(Lnet/minecraft/core/Holder;)V	Tail.blockGrowSetFeature
 net/neoforged/neoforge/event/level/BlockGrowFeatureEvent.setFeature(Lnet/minecraft/resources/ResourceKey;)V	Tail.blockGrowSetFeatureKey

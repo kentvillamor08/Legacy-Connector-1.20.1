@@ -358,6 +358,7 @@ public final class ForgeApi1201 {
      */
     private static final java.util.Set<String> NATIVE_HAS_RESULT_EVENT_TYPES = java.util.Set.of(
             "net.neoforged.neoforge.event.entity.EntityMobGriefingEvent",
+            "net.neoforged.neoforge.event.entity.living.SpawnClusterSizeEvent",
             "net.neoforged.neoforge.event.entity.living.MobDespawnEvent",
             "net.neoforged.neoforge.event.entity.living.MobEffectEvent$Applicable",
             "net.neoforged.neoforge.event.entity.living.MobSpawnEvent$SpawnPlacementCheck",
@@ -549,6 +550,11 @@ public final class ForgeApi1201 {
         }
         if (event instanceof net.neoforged.neoforge.event.entity.player.PlayerSpawnPhantomsEvent e) {
             e.setResult(phantomSpawnResult(result));
+            return;
+        }
+        if (event instanceof net.neoforged.neoforge.event.entity.living.SpawnClusterSizeEvent e) {
+            storeEventResult(event, result);
+            ForgeApiTail1201.spawnClusterSetResult(e, result);
             return;
         }
         if (event instanceof net.neoforged.neoforge.event.entity.living.MobDespawnEvent e) {

@@ -260,6 +260,35 @@ public final class ForgeApiTail1201 {
         return event.getRandom();
     }
 
+    // ---- legacy LivingPackSizeEvent projection
+
+    private static final java.util.Map<Object, Integer> LEGACY_MAX_PACK_SIZES =
+            new com.google.common.collect.MapMaker().weakKeys().makeMap();
+
+    public static int livingPackSizeGetMax(
+            net.neoforged.neoforge.event.entity.living.SpawnClusterSizeEvent event) {
+        return LEGACY_MAX_PACK_SIZES.getOrDefault(event, 0);
+    }
+
+    public static void livingPackSizeSetMax(
+            net.neoforged.neoforge.event.entity.living.SpawnClusterSizeEvent event, int size) {
+        LEGACY_MAX_PACK_SIZES.put(event, size);
+        if (ForgeApi1201.eventGetResult(event)
+                == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW) {
+            event.setSize(size);
+        }
+    }
+
+    public static void spawnClusterSetResult(
+            net.neoforged.neoforge.event.entity.living.SpawnClusterSizeEvent event,
+            legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result) {
+        if (result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW) {
+            event.setSize(livingPackSizeGetMax(event));
+        } else {
+            event.setSize(event.getEntity().getMaxSpawnClusterSize());
+        }
+    }
+
     // ---- attributes
 
     private static net.minecraft.core.Holder<net.minecraft.world.entity.ai.attributes.Attribute> holder(net.minecraft.world.entity.ai.attributes.Attribute a) {
@@ -353,8 +382,7 @@ public final class ForgeApiTail1201 {
             if (!level.isClientSide) stack.shrink(1);
             return 1;
         }
-        // DENY means the legacy handler took the interaction without applying bonemeal;
-        // DEFAULT delegates to the block's normal bonemeal logic.
+        // In Forge's hook, only ALLOW is special; DEFAULT and DENY both return zero here.
         return 0;
     }
 

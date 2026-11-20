@@ -207,6 +207,7 @@ net/minecraftforge/event/entity/living/MobEffectEvent$Added	net/neoforged/neofor
 net/minecraftforge/event/entity/living/MobEffectEvent$Applicable	net/neoforged/neoforge/event/entity/living/MobEffectEvent$Applicable
 net/minecraftforge/event/entity/living/MobEffectEvent$Expired	net/neoforged/neoforge/event/entity/living/MobEffectEvent$Expired
 net/minecraftforge/event/entity/living/MobEffectEvent$Remove	net/neoforged/neoforge/event/entity/living/MobEffectEvent$Remove
+net/minecraftforge/event/entity/living/LivingPackSizeEvent	net/neoforged/neoforge/event/entity/living/SpawnClusterSizeEvent
 net/minecraftforge/event/entity/living/MobSpawnEvent	net/neoforged/neoforge/event/entity/living/MobSpawnEvent
 net/minecraftforge/event/entity/living/MobSpawnEvent$PositionCheck	net/neoforged/neoforge/event/entity/living/MobSpawnEvent$PositionCheck
 net/minecraftforge/event/entity/living/MobSpawnEvent$SpawnPlacementCheck	net/neoforged/neoforge/event/entity/living/MobSpawnEvent$SpawnPlacementCheck
