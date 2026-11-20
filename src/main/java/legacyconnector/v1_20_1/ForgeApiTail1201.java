@@ -226,7 +226,7 @@ public final class ForgeApiTail1201 {
             legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result) {
         if (result == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.DENY) {
             if (!BLOCK_GROW_FEATURE_OVERRIDES.containsKey(event)) rememberBlockGrowFeature(event, event.getFeature());
-            event.setFeature(null);
+            event.setFeature((net.minecraft.core.Holder<net.minecraft.world.level.levelgen.feature.ConfiguredFeature<?, ?>>) null);
         } else {
             restoreBlockGrowFeature(event);
         }
@@ -238,7 +238,7 @@ public final class ForgeApiTail1201 {
             net.minecraft.core.Holder<net.minecraft.world.level.levelgen.feature.ConfiguredFeature<?, ?>> feature) {
         if (BLOCK_GROW_FEATURE_OVERRIDES.containsKey(event)) {
             rememberBlockGrowFeature(event, feature);
-            event.setFeature(null);
+            event.setFeature((net.minecraft.core.Holder<net.minecraft.world.level.levelgen.feature.ConfiguredFeature<?, ?>>) null);
         } else {
             event.setFeature(feature);
         }
@@ -251,7 +251,7 @@ public final class ForgeApiTail1201 {
         event.setFeature(feature);
         if (BLOCK_GROW_FEATURE_OVERRIDES.containsKey(event)) {
             rememberBlockGrowFeature(event, event.getFeature());
-            event.setFeature(null);
+            event.setFeature((net.minecraft.core.Holder<net.minecraft.world.level.levelgen.feature.ConfiguredFeature<?, ?>>) null);
         }
     }
 
