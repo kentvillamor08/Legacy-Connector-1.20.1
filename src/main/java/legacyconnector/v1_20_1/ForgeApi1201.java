@@ -348,6 +348,10 @@ public final class ForgeApi1201 {
      * even though the source event is not. Keep that exact source contract at rewritten call sites.
      */
     private static boolean sourceEventIsCancelable(Object event) {
+        if (event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.SleepingLocationCheckEvent
+                || event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.SleepingTimeCheckEvent) {
+            return false;
+        }
         return event instanceof net.neoforged.bus.api.ICancellableEvent
                 && event.getClass() != net.neoforged.neoforge.event.level.BlockGrowFeatureEvent.class;
     }
