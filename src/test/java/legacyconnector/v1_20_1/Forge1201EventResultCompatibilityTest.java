@@ -21,6 +21,8 @@ import net.minecraft.world.level.block.Blocks;
 import legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result;
 import legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.EntityItemPickupEvent;
 import legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.FillBucketEvent;
+import legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.SleepingLocationCheckEvent;
+import legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.SleepingTimeCheckEvent;
 import net.neoforged.neoforge.common.util.TriState;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -215,6 +217,45 @@ class Forge1201EventResultCompatibilityTest {
         assertSame(heldBucket, canceled.getObject());
         assertNull(next.get(), "the event bus should consume the cancellation directive");
         assertEquals(3, posts.get(), "every invocation must post one FillBucketEvent");
+    }
+
+    @Test
+    void sleepingCheckShimsPreserveForgeHasResultAndNonCancelableContracts() {
+        var location = new SleepingLocationCheckEvent(null, BlockPos.ZERO);
+        var time = new SleepingTimeCheckEvent(null, java.util.Optional.empty());
+
+        assertSame(Event$Result.DEFAULT, location.getResult());
+        assertSame(Event$Result.DEFAULT, ForgeApi1201.eventGetResult(location));
+        assertTrue(location.hasResult());
+        assertTrue(ForgeApi1201.eventHasResult(location));
+        assertFalse(ForgeApi1201.eventIsCancelable(location));
+        assertFalse(ForgeApi1201.eventIsCanceled(location));
+
+        assertSame(Event$Result.DEFAULT, time.getResult());
+        assertSame(Event$Result.DEFAULT, ForgeApi1201.eventGetResult(time));
+        assertTrue(time.hasResult());
+        assertTrue(ForgeApi1201.eventHasResult(time));
+        assertFalse(ForgeApi1201.eventIsCancelable(time));
+        assertFalse(ForgeApi1201.eventIsCanceled(time));
+
+        for (Event$Result result : List.of(Event$Result.DEFAULT, Event$Result.DENY, Event$Result.ALLOW)) {
+            ForgeApi1201.eventSetResult(location, result);
+            assertSame(result, location.getResult());
+            assertSame(result, ForgeApi1201.eventGetResult(location));
+            assertFalse(ForgeApi1201.eventIsCanceled(location),
+                    "SleepingLocationCheckEvent results must not imply cancellation");
+
+            ForgeApi1201.eventSetResult(time, result);
+            assertSame(result, time.getResult());
+            assertSame(result, ForgeApi1201.eventGetResult(time));
+            assertFalse(ForgeApi1201.eventIsCanceled(time),
+                    "SleepingTimeCheckEvent results must not imply cancellation");
+        }
+
+        assertThrows(UnsupportedOperationException.class, () -> ForgeApi1201.eventSetCanceled(location, true));
+        assertThrows(UnsupportedOperationException.class, () -> ForgeApi1201.eventSetCanceled(time, true));
+        assertFalse(ForgeApi1201.eventIsCanceled(location));
+        assertFalse(ForgeApi1201.eventIsCanceled(time));
     }
 
     @Test
