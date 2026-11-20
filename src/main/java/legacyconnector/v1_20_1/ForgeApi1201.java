@@ -560,10 +560,6 @@ public final class ForgeApi1201 {
     /** Bridges Forge Event.Result to the native, event-specific NeoForge result contracts where available. */
     public static void eventSetResult(Object event, legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result result) {
         java.util.Objects.requireNonNull(event, "event");
-        if (event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.EntityItemPickupEvent pickup) {
-            pickup.setResult(result);
-            return;
-        }
         if (event instanceof net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable e) {
             e.setResult(mobEffectResult(result));
             return;
@@ -627,9 +623,6 @@ public final class ForgeApi1201 {
     /** Reads the event-specific target result, converting by explicit enum names. */
     public static legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result eventGetResult(Object event) {
         java.util.Objects.requireNonNull(event, "event");
-        if (event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.EntityItemPickupEvent pickup) {
-            return pickup.getResult();
-        }
         if (event instanceof net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable e) {
             return resultFromMobEffect(e.getResult());
         }

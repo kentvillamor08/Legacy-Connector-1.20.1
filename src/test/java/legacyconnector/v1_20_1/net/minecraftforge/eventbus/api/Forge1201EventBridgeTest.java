@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import net.neoforged.bus.api.Event;
 import net.neoforged.bus.api.ICancellableEvent;
-import legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.EntityItemPickupEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import org.junit.jupiter.api.Test;
 
@@ -24,25 +23,6 @@ final class Forge1201EventBridgeTest {
         assertTrue(Forge1201EventBridge.isKnownSourceCancelableBuiltinType(
                 PlayerInteractEvent.LeftClickBlock.class));
     }
-    @Test
-    void pickupShimSupportsTransformedForgeBaseEventCancellationCalls() {
-        var event = new EntityItemPickupEvent(null, null);
-
-        assertTrue(Forge1201EventBridge.isCancelable(event));
-        assertTrue(Forge1201EventBridge.baseIsCancelable(event));
-        assertFalse(Forge1201EventBridge.isCanceled(event));
-        assertFalse(Forge1201EventBridge.baseIsCanceled(event));
-
-        // These are the non-virtual bridge targets used for transformed Event super calls.
-        Forge1201EventBridge.baseSetCanceled(event, true);
-        assertTrue(Forge1201EventBridge.baseIsCanceled(event));
-        assertTrue(Forge1201EventBridge.isCanceled(event));
-
-        Forge1201EventBridge.baseSetCanceled(event, false);
-        assertFalse(Forge1201EventBridge.baseIsCanceled(event));
-        assertFalse(Forge1201EventBridge.isCanceled(event));
-    }
-
     @Test
     void plainEventRetainsFalseCancelabilityAndRejectsMutation() {
         PlainEvent event = new PlainEvent();

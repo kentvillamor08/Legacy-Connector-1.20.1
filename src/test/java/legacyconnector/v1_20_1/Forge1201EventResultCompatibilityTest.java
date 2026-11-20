@@ -68,6 +68,8 @@ class Forge1201EventResultCompatibilityTest {
     void entityItemPickupShimPreservesIndependentForgeResultAndCancelableContracts() {
         var event = new EntityItemPickupEvent(null, null);
 
+        assertSame(Result.DEFAULT, event.getResult());
+        assertSame(Result.DEFAULT, ForgeApi1201.eventGetResult(event));
         assertTrue(event.hasResult());
         assertTrue(ForgeApi1201.eventHasResult(event));
         assertTrue(ForgeApi1201.eventIsCancelable(event));
