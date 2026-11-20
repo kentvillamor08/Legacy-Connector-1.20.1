@@ -310,7 +310,7 @@ public final class Forge1201ItemPickupRuntimeSelfTest {
         private final List<String> order = new ArrayList<>();
     }
 
-    private static final class ProbeListeners {
+    public static final class ProbeListeners {
         private final Map<ItemEntity, Scenario> scenarios = new IdentityHashMap<>();
 
         @SubscribeEvent
