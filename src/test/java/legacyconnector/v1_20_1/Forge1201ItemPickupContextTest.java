@@ -64,6 +64,25 @@ class Forge1201ItemPickupContextTest {
     }
 
     @Test
+    void negativeEntryDelayStillDispatchesLegacyDecisionLikeForge() {
+        var context = new Forge1201ItemPickupContext(true, -1);
+        var calls = new AtomicInteger();
+
+        // Forge's outer source gate returns only when pickupDelay > 0.
+        // NeoForge's later DEFAULT gate still requires exactly zero; that gate
+        // remains in ItemEntity.playerTouch and is deliberately not rewritten here.
+        assertSame(TriState.DEFAULT, context.afterNativePre(TriState.DEFAULT, () -> {
+            calls.incrementAndGet();
+            return 0;
+        }));
+
+        assertEquals(1, calls.get());
+        assertTrue(context.wasLegacyDecisionDispatched());
+        assertFalse(context.shouldSkipInventoryAdd());
+        assertFalse(context.shouldSuppressNativePost());
+    }
+
+    @Test
     void legacyCancellationVetoesBothNativeDefaultAndNativeTrue() {
         for (TriState nativePre : new TriState[] {TriState.DEFAULT, TriState.TRUE}) {
             var context = new Forge1201ItemPickupContext(true, 0);
