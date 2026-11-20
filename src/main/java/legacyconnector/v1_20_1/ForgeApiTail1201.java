@@ -222,14 +222,6 @@ public final class ForgeApiTail1201 {
         return e.has((net.minecraft.world.entity.EntityType<? extends LivingEntity>) type, holder(attribute));
     }
 
-    public static void interactSetCancellationResult(net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.LeftClickBlock e,
-            net.minecraft.world.InteractionResult result) {
-    }
-
-    public static void interactSetCancellationResult(net.neoforged.neoforge.event.entity.player.PlayerInteractEvent.RightClickEmpty e,
-            net.minecraft.world.InteractionResult result) {
-    }
-
     // ---- fml event bus subscriber: Bus.bus() was a supplier of the bus
 
     public static java.util.function.Supplier<net.neoforged.bus.api.IEventBus> busBus(net.neoforged.fml.common.EventBusSubscriber.Bus bus) {
