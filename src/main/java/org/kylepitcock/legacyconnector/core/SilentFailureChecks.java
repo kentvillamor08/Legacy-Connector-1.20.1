@@ -55,11 +55,52 @@ public final class SilentFailureChecks {
         check("network: LegacyPayload encoding is idempotent", this::payloadIdempotent);
         check("registry: entity host ids match their registry keys", this::hostRegistryKeys);
         check("registry: non-vanilla blocks, items, sounds resolve", this::registrySanity);
+        if (Boolean.getBoolean("legacyconnector.itemPickupMixinSelfTest")) {
+            check("mixin target: ItemEntity.playerTouch class loads", this::itemEntityPickupMixinTarget);
+        }
         LOG.info("SILENT FAILURE CHECKS: {} passed, {} failed", passed, failures.size());
         for (String f : failures) LOG.error("SILENT FAILURE CHECK FAILED: {}", f);
         if (Boolean.getBoolean("legacyconnector.selfTestFailFast") && !failures.isEmpty()) {
             LOG.error("SILENT FAILURE CHECKS: legacyconnector.selfTestFailFast is set, halting the server");
             Runtime.getRuntime().halt(3);
+        }
+    }
+
+    /**
+     * Opt-in runtime probe for the Forge 1.20.1 pickup compatibility mixin.
+     *
+     * <p>Loading ItemEntity through the active game class loader forces the
+     * Mixin transformer to process the target class. Resolving playerTouch
+     * also verifies that the expected target method is present. Mixin's
+     * verbose/export diagnostics provide the separate bytecode-application
+     * evidence for the registered mixin and its required injection points.</p>
+     */
+    private List<String> itemEntityPickupMixinTarget() {
+        try {
+            ClassLoader loader = Thread.currentThread().getContextClassLoader();
+            if (loader == null) loader = SilentFailureChecks.class.getClassLoader();
+
+            Class<?> itemEntity = Class.forName(
+                    "net.minecraft.world.entity.item.ItemEntity",
+                    false,
+                    loader
+            );
+            Class<?> player = Class.forName(
+                    "net.minecraft.world.entity.player.Player",
+                    false,
+                    loader
+            );
+            var pickup = itemEntity.getDeclaredMethod("playerTouch", player);
+
+            LOG.info(
+                    "ItemEntity pickup mixin probe loaded {} with {} and resolved {}",
+                    itemEntity.getName(),
+                    itemEntity.getClassLoader(),
+                    pickup
+            );
+            return List.of();
+        } catch (ReflectiveOperationException ex) {
+            return List.of("could not load/resolve ItemEntity.playerTouch(Player): " + ex);
         }
     }
 
