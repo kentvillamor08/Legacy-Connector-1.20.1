@@ -259,6 +259,65 @@ class Forge1201EventResultCompatibilityTest {
     }
 
     @Test
+    void sleepingCheckResultProjectionPreservesForgeDefaultAllowAndDeny() {
+        assertTrue(ForgeApiTail1201.sleepingCheckResult(Event$Result.ALLOW, false));
+        assertTrue(ForgeApiTail1201.sleepingCheckResult(Event$Result.ALLOW, true));
+        assertFalse(ForgeApiTail1201.sleepingCheckResult(Event$Result.DENY, false));
+        assertFalse(ForgeApiTail1201.sleepingCheckResult(Event$Result.DENY, true));
+        assertTrue(ForgeApiTail1201.sleepingCheckResult(Event$Result.DEFAULT, true));
+        assertFalse(ForgeApiTail1201.sleepingCheckResult(Event$Result.DEFAULT, false));
+        assertFalse(ForgeApiTail1201.sleepingCheckResult(null, true));
+    }
+
+    @Test
+    void sleepingLocationAndTimeHelpersPostOnlyTheirOwnEventsAndPreserveContext() {
+        var bus = net.neoforged.bus.api.BusBuilder.builder().build();
+        var nextLocationResult = new AtomicReference<Event$Result>();
+        var nextTimeResult = new AtomicReference<Event$Result>();
+        var locationEvent = new AtomicReference<SleepingLocationCheckEvent>();
+        var timeEvent = new AtomicReference<SleepingTimeCheckEvent>();
+        var locationPosts = new AtomicInteger();
+        var timePosts = new AtomicInteger();
+
+        bus.addListener(SleepingLocationCheckEvent.class, event -> {
+            locationPosts.incrementAndGet();
+            locationEvent.set(event);
+            event.setResult(nextLocationResult.getAndSet(null));
+        });
+        bus.addListener(SleepingTimeCheckEvent.class, event -> {
+            timePosts.incrementAndGet();
+            timeEvent.set(event);
+            event.setResult(nextTimeResult.getAndSet(null));
+        });
+
+        BlockPos location = new BlockPos(2, 64, 3);
+        nextLocationResult.set(Event$Result.ALLOW);
+        assertTrue(ForgeApiTail1201.onSleepingLocationCheck(bus, null, location));
+        assertSame(location, locationEvent.get().getSleepingLocation());
+        assertEquals(1, locationPosts.get());
+        assertEquals(0, timePosts.get());
+
+        nextLocationResult.set(Event$Result.DENY);
+        assertFalse(ForgeApiTail1201.onSleepingLocationCheck(bus, null, BlockPos.ZERO));
+        assertEquals(2, locationPosts.get());
+        assertEquals(0, timePosts.get());
+
+        java.util.Optional<BlockPos> timeLocation = java.util.Optional.of(location);
+        nextTimeResult.set(Event$Result.DENY);
+        assertFalse(ForgeApiTail1201.onSleepingTimeCheck(bus, null, timeLocation));
+        assertSame(timeLocation, timeEvent.get().getSleepingLocation());
+        assertEquals(2, locationPosts.get());
+        assertEquals(1, timePosts.get());
+
+        java.util.Optional<BlockPos> noTimeLocation = java.util.Optional.empty();
+        nextTimeResult.set(Event$Result.ALLOW);
+        assertTrue(ForgeApiTail1201.onSleepingTimeCheck(bus, null, noTimeLocation));
+        assertSame(noTimeLocation, timeEvent.get().getSleepingLocation());
+        assertEquals(2, locationPosts.get());
+        assertEquals(2, timePosts.get());
+    }
+
+    @Test
     void mobEffectResultUsesNativeNamedResultValues() {
         var event = new net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable(null, null, null);
         ForgeApi1201.eventSetResult(event, Event$Result.DENY);
