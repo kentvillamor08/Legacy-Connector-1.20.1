@@ -11,9 +11,21 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
 import legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result;
 import net.neoforged.neoforge.common.util.TriState;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 class Forge1201EventResultCompatibilityTest {
+    @BeforeAll
+    static void bootstrapMinecraft() throws Exception {
+        var dist = net.neoforged.fml.loading.FMLLoader.class.getDeclaredField("dist");
+        dist.setAccessible(true);
+        dist.set(null, net.neoforged.api.distmarker.Dist.CLIENT);
+        net.neoforged.fml.loading.LoadingModList.of(
+                List.of(), List.of(), List.of(), List.of(), java.util.Map.of());
+        net.minecraft.SharedConstants.tryDetectVersion();
+        net.minecraft.server.Bootstrap.bootStrap();
+    }
+
     @legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$HasResult
     private static class AnnotatedEvent extends net.neoforged.bus.api.Event {}
 
