@@ -1,8 +1,10 @@
 package legacyconnector.v1_20_1;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.Arrays;
 import java.util.List;
@@ -11,6 +13,7 @@ import net.minecraft.util.RandomSource;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.Blocks;
 import legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result;
+import legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.EntityItemPickupEvent;
 import net.neoforged.neoforge.common.util.TriState;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -59,6 +62,37 @@ class Forge1201EventResultCompatibilityTest {
         assertEquals(true, ForgeApi1201.eventHasResult(critical));
         assertEquals(true, ForgeApi1201.eventHasResult(bonemeal));
         assertEquals(true, ForgeApi1201.eventHasResult(sapling));
+    }
+
+    @Test
+    void entityItemPickupShimPreservesIndependentForgeResultAndCancelableContracts() {
+        var event = new EntityItemPickupEvent(null, null);
+
+        assertTrue(event.hasResult());
+        assertTrue(ForgeApi1201.eventHasResult(event));
+        assertTrue(ForgeApi1201.eventIsCancelable(event));
+        assertFalse(ForgeApi1201.eventIsCanceled(event));
+
+        // The source Event#setResult call sites are rewritten through these helpers.
+        for (Result result : List.of(Result.DEFAULT, Result.DENY, Result.ALLOW)) {
+            ForgeApi1201.eventSetResult(event, result);
+            assertSame(result, event.getResult());
+            assertSame(result, ForgeApi1201.eventGetResult(event));
+            assertFalse(ForgeApi1201.eventIsCanceled(event),
+                    "Event.Result must not implicitly cancel the pickup event");
+        }
+
+        // Direct compatibility methods and rewritten helper calls share the same event state.
+        event.setResult(Result.DENY);
+        assertSame(Result.DENY, ForgeApi1201.eventGetResult(event));
+        event.setCanceled(true);
+        assertTrue(ForgeApi1201.eventIsCanceled(event));
+        assertTrue(event.isCanceled());
+        assertSame(Result.DENY, ForgeApi1201.eventGetResult(event));
+
+        ForgeApi1201.eventSetCanceled(event, false);
+        assertFalse(ForgeApi1201.eventIsCanceled(event));
+        assertSame(Result.DENY, ForgeApi1201.eventGetResult(event));
     }
 
     @Test
