@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.util.Arrays;
 import java.util.List;
@@ -21,18 +22,6 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 class Forge1201EventResultCompatibilityTest {
-    private record PickupDirective(Event$Result result, boolean canceled) {}
-
-    private static final AtomicReference<PickupDirective> NEXT_PICKUP_DIRECTIVE = new AtomicReference<>();
-    private static final AtomicInteger PICKUP_EVENT_POSTS = new AtomicInteger();
-
-    private static void applyPickupDirective(EntityItemPickupEvent event) {
-        PICKUP_EVENT_POSTS.incrementAndGet();
-        PickupDirective directive = NEXT_PICKUP_DIRECTIVE.getAndSet(null);
-        if (directive == null) return;
-        event.setResult(directive.result());
-        if (directive.canceled()) event.setCanceled(true);
-    }
     @BeforeAll
     static void bootstrapMinecraft() throws Exception {
         var dist = net.neoforged.fml.loading.FMLLoader.class.getDeclaredField("dist");
@@ -42,9 +31,6 @@ class Forge1201EventResultCompatibilityTest {
                 List.of(), List.of(), List.of(), List.of(), java.util.Map.of());
         net.minecraft.SharedConstants.tryDetectVersion();
         net.minecraft.server.Bootstrap.bootStrap();
-        net.neoforged.neoforge.common.NeoForge.EVENT_BUS.addListener(
-                EntityItemPickupEvent.class,
-                Forge1201EventResultCompatibilityTest::applyPickupDirective);
     }
 
     @legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$HasResult
@@ -83,23 +69,35 @@ class Forge1201EventResultCompatibilityTest {
 
     @Test
     void onItemPickupPostsLegacyEventAndReturnsForgeFactoryContract() {
-        int postsBefore = PICKUP_EVENT_POSTS.get();
+        record PickupDirective(Event$Result result, boolean canceled) {}
+
+        // A standalone, active bus makes this test independent of NeoForge's global startup lifecycle.
+        var bus = net.neoforged.bus.api.BusBuilder.builder().build();
+        var nextDirective = new AtomicReference<PickupDirective>();
+        var eventPosts = new AtomicInteger();
+        bus.addListener(EntityItemPickupEvent.class, event -> {
+            eventPosts.incrementAndGet();
+            PickupDirective directive = nextDirective.getAndSet(null);
+            if (directive == null) return;
+            event.setResult(directive.result());
+            if (directive.canceled()) event.setCanceled(true);
+        });
 
         for (Event$Result result : List.of(Event$Result.DEFAULT, Event$Result.DENY, Event$Result.ALLOW)) {
-            NEXT_PICKUP_DIRECTIVE.set(new PickupDirective(result, false));
+            nextDirective.set(new PickupDirective(result, false));
             int expected = result == Event$Result.ALLOW ? 1 : 0;
-            assertEquals(expected, ForgeApiTail1201.onItemPickup(null, null), "result=" + result);
-            assertEquals(null, NEXT_PICKUP_DIRECTIVE.get(), "the event bus should consume the probe directive");
+            assertEquals(expected, ForgeApiTail1201.onItemPickup(bus, null, null), "result=" + result);
+            assertNull(nextDirective.get(), "the event bus should consume the probe directive");
         }
 
         // Cancellation is independent of Result and takes precedence for every Result value.
         for (Event$Result result : List.of(Event$Result.DEFAULT, Event$Result.DENY, Event$Result.ALLOW)) {
-            NEXT_PICKUP_DIRECTIVE.set(new PickupDirective(result, true));
-            assertEquals(-1, ForgeApiTail1201.onItemPickup(null, null), "canceled result=" + result);
-            assertEquals(null, NEXT_PICKUP_DIRECTIVE.get(), "the event bus should consume the probe directive");
+            nextDirective.set(new PickupDirective(result, true));
+            assertEquals(-1, ForgeApiTail1201.onItemPickup(bus, null, null), "canceled result=" + result);
+            assertNull(nextDirective.get(), "the event bus should consume the probe directive");
         }
 
-        assertEquals(postsBefore + 6, PICKUP_EVENT_POSTS.get(), "each helper call must post the legacy shim");
+        assertEquals(6, eventPosts.get(), "each helper call must post the legacy shim");
     }
 
     @Test

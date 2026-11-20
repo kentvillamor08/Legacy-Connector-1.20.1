@@ -395,8 +395,15 @@ public final class ForgeApiTail1201 {
      */
     public static int onItemPickup(net.minecraft.world.entity.item.ItemEntity entityItem,
             net.minecraft.world.entity.player.Player player) {
+        return onItemPickup(net.neoforged.neoforge.common.NeoForge.EVENT_BUS, entityItem, player);
+    }
+
+    /** Shared dispatch body; the package-private overload also permits deterministic isolated-bus tests. */
+    static int onItemPickup(net.neoforged.bus.api.IEventBus eventBus,
+            net.minecraft.world.entity.item.ItemEntity entityItem,
+            net.minecraft.world.entity.player.Player player) {
         var event = new legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.EntityItemPickupEvent(player, entityItem);
-        net.neoforged.neoforge.common.NeoForge.EVENT_BUS.post(event);
+        eventBus.post(event);
         if (event.isCanceled()) return -1;
         return event.getResult()
                 == legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result.ALLOW ? 1 : 0;
