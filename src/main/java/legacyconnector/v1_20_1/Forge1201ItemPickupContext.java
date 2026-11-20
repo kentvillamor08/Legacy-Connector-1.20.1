@@ -49,7 +49,7 @@ public final class Forge1201ItemPickupContext {
      * <ul>
      *   <li>Client calls never post the legacy event.</li>
      *   <li>Native FALSE is a hard veto and is checked before the legacy event.</li>
-     *   <li>The legacy event is posted only when the entry-time delay was zero.</li>
+     *   <li>The legacy event is posted only when the entry-time delay was non-positive.</li>
      *   <li>Legacy cancellation (-1) vetoes the pickup.</li>
      *   <li>Legacy DEFAULT/DENY (0) preserve the native Pre result and inventory path.</li>
      *   <li>Legacy ALLOW (1) preserves the native Pre result; the mixin separately
@@ -69,7 +69,7 @@ public final class Forge1201ItemPickupContext {
         }
         nativePreHandled = true;
 
-        if (!serverSide || entryPickupDelay != 0 || nativePreResult == TriState.FALSE) {
+        if (!serverSide || entryPickupDelay > 0 || nativePreResult == TriState.FALSE) {
             return nativePreResult;
         }
 
