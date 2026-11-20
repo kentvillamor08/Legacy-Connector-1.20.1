@@ -20,6 +20,7 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.InteractionResultHolder;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.phys.AABB;
@@ -220,9 +221,9 @@ public final class Forge1201BucketFillRuntimeSelfTest {
         }
     }
 
-    private static void fillMainInventory(Inventory inventory, ItemStack stack) {
+    private static void fillMainInventory(Inventory inventory, Item item, int count) {
         for (int slot = 0; slot < MAIN_INVENTORY_SLOTS; slot++) {
-            inventory.setItem(slot, stack.copy());
+            inventory.setItem(slot, new ItemStack(item, count));
         }
     }
 
