@@ -342,12 +342,30 @@ public final class ForgeApi1201 {
 
     // ---- events -------------------------------------------------------------------------------------------------------------
 
+    /**
+     * Target ICancellableEvent membership is not always source Forge @Cancelable membership.
+     * Forge SaplingGrowTreeEvent maps to NeoForge BlockGrowFeatureEvent, which is target-cancellable
+     * even though the source event is not. Keep that exact source contract at rewritten call sites.
+     */
+    private static boolean sourceEventIsCancelable(Object event) {
+        return event instanceof net.neoforged.bus.api.ICancellableEvent
+                && event.getClass() != net.neoforged.neoforge.event.level.BlockGrowFeatureEvent.class;
+    }
+
     public static void eventSetCanceled(Object event, boolean canceled) {
-        if (event instanceof net.neoforged.bus.api.ICancellableEvent c) c.setCanceled(canceled);
+        java.util.Objects.requireNonNull(event, "event");
+        if (sourceEventIsCancelable(event)) {
+            ((net.neoforged.bus.api.ICancellableEvent) event).setCanceled(canceled);
+            return;
+        }
+        throw new UnsupportedOperationException(
+                "Attempted to call Event#setCanceled() on a non-cancelable event of type: " + event.getClass().getName());
     }
 
     public static boolean eventIsCanceled(Object event) {
-        return event instanceof net.neoforged.bus.api.ICancellableEvent c && c.isCanceled();
+        java.util.Objects.requireNonNull(event, "event");
+        return sourceEventIsCancelable(event)
+                && ((net.neoforged.bus.api.ICancellableEvent) event).isCanceled();
     }
 
     private static final Object NULL_EVENT_RESULT = new Object();
