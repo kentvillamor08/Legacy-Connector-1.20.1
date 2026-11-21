@@ -93,11 +93,11 @@ public abstract class ZombieSummonAidEventMixin {
                 summonChance
         );
 
-        Result result = legacyconnector.v1_20_1.ForgeApi1201.eventGetResult(event);
-        if (result == Result.DENY) {
+        Event$Result result = legacyconnector.v1_20_1.ForgeApi1201.eventGetResult(event);
+        if (result == Event$Result.DENY) {
             // Damage was already accepted by Monster.hurt; only veto reinforcement.
             cir.setReturnValue(true);
-        } else if (result == Result.ALLOW) {
+        } else if (result == Event$Result.ALLOW) {
             Zombie customAid = event.getCustomSummonedAid();
             legacyconnector$spawnForcedAid(serverLevel, hurtZombie, attacker, customAid, x, y, z);
             cir.setReturnValue(true);
