@@ -375,6 +375,29 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
         return candidates;
     }
 
+    /**
+     * The temporary placement pads occupy the candidate column from one block
+     * below the candidate through two blocks above it. Two candidates in the
+     * same X/Z column must have disjoint vertical pad ranges; otherwise a later
+     * pad can overwrite an earlier candidate block and make isSpawnPositionOk
+     * reject it before NeoForge posts SpawnPlacementCheck.
+     */
+    private static boolean placementPadsOverlap(List<BlockPos> candidates) {
+        for (int firstIndex = 0; firstIndex < candidates.size(); firstIndex++) {
+            BlockPos first = candidates.get(firstIndex);
+            int firstMinY = first.getY() - 1;
+            int firstMaxY = first.getY() + 2;
+            for (int secondIndex = firstIndex + 1; secondIndex < candidates.size(); secondIndex++) {
+                BlockPos second = candidates.get(secondIndex);
+                if (first.getX() != second.getX() || first.getZ() != second.getZ()) continue;
+                int secondMinY = second.getY() - 1;
+                int secondMaxY = second.getY() + 2;
+                if (firstMinY <= secondMaxY && secondMinY <= firstMaxY) return true;
+            }
+        }
+        return false;
+    }
+
     private static void require(boolean condition, String message) {
         if (!condition) throw new IllegalStateException(message);
     }
@@ -523,11 +546,13 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                 // The Mixin posts this event after Monster.hurt has already processed accepted damage.
                 // Seed at this exact hook rather than before Zombie.hurt(), so earlier damage-path RNG
                 // consumption cannot contaminate the deterministic forced-placement oracle.
-                long seed = 0x5EED1201L;
+                long seed = 0x5EED1205L;
                 RandomSource hurtZombieRandom = watched.getRandom();
                 hurtZombieRandom.setSeed(seed);
                 List<BlockPos> expectedCandidates = placementCandidates(
                         new BlockPos(active.eventX, active.eventY, active.eventZ), hurtZombieRandom);
+                require(!placementPadsOverlap(expectedCandidates),
+                        "deterministic placement fixture contains overlapping candidate pads");
                 active.expectedFirstPlacementPos = expectedCandidates.get(0);
                 arena.installPlacementPads(expectedCandidates);
                 // Rewind after the pads are installed; the production ALLOW helper now starts at this state.
