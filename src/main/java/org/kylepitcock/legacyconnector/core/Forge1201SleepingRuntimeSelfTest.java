@@ -210,11 +210,14 @@ public final class Forge1201SleepingRuntimeSelfTest {
         Scenario scenario = new Scenario();
         scenario.timeResult = timeResult;
         scenario.nativeContinueOverride = nativeOverride;
-        level.setDayTime(daytime ? 1000L : 13000L);
+        level.setDayTime(daytime ? 1000L : 18000L);
         prepare(player, bed.foot);
         player.setSleepingPos(bed.foot);
         listeners.arm(player, scenario);
         try {
+            require(level.isDay() == daytime,
+                    "tick day-time fixture mismatch: dayTime=" + level.getDayTime()
+                            + ", isDay=" + level.isDay() + ", expectedDay=" + daytime);
             // ServerPlayer.doTick() invokes the Player.tick() implementation with invokespecial.
             player.doTick();
 
@@ -256,8 +259,8 @@ public final class Forge1201SleepingRuntimeSelfTest {
             BedFixture bed
     ) {
         runSleepStartCase(failures, listeners, player, level, bed,
-                "native CanPlayerSleepEvent rejection prevents the legacy time event",
-                false, Event$Result.DEFAULT, true, true);
+                "native CanPlayerSleepEvent rejection still blocks sleep after legacy time dispatch",
+                false, Event$Result.DEFAULT, true, false);
         runSleepStartCase(failures, listeners, player, level, bed,
                 "daytime DEFAULT returns NOT_POSSIBLE_NOW",
                 true, Event$Result.DEFAULT, false, false);
@@ -287,41 +290,40 @@ public final class Forge1201SleepingRuntimeSelfTest {
         Scenario scenario = new Scenario();
         scenario.timeResult = timeResult;
         scenario.rejectNativeSleep = rejectNativePrecheck;
-        level.setDayTime(daytime ? 1000L : 13000L);
-        prepare(player, bed.foot);
+        level.setDayTime(daytime ? 1000L : 18000L);
+        prepareForSleepStart(player, bed.foot);
         player.clearSleepingPos();
         listeners.arm(player, scenario);
         try {
+            require(level.isDay() == daytime,
+                    "sleep-start day-time fixture mismatch: dayTime=" + level.getDayTime()
+                            + ", isDay=" + level.isDay() + ", expectedDay=" + daytime);
             Either<Player.BedSleepingProblem, Unit> outcome = player.startSleepInBed(bed.foot);
 
+            require(scenario.timeCount == 1,
+                    "SleepingTimeCheckEvent count was " + scenario.timeCount);
+            require(scenario.timePositions.size() == 1
+                            && scenario.timePositions.get(0).equals(Optional.of(bed.foot)),
+                    "sleep-start time event position was " + scenario.timePositions);
             require(scenario.nativePreSleepCount == 1,
                     "native CanPlayerSleepEvent count was " + scenario.nativePreSleepCount);
+            require(scenario.order.equals(List.of("legacy-time", "native-pre-sleep")),
+                    "sleep-start event order was " + scenario.order);
             if (rejectNativePrecheck) {
-                require(scenario.timeCount == 0,
-                        "legacy SleepingTimeCheckEvent fired after native pre-sleep rejection");
                 require(outcome.left().orElse(null) == Player.BedSleepingProblem.NOT_POSSIBLE_NOW,
-                        "native precheck result was " + outcome);
-                require(scenario.order.equals(List.of("native-pre-sleep")),
-                        "precheck rejection order was " + scenario.order);
+                        "native CanPlayerSleepEvent did not retain its veto: " + outcome);
+                require(!player.isSleeping(),
+                        "native CanPlayerSleepEvent rejection left the player sleeping");
+            } else if (expectedSuccess) {
+                require(outcome.right().isPresent(),
+                        "expected successful sleep-start result, got " + outcome);
+                require(player.isSleeping(), "sleep-start returned success but player is not sleeping");
+                require(outcome.right().orElse(null) == Unit.INSTANCE,
+                        "sleep-start right value was not Unit.INSTANCE");
             } else {
-                require(scenario.timeCount == 1,
-                        "SleepingTimeCheckEvent count was " + scenario.timeCount);
-                require(scenario.timePositions.size() == 1
-                                && scenario.timePositions.get(0).equals(Optional.of(bed.foot)),
-                        "sleep-start time event position was " + scenario.timePositions);
-                require(scenario.order.equals(List.of("native-pre-sleep", "legacy-time")),
-                        "sleep-start event order was " + scenario.order);
-                if (expectedSuccess) {
-                    require(outcome.right().isPresent(),
-                            "expected successful sleep-start result, got " + outcome);
-                    require(player.isSleeping(), "sleep-start returned success but player is not sleeping");
-                    require(outcome.right().orElse(null) == Unit.INSTANCE,
-                            "sleep-start right value was not Unit.INSTANCE");
-                } else {
-                    require(outcome.left().orElse(null) == Player.BedSleepingProblem.NOT_POSSIBLE_NOW,
-                            "expected NOT_POSSIBLE_NOW, got " + outcome);
-                    require(!player.isSleeping(), "rejected sleep-start left the player sleeping");
-                }
+                require(outcome.left().orElse(null) == Player.BedSleepingProblem.NOT_POSSIBLE_NOW,
+                        "expected NOT_POSSIBLE_NOW, got " + outcome);
+                require(!player.isSleeping(), "rejected sleep-start left the player sleeping");
             }
 
             LOG.info("ok: sleeping-start: {}", name);
@@ -340,6 +342,14 @@ public final class Forge1201SleepingRuntimeSelfTest {
         player.setPos(pos.getX() + 0.5D, pos.getY() + 0.1D, pos.getZ() + 0.5D);
         player.setXRot(0.0F);
         player.setYRot(0.0F);
+    }
+
+    private static void prepareForSleepStart(FakePlayer player, BlockPos bedPos) {
+        prepare(player, bedPos);
+        // Stand immediately south of the north-facing bed, outside its occupied
+        // volume but within the vanilla bedInRange distance.
+        BlockPos approach = bedPos.relative(Direction.SOUTH);
+        player.setPos(approach.getX() + 0.5D, bedPos.getY() + 0.1D, approach.getZ() + 0.5D);
     }
 
     private static boolean invokeCheckBedExists(LivingEntity entity) {
