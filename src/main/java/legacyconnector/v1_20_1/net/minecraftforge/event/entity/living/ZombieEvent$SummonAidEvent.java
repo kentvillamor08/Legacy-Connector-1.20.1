@@ -19,7 +19,7 @@ public class ZombieEvent$SummonAidEvent extends ZombieEvent {
     private final int z;
     private final LivingEntity attacker;
     private final double summonChance;
-    private Result result = Result.DEFAULT;
+    private Event$Result result = Event$Result.DEFAULT;
 
     public ZombieEvent$SummonAidEvent(
             Zombie zombie,
@@ -70,11 +70,11 @@ public class ZombieEvent$SummonAidEvent extends ZombieEvent {
         return summonChance;
     }
 
-    public Result getResult() {
+    public Event$Result getResult() {
         return result;
     }
 
-    public void setResult(Result result) {
+    public void setResult(Event$Result result) {
         this.result = result;
     }
 
