@@ -234,11 +234,11 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                             "reinforcement with a null attacker unexpectedly received a target");
                 }
 
-                double expectedCallerChance = scenario.summonChance - 0.05D;
-                double actualCallerChance = hurtZombie.getAttributeValue(Attributes.SPAWN_REINFORCEMENTS_CHANCE);
-                require(Math.abs(actualCallerChance - expectedCallerChance) < 0.0001D,
-                        "caller reinforcement chance was " + actualCallerChance
-                                + ", expected " + expectedCallerChance);
+                double actualCallerCharge = callerChargeModifierAmount(hurtZombie);
+                require(Math.abs(actualCallerCharge + 0.05D) < 0.0001D,
+                        "caller reinforcement charge modifier amount was " + actualCallerCharge
+                                + ", expected -0.05 (effective attribute value "
+                                + hurtZombie.getAttributeValue(Attributes.SPAWN_REINFORCEMENTS_CHANCE) + ")");
 
                 if (scenario.customAid) {
                     double customChance = customAid.getAttributeValue(Attributes.SPAWN_REINFORCEMENTS_CHANCE);
@@ -274,6 +274,26 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
             }
             if (customAid != null && !customAid.isRemoved()) customAid.discard();
             if (hurtZombie != null && !hurtZombie.isRemoved()) hurtZombie.discard();
+        }
+    }
+
+    /**
+     * Reads the stored reinforcement-charge modifier, not the effective
+     * attribute value. The attribute is clamped at its minimum (zero), so a
+     * valid -0.05 modifier on a zero-base ALLOW scenario still reports an
+     * effective value of 0.0.
+     */
+    private static double callerChargeModifierAmount(Zombie zombie) {
+        try {
+            var field = Zombie.class.getDeclaredField("REINFORCEMENT_CALLER_CHARGE_ID");
+            field.setAccessible(true);
+            var modifierId = (net.minecraft.resources.ResourceLocation) field.get(null);
+            var modifier = zombie.getAttribute(Attributes.SPAWN_REINFORCEMENTS_CHANCE)
+                    .getModifier(modifierId);
+            require(modifier != null, "target caller reinforcement-charge modifier was not installed");
+            return modifier.amount();
+        } catch (ReflectiveOperationException ex) {
+            throw new IllegalStateException("could not read target caller reinforcement-charge modifier id", ex);
         }
     }
 
