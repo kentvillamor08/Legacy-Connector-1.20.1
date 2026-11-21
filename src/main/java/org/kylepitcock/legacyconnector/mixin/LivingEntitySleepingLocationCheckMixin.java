@@ -19,10 +19,10 @@ import org.spongepowered.asm.mixin.injection.At;
  * Restores Forge 1.20.1's SleepingLocationCheckEvent at the precise location
  * validation call site in LivingEntity.checkBedExists().
  *
- * <p>The target method invokes EventHooks.canEntityContinueSleeping from
- * inside its sleeping-position Optional.map callback. The explicit Optional
- * guard is retained so a missing sleeping position never fabricates a
- * legacy event. The legacy result is projected to a target problem and the
+ * <p>The target method computes its vanilla bed-state boolean from the
+ * sleeping-position Optional before invoking EventHooks.canEntityContinueSleeping.
+ * The explicit Optional guard is retained so an empty position never fabricates
+ * a legacy event. The legacy result is projected to a target problem and the
  * original NeoForge hook is then called exactly once, preserving native
  * CanContinueSleepingEvent listeners.</p>
  */
