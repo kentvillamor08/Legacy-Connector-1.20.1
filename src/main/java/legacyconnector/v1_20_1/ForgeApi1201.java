@@ -348,7 +348,8 @@ public final class ForgeApi1201 {
      * even though the source event is not. Keep that exact source contract at rewritten call sites.
      */
     private static boolean sourceEventIsCancelable(Object event) {
-        if (event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.SleepingLocationCheckEvent
+        if (event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.living.ZombieEvent$SummonAidEvent
+                || event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.SleepingLocationCheckEvent
                 || event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.SleepingTimeCheckEvent) {
             return false;
         }
@@ -580,6 +581,10 @@ public final class ForgeApi1201 {
             sleepingTime.setResult(result);
             return;
         }
+        if (event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.living.ZombieEvent$SummonAidEvent summonAid) {
+            summonAid.setResult(result);
+            return;
+        }
         if (event instanceof net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable e) {
             e.setResult(mobEffectResult(result));
             return;
@@ -654,6 +659,9 @@ public final class ForgeApi1201 {
         }
         if (event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.SleepingTimeCheckEvent sleepingTime) {
             return sleepingTime.getResult();
+        }
+        if (event instanceof legacyconnector.v1_20_1.net.minecraftforge.event.entity.living.ZombieEvent$SummonAidEvent summonAid) {
+            return summonAid.getResult();
         }
         if (event instanceof net.neoforged.neoforge.event.entity.living.MobEffectEvent.Applicable e) {
             return resultFromMobEffect(e.getResult());
