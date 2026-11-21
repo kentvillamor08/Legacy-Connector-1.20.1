@@ -70,6 +70,10 @@ public final class SilentFailureChecks {
             check("sleeping: SleepingLocationCheckEvent and SleepingTimeCheckEvent behavior",
                     () -> Forge1201SleepingRuntimeSelfTest.run(testLevel));
         }
+        if (Boolean.getBoolean("legacyconnector.zombieSummonAidBehaviorSelfTest")) {
+            check("zombie summon-aid: Zombie.hurt result and spawn behavior",
+                    () -> Forge1201ZombieSummonAidRuntimeSelfTest.run(testLevel));
+        }
         LOG.info("SILENT FAILURE CHECKS: {} passed, {} failed", passed, failures.size());
         for (String f : failures) LOG.error("SILENT FAILURE CHECK FAILED: {}", f);
         if (Boolean.getBoolean("legacyconnector.selfTestFailFast") && !failures.isEmpty()) {
