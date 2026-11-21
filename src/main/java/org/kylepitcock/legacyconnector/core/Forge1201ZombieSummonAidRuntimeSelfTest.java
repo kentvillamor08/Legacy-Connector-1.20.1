@@ -297,7 +297,12 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                 }
             }
 
-            LOG.info("ok: zombie-summon-aid: {}", scenario.name);
+            if (scenario.expectPlacementAttempt) {
+                LOG.info("ok: zombie-summon-aid: {} (nativePlacementChecks={}, entityJoinEvents={})",
+                        scenario.name, scenario.placementCount, scenario.entityJoinCount);
+            } else {
+                LOG.info("ok: zombie-summon-aid: {}", scenario.name);
+            }
         } catch (RuntimeException | LinkageError ex) {
             failures.add(scenario.name + ": " + ex);
             LOG.error("Zombie SummonAid scenario failed: {}", scenario.name, ex);
