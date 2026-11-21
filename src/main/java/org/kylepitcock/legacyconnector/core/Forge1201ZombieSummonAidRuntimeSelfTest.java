@@ -311,8 +311,18 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
             } else {
                 require(addedZombies.isEmpty(),
                         "unexpected reinforcement spawn(s): " + addedZombies.size());
-                require(scenario.entityJoinCount == 0,
-                        "an aid entity joined despite the scenario expecting no spawn");
+                if (scenario.cancelFinalizeSpawn) {
+                    require(scenario.entityJoinCount == 1,
+                            "expected one EntityJoinLevelEvent for the spawn-cancelled aid, got "
+                                    + scenario.entityJoinCount);
+                    require(scenario.entityJoinCancelled,
+                            "NeoForge's built-in spawn blocker did not cancel EntityJoinLevelEvent");
+                    require(scenario.finalizedAid != null && !scenario.finalizedAid.isAddedToLevel(),
+                            "spawn-cancelled aid unexpectedly entered the level");
+                } else {
+                    require(scenario.entityJoinCount == 0,
+                            "an aid EntityJoinLevelEvent occurred despite the scenario expecting no spawn");
+                }
                 if (scenario.expectPlacementAttempt) {
                     require(scenario.placementCount > 0,
                             "no native placement attempt reached the event listener");
@@ -348,8 +358,9 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                 LOG.info("ok: zombie-summon-aid: {} (nativePlacementChecks={}, entityJoinEvents={})",
                         scenario.name, scenario.placementCount, scenario.entityJoinCount);
             } else if (scenario.cancelFinalizeSpawn) {
-                LOG.info("ok: zombie-summon-aid: {} (nativeFinalizeSpawnEvents={}, entityJoinEvents={})",
-                        scenario.name, scenario.finalizeSpawnCount, scenario.entityJoinCount);
+                LOG.info("ok: zombie-summon-aid: {} (nativeFinalizeSpawnEvents={}, entityJoinEvents={}, entityJoinCancelled={})",
+                        scenario.name, scenario.finalizeSpawnCount, scenario.entityJoinCount,
+                        scenario.entityJoinCancelled);
             } else {
                 LOG.info("ok: zombie-summon-aid: {}", scenario.name);
             }
@@ -491,6 +502,7 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
         BlockPos expectedFirstPlacementPos;
         BlockPos firstPlacementPos;
         int entityJoinCount;
+        boolean entityJoinCancelled;
         Zombie joinedAid;
         final List<String> order = new ArrayList<>();
 
@@ -696,6 +708,7 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
             if (active == null || event.getLevel() != level) return;
             if (event.getEntity() instanceof Zombie zombie && zombie != watched) {
                 active.entityJoinCount++;
+                active.entityJoinCancelled |= event.isCanceled();
                 active.joinedAid = zombie;
                 active.order.add("entity-join");
             }
