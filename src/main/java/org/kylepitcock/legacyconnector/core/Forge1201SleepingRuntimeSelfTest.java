@@ -293,6 +293,7 @@ public final class Forge1201SleepingRuntimeSelfTest {
         scenario.timeResult = timeResult;
         scenario.rejectNativeSleep = rejectNativePrecheck;
         level.setDayTime(daytime ? 1000L : 18000L);
+        level.updateSkyBrightness();
         prepareForSleepStart(player, bed.foot);
         player.clearSleepingPos();
         listeners.arm(player, scenario);
