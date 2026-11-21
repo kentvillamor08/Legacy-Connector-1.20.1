@@ -18,7 +18,6 @@ import legacyconnector.v1_20_1.net.minecraftforge.event.entity.living.ZombieEven
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Difficulty;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobSpawnType;
 import net.minecraft.world.entity.ai.attributes.Attributes;
@@ -43,8 +42,8 @@ import org.slf4j.LoggerFactory;
  * {@code -Dlegacyconnector.zombieSummonAidBehaviorSelfTest=true}. The probe
  * drives real Zombie.hurt calls through the registered Mixin and NeoForge
  * event bus. A temporary, dark 81x81 spawn arena makes the reinforcement
- * placement loop deterministic enough to exercise without depending on
- * generated terrain. Original block states, difficulty, gamerule and time
+ * placement loop a broad candidate region without depending on
+ * the generated terrain. Original block states, difficulty, gamerule and time
  * are restored before this method returns.</p>
  */
 public final class Forge1201ZombieSummonAidRuntimeSelfTest {
@@ -66,10 +65,10 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
         );
 
         try {
+            NeoForge.EVENT_BUS.register(listeners);
             arena.install();
             level.setDayTime(18000L);
             level.updateSkyBrightness();
-            NeoForge.EVENT_BUS.register(listeners);
 
             runCase(failures, level, arena, listeners, attacker,
                     Scenario.expectNoSpawn("DEFAULT with null attacker still posts the event",
@@ -375,7 +374,6 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
 
     private static final class ProbeListeners {
         private final ServerLevel level;
-        private final List<Zombie> joinedZombies = new ArrayList<>();
         private Zombie watched;
         private Scenario scenario;
         private ProbeArena arena;
@@ -452,7 +450,6 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                 active.entityJoinCount++;
                 active.joinedAid = zombie;
                 active.order.add("entity-join");
-                joinedZombies.add(zombie);
             }
         }
     }
