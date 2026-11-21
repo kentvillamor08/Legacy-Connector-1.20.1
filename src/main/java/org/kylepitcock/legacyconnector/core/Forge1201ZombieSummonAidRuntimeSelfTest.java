@@ -115,7 +115,7 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
 
             runCase(failures, level, arena, listeners, attacker,
                     Scenario.expectNativeVeto(
-                            "native SpawnPlacementCheck FAIL vetoes ALLOW after exactly 50 attempts without consuming the vanilla chance roll",
+                            "native SpawnPlacementCheck FAIL vetoes ALLOW after exactly 50 attempts without consuming the vanilla chance roll (same Zombie RNG instance)",
                             Event$Result.ALLOW, Difficulty.HARD, true, 0.0D, false,
                             MobSpawnEvent.SpawnPlacementCheck.Result.FAIL));
 
@@ -173,10 +173,14 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                     : level.damageSources().playerAttack(attacker);
             if (scenario.verifyFirstPlacementSequence) {
                 long seed = 0x5EED1201L;
-                List<BlockPos> expectedCandidates = placementCandidates(hurtZombie.blockPosition(), seed);
+                RandomSource hurtZombieRandom = hurtZombie.getRandom();
+                hurtZombieRandom.setSeed(seed);
+                List<BlockPos> expectedCandidates = placementCandidates(
+                        hurtZombie.blockPosition(), hurtZombieRandom);
                 scenario.expectedFirstPlacementPos = expectedCandidates.get(0);
                 arena.installPlacementPads(expectedCandidates);
-                hurtZombie.getRandom().setSeed(seed);
+                // Rewind the very same RNG implementation and instance the production Mixin samples.
+                hurtZombieRandom.setSeed(seed);
             }
             boolean hurtResult = hurtZombie.hurt(damageSource, 1.0F);
             listeners.disarm();
@@ -358,12 +362,12 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
     }
 
     /**
-     * Reproduces the target's 50 candidate coordinate draws from an
-     * independently seeded RandomSource so the probe can prepare a valid
-     * ground-placement pad at every candidate before invoking Zombie.hurt.
+     * Reproduces the target's 50 candidate coordinate draws from the hurt
+     * Zombie's own RandomSource instance. Using the same object is important:
+     * RandomSource.create(seed) may produce a different RNG implementation
+     * than Entity.getRandom() on this Minecraft version.
      */
-    private static List<BlockPos> placementCandidates(BlockPos origin, long seed) {
-        RandomSource expectedRandom = RandomSource.create(seed);
+    private static List<BlockPos> placementCandidates(BlockPos origin, RandomSource expectedRandom) {
         List<BlockPos> candidates = new ArrayList<>(50);
         for (int attempt = 0; attempt < 50; attempt++) {
             int x = origin.getX() + Mth.nextInt(expectedRandom, 7, 40)
