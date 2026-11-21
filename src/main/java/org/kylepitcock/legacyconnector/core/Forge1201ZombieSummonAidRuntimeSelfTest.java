@@ -249,10 +249,18 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                                 + ", lastPlacementPos=" + scenario.lastPlacementPos
                                 + ", entityJoinEvents=" + scenario.entityJoinCount
                                 + ", joinedAid=" + scenario.joinedAid
+                                + ", entityJoinCancelled=" + scenario.entityJoinCancelled
+                                + ", joinedAidIsCustom=" + (customAid != null && scenario.joinedAid == customAid)
+                                + ", finalizedAidIsCustom=" + (customAid != null && scenario.finalizedAid == customAid)
+                                + ", joinedAidAddedToLevel=" + (scenario.joinedAid != null && scenario.joinedAid.isAddedToLevel())
+                                + ", joinedAidRemoved=" + (scenario.joinedAid != null && scenario.joinedAid.isRemoved())
                                 + ", order=" + scenario.order
                                 + ", hurtZombiePos=" + hurtZombie.blockPosition()
                                 + ", customAidProvided=" + (customAid != null)
                                 + (customAid == null ? "" : ", customAidRemoved=" + customAid.isRemoved()
+                                + ", customAidAddedToLevel=" + customAid.isAddedToLevel()
+                                + ", customAidEntityId=" + customAid.getId()
+                                + ", customAidUuid=" + customAid.getUUID()
                                 + ", customAidLevelMatches=" + (customAid.level() == level)));
                 Zombie aid = addedZombies.get(0);
                 require(scenario.customAid ? aid == customAid : aid != customAid,
@@ -312,11 +320,13 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                 require(addedZombies.isEmpty(),
                         "unexpected reinforcement spawn(s): " + addedZombies.size());
                 if (scenario.cancelFinalizeSpawn) {
-                    require(scenario.entityJoinCount == 1,
-                            "expected one EntityJoinLevelEvent for the spawn-cancelled aid, got "
+                    // NeoForge 1.21.1's MobSpawnEvent contract states that EntityJoinLevelEvent
+                    // is only fired when FinalizeSpawnEvent has not cancelled the mob's spawn.
+                    require(scenario.entityJoinCount == 0,
+                            "EntityJoinLevelEvent unexpectedly fired for the spawn-cancelled aid, got "
                                     + scenario.entityJoinCount);
-                    require(scenario.entityJoinCancelled,
-                            "NeoForge's built-in spawn blocker did not cancel EntityJoinLevelEvent");
+                    require(scenario.joinedAid == null,
+                            "spawn-cancelled aid unexpectedly reached EntityJoinLevelEvent");
                     require(scenario.finalizedAid != null && !scenario.finalizedAid.isAddedToLevel(),
                             "spawn-cancelled aid unexpectedly entered the level");
                 } else {
@@ -358,9 +368,10 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                 LOG.info("ok: zombie-summon-aid: {} (nativePlacementChecks={}, entityJoinEvents={})",
                         scenario.name, scenario.placementCount, scenario.entityJoinCount);
             } else if (scenario.cancelFinalizeSpawn) {
-                LOG.info("ok: zombie-summon-aid: {} (nativeFinalizeSpawnEvents={}, entityJoinEvents={}, entityJoinCancelled={})",
+                LOG.info("ok: zombie-summon-aid: {} (nativeFinalizeSpawnEvents={}, entityJoinEvents={}, spawnCancelled={}, aidAddedToLevel={})",
                         scenario.name, scenario.finalizeSpawnCount, scenario.entityJoinCount,
-                        scenario.entityJoinCancelled);
+                        scenario.finalizedAid != null && scenario.finalizedAid.isSpawnCancelled(),
+                        scenario.finalizedAid != null && scenario.finalizedAid.isAddedToLevel());
             } else {
                 LOG.info("ok: zombie-summon-aid: {}", scenario.name);
             }
