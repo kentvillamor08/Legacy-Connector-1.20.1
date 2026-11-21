@@ -75,6 +75,7 @@ public final class Forge1201SleepingRuntimeSelfTest {
             player.clearSleepingPos();
             bed.restore();
             level.setDayTime(originalDayTime);
+            level.updateSkyBrightness();
         }
 
         return failures;
@@ -211,6 +212,7 @@ public final class Forge1201SleepingRuntimeSelfTest {
         scenario.timeResult = timeResult;
         scenario.nativeContinueOverride = nativeOverride;
         level.setDayTime(daytime ? 1000L : 18000L);
+        level.updateSkyBrightness();
         prepare(player, bed.foot);
         player.setSleepingPos(bed.foot);
         listeners.arm(player, scenario);
