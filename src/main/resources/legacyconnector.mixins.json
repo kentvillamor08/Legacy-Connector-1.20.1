@@ -30,6 +30,7 @@
     "LivingEntitySleepingLocationCheckMixin",
     "PlayerSleepingTimeCheckMixin",
     "ServerPlayerSleepingTimeCheckMixin",
+    "ZombieSummonAidEventMixin",
     "MobBucketItemLegacyNbtMixin",
     "PlayerLegacyEnchantmentDamageMixin",
     "JigsawStructureLegacyVillageMixin",
