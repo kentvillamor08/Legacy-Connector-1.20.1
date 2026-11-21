@@ -162,6 +162,8 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                     .set(scenario.mobSpawning, level.getServer());
 
             listeners.arm(hurtZombie, scenario, arena);
+            listeners.setCustomAid(customAid);
+            if (scenario.customAid) require(customAid != null, "could not construct listener-supplied custom Zombie");
             float healthBefore = hurtZombie.getHealth();
             var damageSource = scenario.nullAttacker
                     ? level.damageSources().generic()
@@ -392,6 +394,7 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
             watched = null;
             scenario = null;
             arena = null;
+            activeCustomAid = null;
         }
 
         @SubscribeEvent
