@@ -29,6 +29,7 @@
     "BucketItemForge1201FillBucketMixin",
     "LivingEntitySleepingLocationCheckMixin",
     "PlayerSleepingTimeCheckMixin",
+    "ServerPlayerSleepingTimeCheckMixin",
     "MobBucketItemLegacyNbtMixin",
     "PlayerLegacyEnchantmentDamageMixin",
     "JigsawStructureLegacyVillageMixin",
