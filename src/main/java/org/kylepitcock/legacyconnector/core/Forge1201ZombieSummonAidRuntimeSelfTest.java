@@ -173,8 +173,10 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                     : level.damageSources().playerAttack(attacker);
             if (scenario.verifyFirstPlacementSequence) {
                 long seed = 0x5EED1201L;
+                List<BlockPos> expectedCandidates = placementCandidates(hurtZombie.blockPosition(), seed);
+                scenario.expectedFirstPlacementPos = expectedCandidates.get(0);
+                arena.installPlacementPads(expectedCandidates);
                 hurtZombie.getRandom().setSeed(seed);
-                scenario.expectedFirstPlacementPos = firstPlacementCandidate(hurtZombie.blockPosition(), seed);
             }
             boolean hurtResult = hurtZombie.hurt(damageSource, 1.0F);
             listeners.disarm();
@@ -356,18 +358,23 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
     }
 
     /**
-     * Mirrors the first three candidate-axis draws made by the production
-     * forced-spawn loop from an independently seeded RandomSource.
+     * Reproduces the target's 50 candidate coordinate draws from an
+     * independently seeded RandomSource so the probe can prepare a valid
+     * ground-placement pad at every candidate before invoking Zombie.hurt.
      */
-    private static BlockPos firstPlacementCandidate(BlockPos origin, long seed) {
+    private static List<BlockPos> placementCandidates(BlockPos origin, long seed) {
         RandomSource expectedRandom = RandomSource.create(seed);
-        int x = origin.getX() + Mth.nextInt(expectedRandom, 7, 40)
-                * Mth.nextInt(expectedRandom, -1, 1);
-        int y = origin.getY() + Mth.nextInt(expectedRandom, 7, 40)
-                * Mth.nextInt(expectedRandom, -1, 1);
-        int z = origin.getZ() + Mth.nextInt(expectedRandom, 7, 40)
-                * Mth.nextInt(expectedRandom, -1, 1);
-        return new BlockPos(x, y, z);
+        List<BlockPos> candidates = new ArrayList<>(50);
+        for (int attempt = 0; attempt < 50; attempt++) {
+            int x = origin.getX() + Mth.nextInt(expectedRandom, 7, 40)
+                    * Mth.nextInt(expectedRandom, -1, 1);
+            int y = origin.getY() + Mth.nextInt(expectedRandom, 7, 40)
+                    * Mth.nextInt(expectedRandom, -1, 1);
+            int z = origin.getZ() + Mth.nextInt(expectedRandom, 7, 40)
+                    * Mth.nextInt(expectedRandom, -1, 1);
+            candidates.add(new BlockPos(x, y, z));
+        }
+        return candidates;
     }
 
     private static void require(boolean condition, String message) {
@@ -610,6 +617,17 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                             centerX + ARENA_RADIUS + 9, entityY + ARENA_RADIUS + 9, centerZ + ARENA_RADIUS + 9
                     )
             );
+        }
+
+        void installPlacementPads(List<BlockPos> candidates) {
+            BlockState air = Blocks.AIR.defaultBlockState();
+            BlockState stone = Blocks.STONE.defaultBlockState();
+            for (BlockPos pos : candidates) {
+                set(pos.below(), stone);
+                set(pos, air);
+                set(pos.above(), air);
+                set(pos.above(2), stone);
+            }
         }
 
         private void set(BlockPos pos, BlockState state) {
