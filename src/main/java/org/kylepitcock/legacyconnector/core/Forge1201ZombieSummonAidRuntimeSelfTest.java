@@ -33,6 +33,7 @@ import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.common.util.FakePlayer;
 import net.neoforged.neoforge.common.util.FakePlayerFactory;
 import net.neoforged.neoforge.event.entity.EntityJoinLevelEvent;
+import net.neoforged.neoforge.event.entity.living.FinalizeSpawnEvent;
 import net.neoforged.neoforge.event.entity.living.MobSpawnEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -118,6 +119,12 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                             "native SpawnPlacementCheck FAIL vetoes exactly 50 ALLOW candidates from the hook-time RNG sequence",
                             Event$Result.ALLOW, Difficulty.HARD, true, 0.0D, false,
                             MobSpawnEvent.SpawnPlacementCheck.Result.FAIL));
+
+            runCase(failures, level, arena, listeners, attacker,
+                    Scenario.expectFinalizeSpawnVeto(
+                            "ALLOW honors native FinalizeSpawnEvent spawn cancellation",
+                            Event$Result.ALLOW, Difficulty.NORMAL, false, 0.0D, false,
+                            MobSpawnEvent.SpawnPlacementCheck.Result.SUCCEED));
 
         } catch (RuntimeException | LinkageError ex) {
             failures.add("Zombie SummonAid behavior probe setup/execution threw: " + ex);
@@ -215,6 +222,25 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                 }
             }
 
+            if (scenario.expectFinalizeSpawnEvent) {
+                require(scenario.finalizeSpawnCount == 1,
+                        "FinalizeSpawnEvent count was " + scenario.finalizeSpawnCount + ", expected exactly one");
+                require(scenario.finalizedAid != null,
+                        "FinalizeSpawnEvent did not capture the reinforcement Zombie");
+                require(scenario.finalizedSpawnType == MobSpawnType.REINFORCEMENT,
+                        "FinalizeSpawnEvent spawn type was " + scenario.finalizedSpawnType
+                                + ", expected REINFORCEMENT");
+                require(scenario.order.indexOf("finalize-spawn") > scenario.order.indexOf("native-placement"),
+                        "FinalizeSpawnEvent did not follow native placement checks: " + scenario.order);
+                if (scenario.cancelFinalizeSpawn) {
+                    require(scenario.finalizedAid.isSpawnCancelled(),
+                            "FinalizeSpawnEvent setSpawnCancelled(true) did not mark the exact aid Zombie");
+                }
+            } else {
+                require(scenario.finalizeSpawnCount == 0,
+                        "FinalizeSpawnEvent fired unexpectedly " + scenario.finalizeSpawnCount + " time(s)");
+            }
+
             if (scenario.expectSpawn) {
                 require(addedZombies.size() == 1,
                         "expected exactly one reinforcement Zombie, found " + addedZombies.size()
@@ -237,6 +263,10 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                         "EntityJoinLevelEvent count for the aid was " + scenario.entityJoinCount);
                 require(scenario.joinedAid == aid,
                         "EntityJoinLevelEvent did not observe the exact reinforcement instance");
+                require(scenario.finalizedAid == aid,
+                        "FinalizeSpawnEvent did not observe the exact reinforcement instance");
+                require(scenario.order.indexOf("entity-join") > scenario.order.indexOf("finalize-spawn"),
+                        "entity addition did not follow FinalizeSpawnEvent: " + scenario.order);
                 require(scenario.placementCount > 0,
                         "native MobSpawnEvent.SpawnPlacementCheck was not observed");
                 require(scenario.placementCount <= 50,
@@ -291,15 +321,35 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                                     + " times, expected one check for each of the exact 50 placement attempts");
                     require(scenario.lastPlacementResult == MobSpawnEvent.SpawnPlacementCheck.Result.FAIL,
                             "native veto did not leave the final placement result at FAIL");
+                } else if (scenario.expectFinalizeSpawnEvent) {
+                    require(scenario.placementCount > 0,
+                            "FinalizeSpawnEvent veto scenario never reached native placement checks");
+                    require(scenario.lastPlacementResult == MobSpawnEvent.SpawnPlacementCheck.Result.SUCCEED,
+                            "FinalizeSpawnEvent veto scenario did not pass native placement checks");
+                    require(scenario.finalizeSpawnCount == 1,
+                            "FinalizeSpawnEvent veto scenario should fire exactly once");
+                    require(scenario.finalizedAid != null && scenario.finalizedAid.isSpawnCancelled(),
+                            "native FinalizeSpawnEvent did not mark the aid Zombie as spawn-cancelled");
+                    require(Math.abs(callerChargeModifierAmount(hurtZombie) + 0.05D) < 0.0001D,
+                            "caller reinforcement charge was not applied after the cancelled add attempt");
+                    AttributeModifier calleeCharge = calleeChargeModifier(scenario.finalizedAid);
+                    require(Math.abs(calleeCharge.amount() + 0.05D) < 0.0001D
+                                    && calleeCharge.operation() == AttributeModifier.Operation.ADD_VALUE,
+                            "callee charge was not applied to the finalized-but-cancelled aid Zombie");
                 } else {
                     require(scenario.placementCount == 0,
                             "native placement ran even though a vanilla gate should have prevented it");
+                    require(scenario.finalizeSpawnCount == 0,
+                            "FinalizeSpawnEvent ran even though no aid candidate was accepted");
                 }
             }
 
             if (scenario.expectPlacementAttempt) {
                 LOG.info("ok: zombie-summon-aid: {} (nativePlacementChecks={}, entityJoinEvents={})",
                         scenario.name, scenario.placementCount, scenario.entityJoinCount);
+            } else if (scenario.cancelFinalizeSpawn) {
+                LOG.info("ok: zombie-summon-aid: {} (nativeFinalizeSpawnEvents={}, entityJoinEvents={})",
+                        scenario.name, scenario.finalizeSpawnCount, scenario.entityJoinCount);
             } else {
                 LOG.info("ok: zombie-summon-aid: {}", scenario.name);
             }
@@ -430,9 +480,14 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
         double eventSummonChance;
         Event$Result eventResult;
         int placementCount;
+        int finalizeSpawnCount;
+        Zombie finalizedAid;
+        MobSpawnType finalizedSpawnType;
         MobSpawnEvent.SpawnPlacementCheck.Result lastPlacementResult;
         BlockPos lastPlacementPos;
         boolean verifyFirstPlacementSequence;
+        boolean expectFinalizeSpawnEvent;
+        boolean cancelFinalizeSpawn;
         BlockPos expectedFirstPlacementPos;
         BlockPos firstPlacementPos;
         int entityJoinCount;
@@ -479,8 +534,10 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                 MobSpawnEvent.SpawnPlacementCheck.Result placementResult,
                 boolean customAid, boolean expectTarget
         ) {
-            return new Scenario(name, result, difficulty, mobSpawning, chance, nullAttacker,
+            Scenario scenario = new Scenario(name, result, difficulty, mobSpawning, chance, nullAttacker,
                     customAid, placementResult, true, expectTarget, false);
+            scenario.expectFinalizeSpawnEvent = true;
+            return scenario;
         }
 
         static Scenario expectSpawnWithoutTarget(
@@ -488,8 +545,10 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                 boolean mobSpawning, double chance, boolean nullAttacker,
                 MobSpawnEvent.SpawnPlacementCheck.Result placementResult
         ) {
-            return new Scenario(name, result, difficulty, mobSpawning, chance, nullAttacker,
+            Scenario scenario = new Scenario(name, result, difficulty, mobSpawning, chance, nullAttacker,
                     false, placementResult, true, false, false);
+            scenario.expectFinalizeSpawnEvent = true;
+            return scenario;
         }
 
         static Scenario expectNativeVeto(
@@ -500,6 +559,18 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
             Scenario scenario = new Scenario(name, result, difficulty, mobSpawning, chance, nullAttacker,
                     false, placementResult, false, false, true);
             scenario.verifyFirstPlacementSequence = true;
+            return scenario;
+        }
+
+        static Scenario expectFinalizeSpawnVeto(
+                String name, Event$Result result, Difficulty difficulty,
+                boolean mobSpawning, double chance, boolean nullAttacker,
+                MobSpawnEvent.SpawnPlacementCheck.Result placementResult
+        ) {
+            Scenario scenario = new Scenario(name, result, difficulty, mobSpawning, chance, nullAttacker,
+                    false, placementResult, false, false, false);
+            scenario.expectFinalizeSpawnEvent = true;
+            scenario.cancelFinalizeSpawn = true;
             return scenario;
         }
     }
@@ -593,6 +664,30 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
             }
             active.lastPlacementResult = event.getResult();
             active.lastPlacementPos = event.getPos();
+        }
+
+        @SubscribeEvent
+        public void onFinalizeSpawn(FinalizeSpawnEvent event) {
+            Scenario active = scenario;
+            ProbeArena activeArena = arena;
+            if (active == null || activeArena == null
+                    || event.getLevel() != level
+                    || event.getSpawnType() != MobSpawnType.REINFORCEMENT
+                    || !(event.getEntity() instanceof Zombie zombie)
+                    || zombie == watched
+                    || !activeArena.contains(zombie.blockPosition())) {
+                return;
+            }
+
+            active.finalizeSpawnCount++;
+            active.finalizedAid = zombie;
+            active.finalizedSpawnType = event.getSpawnType();
+            active.order.add("finalize-spawn");
+            if (active.cancelFinalizeSpawn) {
+                // This is the NeoForge spawn-cancel flag, not event cancellation:
+                // finalization still runs, but the entity must not enter the level.
+                event.setSpawnCancelled(true);
+            }
         }
 
         @SubscribeEvent
