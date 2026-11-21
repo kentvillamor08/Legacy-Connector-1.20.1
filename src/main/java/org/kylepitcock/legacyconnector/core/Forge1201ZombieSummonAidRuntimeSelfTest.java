@@ -115,7 +115,7 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
 
             runCase(failures, level, arena, listeners, attacker,
                     Scenario.expectNativeVeto(
-                            "native SpawnPlacementCheck FAIL vetoes ALLOW after exactly 50 attempts without consuming the vanilla chance roll (same Zombie RNG instance)",
+                            "native SpawnPlacementCheck FAIL vetoes exactly 50 ALLOW candidates from the hook-time RNG sequence",
                             Event$Result.ALLOW, Difficulty.HARD, true, 0.0D, false,
                             MobSpawnEvent.SpawnPlacementCheck.Result.FAIL));
 
@@ -171,17 +171,9 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
             var damageSource = scenario.nullAttacker
                     ? level.damageSources().generic()
                     : level.damageSources().playerAttack(attacker);
-            if (scenario.verifyFirstPlacementSequence) {
-                long seed = 0x5EED1201L;
-                RandomSource hurtZombieRandom = hurtZombie.getRandom();
-                hurtZombieRandom.setSeed(seed);
-                List<BlockPos> expectedCandidates = placementCandidates(
-                        hurtZombie.blockPosition(), hurtZombieRandom);
-                scenario.expectedFirstPlacementPos = expectedCandidates.get(0);
-                arena.installPlacementPads(expectedCandidates);
-                // Rewind the very same RNG implementation and instance the production Mixin samples.
-                hurtZombieRandom.setSeed(seed);
-            }
+            // For the forced-placement exhaustion case, the deterministic RNG setup is performed
+            // inside onSummonAid(), at the actual Mixin decision point. Seeding before hurt() would
+            // incorrectly include any RNG use in Monster.hurt's accepted-damage prefix.
             boolean hurtResult = hurtZombie.hurt(damageSource, 1.0F);
             listeners.disarm();
 
@@ -363,9 +355,11 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
 
     /**
      * Reproduces the target's 50 candidate coordinate draws from the hurt
-     * Zombie's own RandomSource instance. Using the same object is important:
-     * RandomSource.create(seed) may produce a different RNG implementation
-     * than Entity.getRandom() on this Minecraft version.
+     * Zombie's own RandomSource instance. The caller seeds this object from the
+     * SummonAidEvent listener at the Mixin decision point, after accepted damage
+     * processing; seeding before Zombie.hurt would include any earlier damage-path
+     * RNG consumption. Using the same object also avoids assuming that a separate
+     * RandomSource.create(seed) has the same implementation or sequence.
      */
     private static List<BlockPos> placementCandidates(BlockPos origin, RandomSource expectedRandom) {
         List<BlockPos> candidates = new ArrayList<>(50);
@@ -524,6 +518,21 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
             }
             event.setResult(active.result);
             active.eventResult = event.getResult();
+
+            if (active.verifyFirstPlacementSequence) {
+                // The Mixin posts this event after Monster.hurt has already processed accepted damage.
+                // Seed at this exact hook rather than before Zombie.hurt(), so earlier damage-path RNG
+                // consumption cannot contaminate the deterministic forced-placement oracle.
+                long seed = 0x5EED1201L;
+                RandomSource hurtZombieRandom = watched.getRandom();
+                hurtZombieRandom.setSeed(seed);
+                List<BlockPos> expectedCandidates = placementCandidates(
+                        new BlockPos(active.eventX, active.eventY, active.eventZ), hurtZombieRandom);
+                active.expectedFirstPlacementPos = expectedCandidates.get(0);
+                arena.installPlacementPads(expectedCandidates);
+                // Rewind after the pads are installed; the production ALLOW helper now starts at this state.
+                hurtZombieRandom.setSeed(seed);
+            }
         }
 
         private Zombie activeCustomAid;
