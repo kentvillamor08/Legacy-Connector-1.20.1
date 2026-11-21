@@ -23,6 +23,7 @@ import net.minecraft.world.entity.SpawnPlacements;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.level.Level;
+import net.neoforged.neoforge.event.EventHooks;
 import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -143,7 +144,10 @@ public abstract class ZombieSummonAidEventMixin {
             }
 
             DifficultyInstance difficulty = level.getCurrentDifficultyAt(aid.blockPosition());
-            aid.finalizeSpawn(
+            // Match NeoForge's call-site redirect for vanilla finalizeSpawn calls:
+            // this wrapper posts FinalizeSpawnEvent and applies its spawn-cancelled flag.
+            EventHooks.finalizeMobSpawn(
+                    aid,
                     serverLevel,
                     difficulty,
                     MobSpawnType.REINFORCEMENT,
