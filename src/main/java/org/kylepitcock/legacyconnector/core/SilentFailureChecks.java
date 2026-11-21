@@ -66,6 +66,10 @@ public final class SilentFailureChecks {
             check("bucket: BucketItem.use FillBucketEvent transaction behavior",
                     () -> Forge1201BucketFillRuntimeSelfTest.run(testLevel));
         }
+        if (Boolean.getBoolean("legacyconnector.sleepingBehaviorSelfTest")) {
+            check("sleeping: SleepingLocationCheckEvent and SleepingTimeCheckEvent behavior",
+                    () -> Forge1201SleepingRuntimeSelfTest.run(testLevel));
+        }
         LOG.info("SILENT FAILURE CHECKS: {} passed, {} failed", passed, failures.size());
         for (String f : failures) LOG.error("SILENT FAILURE CHECK FAILED: {}", f);
         if (Boolean.getBoolean("legacyconnector.selfTestFailFast") && !failures.isEmpty()) {
