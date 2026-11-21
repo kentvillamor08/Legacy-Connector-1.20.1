@@ -27,6 +27,8 @@
     "ItemStackLegacyNbtMixin",
     "ItemEntityForge1201PickupMixin",
     "BucketItemForge1201FillBucketMixin",
+    "LivingEntitySleepingLocationCheckMixin",
+    "PlayerSleepingTimeCheckMixin",
     "MobBucketItemLegacyNbtMixin",
     "PlayerLegacyEnchantmentDamageMixin",
     "JigsawStructureLegacyVillageMixin",
