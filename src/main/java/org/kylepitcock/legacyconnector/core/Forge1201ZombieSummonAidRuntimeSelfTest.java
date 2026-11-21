@@ -17,6 +17,8 @@ import legacyconnector.v1_20_1.net.minecraftforge.eventbus.api.Event$Result;
 import legacyconnector.v1_20_1.net.minecraftforge.event.entity.living.ZombieEvent$SummonAidEvent;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.Mth;
+import net.minecraft.util.RandomSource;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobSpawnType;
@@ -97,7 +99,8 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                             Event$Result.DENY, Difficulty.HARD, true, 1.0D, false));
 
             runCase(failures, level, arena, listeners, attacker,
-                    Scenario.expectSpawn("ALLOW bypasses difficulty, chance and gamerule gates",
+                    Scenario.expectSpawnWithFirstPlacementSequence(
+                            "ALLOW bypasses difficulty, chance and gamerule gates before the vanilla chance roll",
                             Event$Result.ALLOW, Difficulty.NORMAL, false, 0.0D, false,
                             MobSpawnEvent.SpawnPlacementCheck.Result.SUCCEED, false, true));
 
@@ -112,7 +115,7 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                             MobSpawnEvent.SpawnPlacementCheck.Result.SUCCEED));
 
             runCase(failures, level, arena, listeners, attacker,
-                    Scenario.expectNativeVeto("native SpawnPlacementCheck FAIL still vetoes ALLOW",
+                    Scenario.expectNativeVeto("native SpawnPlacementCheck FAIL vetoes ALLOW after exactly 50 attempts",
                             Event$Result.ALLOW, Difficulty.NORMAL, false, 0.0D, false,
                             MobSpawnEvent.SpawnPlacementCheck.Result.FAIL));
 
@@ -168,6 +171,11 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
             var damageSource = scenario.nullAttacker
                     ? level.damageSources().generic()
                     : level.damageSources().playerAttack(attacker);
+            if (scenario.verifyFirstPlacementSequence) {
+                long seed = 0x5EED1201L;
+                hurtZombie.getRandom().setSeed(seed);
+                scenario.expectedFirstPlacementPos = firstPlacementCandidate(hurtZombie.blockPosition(), seed);
+            }
             boolean hurtResult = hurtZombie.hurt(damageSource, 1.0F);
             listeners.disarm();
 
@@ -193,6 +201,14 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                     "listener result round-trip was " + scenario.eventResult + ", expected " + scenario.result);
             require(!scenario.order.isEmpty() && "legacy-event".equals(scenario.order.get(0)),
                     "legacy SummonAidEvent was not the first recorded hook: " + scenario.order);
+            if (scenario.verifyFirstPlacementSequence) {
+                require(scenario.firstPlacementPos != null,
+                        "ALLOW did not reach a native placement check for its first candidate");
+                require(scenario.expectedFirstPlacementPos.equals(scenario.firstPlacementPos),
+                        "first placement candidate was " + scenario.firstPlacementPos
+                                + ", expected seeded first candidate " + scenario.expectedFirstPlacementPos
+                                + "; a random value may have been consumed before forced placement sampling");
+            }
 
             List<Zombie> addedZombies = new ArrayList<>();
             for (Zombie zombie : arena.zombies()) {
@@ -272,8 +288,9 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                 if (scenario.expectPlacementAttempt) {
                     require(scenario.placementCount > 0,
                             "no native placement attempt reached the event listener");
-                    require(scenario.placementCount <= 50,
-                            "native placement event count exceeded the target 50-attempt loop");
+                    require(scenario.placementCount == 50,
+                            "native placement veto was observed " + scenario.placementCount
+                                    + " times, expected one check for each of the exact 50 placement attempts");
                     require(scenario.lastPlacementResult == MobSpawnEvent.SpawnPlacementCheck.Result.FAIL,
                             "native veto did not leave the final placement result at FAIL");
                 } else {
@@ -338,6 +355,21 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
         }
     }
 
+    /**
+     * Mirrors the first three candidate-axis draws made by the production
+     * forced-spawn loop from an independently seeded RandomSource.
+     */
+    private static BlockPos firstPlacementCandidate(BlockPos origin, long seed) {
+        RandomSource expectedRandom = RandomSource.create(seed);
+        int x = origin.getX() + Mth.nextInt(expectedRandom, 7, 40)
+                * Mth.nextInt(expectedRandom, -1, 1);
+        int y = origin.getY() + Mth.nextInt(expectedRandom, 7, 40)
+                * Mth.nextInt(expectedRandom, -1, 1);
+        int z = origin.getZ() + Mth.nextInt(expectedRandom, 7, 40)
+                * Mth.nextInt(expectedRandom, -1, 1);
+        return new BlockPos(x, y, z);
+    }
+
     private static void require(boolean condition, String message) {
         if (!condition) throw new IllegalStateException(message);
     }
@@ -367,6 +399,9 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
         int placementCount;
         MobSpawnEvent.SpawnPlacementCheck.Result lastPlacementResult;
         BlockPos lastPlacementPos;
+        boolean verifyFirstPlacementSequence;
+        BlockPos expectedFirstPlacementPos;
+        BlockPos firstPlacementPos;
         int entityJoinCount;
         Zombie joinedAid;
         final List<String> order = new ArrayList<>();
@@ -422,6 +457,18 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
         ) {
             return new Scenario(name, result, difficulty, mobSpawning, chance, nullAttacker,
                     false, placementResult, true, false, false);
+        }
+
+        static Scenario expectSpawnWithFirstPlacementSequence(
+                String name, Event$Result result, Difficulty difficulty,
+                boolean mobSpawning, double chance, boolean nullAttacker,
+                MobSpawnEvent.SpawnPlacementCheck.Result placementResult,
+                boolean customAid, boolean expectTarget
+        ) {
+            Scenario scenario = expectSpawn(name, result, difficulty, mobSpawning, chance,
+                    nullAttacker, placementResult, customAid, expectTarget);
+            scenario.verifyFirstPlacementSequence = true;
+            return scenario;
         }
 
         static Scenario expectNativeVeto(
@@ -497,6 +544,9 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
             }
 
             active.placementCount++;
+            if (active.firstPlacementPos == null) {
+                active.firstPlacementPos = event.getPos().immutable();
+            }
             active.order.add("native-placement");
             if (active.nativePlacementResult != null) {
                 event.setResult(active.nativePlacementResult);
