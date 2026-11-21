@@ -89,26 +89,26 @@ public final class Forge1201SleepingRuntimeSelfTest {
     ) {
         runLocationCase(failures, listeners, player, level, bed,
                 "DEFAULT accepts a valid bed", bed.foot, false,
-                Result.DEFAULT, null, true, null, List.of("legacy-location", "native-continue"));
+                Event$Result.DEFAULT, null, true, null, List.of("legacy-location", "native-continue"));
         runLocationCase(failures, listeners, player, level, bed,
                 "DEFAULT rejects a non-bed position", bed.nonBed, false,
-                Result.DEFAULT, null, false, Player.BedSleepingProblem.NOT_POSSIBLE_HERE,
+                Event$Result.DEFAULT, null, false, Player.BedSleepingProblem.NOT_POSSIBLE_HERE,
                 List.of("legacy-location", "native-continue"));
         runLocationCase(failures, listeners, player, level, bed,
                 "ALLOW accepts a non-bed position", bed.nonBed, false,
-                Result.ALLOW, null, true, null,
+                Event$Result.ALLOW, null, true, null,
                 List.of("legacy-location", "native-continue"));
         runLocationCase(failures, listeners, player, level, bed,
                 "DENY rejects a valid bed", bed.foot, false,
-                Result.DENY, null, false, Player.BedSleepingProblem.NOT_POSSIBLE_HERE,
+                Event$Result.DENY, null, false, Player.BedSleepingProblem.NOT_POSSIBLE_HERE,
                 List.of("legacy-location", "native-continue"));
         runLocationCase(failures, listeners, player, level, bed,
                 "empty sleeping Optional skips the legacy location event", bed.foot, true,
-                Result.DEFAULT, null, false, Player.BedSleepingProblem.NOT_POSSIBLE_HERE,
+                Event$Result.DEFAULT, null, false, Player.BedSleepingProblem.NOT_POSSIBLE_HERE,
                 List.of("native-continue"));
         runLocationCase(failures, listeners, player, level, bed,
                 "native continuation listener can override legacy DENY", bed.foot, false,
-                Result.DENY, true, true, Player.BedSleepingProblem.NOT_POSSIBLE_HERE,
+                Event$Result.DENY, true, true, Player.BedSleepingProblem.NOT_POSSIBLE_HERE,
                 List.of("legacy-location", "native-continue"));
     }
 
@@ -121,7 +121,7 @@ public final class Forge1201SleepingRuntimeSelfTest {
             String name,
             BlockPos sleepingPos,
             boolean clearPosition,
-            Result locationResult,
+            Event$Result locationResult,
             Boolean nativeOverride,
             boolean expectedResult,
             Player.BedSleepingProblem expectedNativeProblem,
@@ -170,23 +170,23 @@ public final class Forge1201SleepingRuntimeSelfTest {
             BedFixture bed
     ) {
         runTickCase(failures, listeners, player, level, bed,
-                "daytime DEFAULT wakes the sleeper", true, Result.DEFAULT, null,
+                "daytime DEFAULT wakes the sleeper", true, Event$Result.DEFAULT, null,
                 false, 0, 1, Player.BedSleepingProblem.NOT_POSSIBLE_NOW,
                 List.of("legacy-time", "native-continue"));
         runTickCase(failures, listeners, player, level, bed,
-                "nighttime DEFAULT keeps the sleeper asleep", false, Result.DEFAULT, null,
+                "nighttime DEFAULT keeps the sleeper asleep", false, Event$Result.DEFAULT, null,
                 true, 1, 2, null,
                 List.of("legacy-time", "native-continue", "legacy-location", "native-continue"));
         runTickCase(failures, listeners, player, level, bed,
-                "daytime ALLOW keeps the sleeper asleep", true, Result.ALLOW, null,
+                "daytime ALLOW keeps the sleeper asleep", true, Event$Result.ALLOW, null,
                 true, 1, 2, null,
                 List.of("legacy-time", "native-continue", "legacy-location", "native-continue"));
         runTickCase(failures, listeners, player, level, bed,
-                "nighttime DENY wakes the sleeper", false, Result.DENY, null,
+                "nighttime DENY wakes the sleeper", false, Event$Result.DENY, null,
                 false, 0, 1, Player.BedSleepingProblem.NOT_POSSIBLE_NOW,
                 List.of("legacy-time", "native-continue"));
         runTickCase(failures, listeners, player, level, bed,
-                "native continuation listener can override legacy time DENY", false, Result.DENY, true,
+                "native continuation listener can override legacy time DENY", false, Event$Result.DENY, true,
                 true, 1, 2, Player.BedSleepingProblem.NOT_POSSIBLE_NOW,
                 List.of("legacy-time", "native-continue", "legacy-location", "native-continue"));
     }
@@ -199,7 +199,7 @@ public final class Forge1201SleepingRuntimeSelfTest {
             BedFixture bed,
             String name,
             boolean daytime,
-            Result timeResult,
+            Event$Result timeResult,
             Boolean nativeOverride,
             boolean expectedSleeping,
             int expectedLocationCount,
@@ -257,19 +257,19 @@ public final class Forge1201SleepingRuntimeSelfTest {
     ) {
         runSleepStartCase(failures, listeners, player, level, bed,
                 "native CanPlayerSleepEvent rejection prevents the legacy time event",
-                false, Result.DEFAULT, true, true);
+                false, Event$Result.DEFAULT, true, true);
         runSleepStartCase(failures, listeners, player, level, bed,
                 "daytime DEFAULT returns NOT_POSSIBLE_NOW",
-                true, Result.DEFAULT, false, false);
+                true, Event$Result.DEFAULT, false, false);
         runSleepStartCase(failures, listeners, player, level, bed,
                 "nighttime DEFAULT starts sleeping",
-                false, Result.DEFAULT, false, true);
+                false, Event$Result.DEFAULT, false, true);
         runSleepStartCase(failures, listeners, player, level, bed,
                 "daytime ALLOW starts sleeping",
-                true, Result.ALLOW, false, true);
+                true, Event$Result.ALLOW, false, true);
         runSleepStartCase(failures, listeners, player, level, bed,
                 "nighttime DENY returns NOT_POSSIBLE_NOW",
-                false, Result.DENY, false, false);
+                false, Event$Result.DENY, false, false);
     }
 
     private static void runSleepStartCase(
@@ -280,7 +280,7 @@ public final class Forge1201SleepingRuntimeSelfTest {
             BedFixture bed,
             String name,
             boolean daytime,
-            Result timeResult,
+            Event$Result timeResult,
             boolean rejectNativePrecheck,
             boolean expectedSuccess
     ) {
@@ -408,8 +408,8 @@ public final class Forge1201SleepingRuntimeSelfTest {
     }
 
     private static final class Scenario {
-        private Result locationResult = Result.DEFAULT;
-        private Result timeResult = Result.DEFAULT;
+        private Event$Result locationResult = Event$Result.DEFAULT;
+        private Event$Result timeResult = Event$Result.DEFAULT;
         private Boolean nativeContinueOverride;
         private boolean rejectNativeSleep;
         private int locationCount;
