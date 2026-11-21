@@ -202,7 +202,17 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
 
             if (scenario.expectSpawn) {
                 require(addedZombies.size() == 1,
-                        "expected exactly one reinforcement Zombie, found " + addedZombies.size());
+                        "expected exactly one reinforcement Zombie, found " + addedZombies.size()
+                                + "; nativePlacementChecks=" + scenario.placementCount
+                                + ", lastPlacementResult=" + scenario.lastPlacementResult
+                                + ", lastPlacementPos=" + scenario.lastPlacementPos
+                                + ", entityJoinEvents=" + scenario.entityJoinCount
+                                + ", joinedAid=" + scenario.joinedAid
+                                + ", order=" + scenario.order
+                                + ", hurtZombiePos=" + hurtZombie.blockPosition()
+                                + ", customAidProvided=" + (customAid != null)
+                                + (customAid == null ? "" : ", customAidRemoved=" + customAid.isRemoved()
+                                + ", customAidLevelMatches=" + (customAid.level() == level)));
                 Zombie aid = addedZombies.get(0);
                 require(scenario.customAid ? aid == customAid : aid != customAid,
                         scenario.customAid
@@ -325,6 +335,7 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
         Event$Result eventResult;
         int placementCount;
         MobSpawnEvent.SpawnPlacementCheck.Result lastPlacementResult;
+        BlockPos lastPlacementPos;
         int entityJoinCount;
         Zombie joinedAid;
         final List<String> order = new ArrayList<>();
@@ -460,6 +471,7 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                 event.setResult(active.nativePlacementResult);
             }
             active.lastPlacementResult = event.getResult();
+            active.lastPlacementPos = event.getPos();
         }
 
         @SubscribeEvent
