@@ -20,6 +20,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Difficulty;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.MobSpawnType;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.monster.Zombie;
 import net.minecraft.world.level.GameRules;
@@ -251,9 +252,17 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                                 + hurtZombie.getAttributeValue(Attributes.SPAWN_REINFORCEMENTS_CHANCE) + ")");
 
                 if (scenario.customAid) {
-                    double customChance = customAid.getAttributeValue(Attributes.SPAWN_REINFORCEMENTS_CHANCE);
-                    require(Math.abs(customChance - 0.45D) < 0.0001D,
-                            "custom callee reinforcement chance was " + customChance + ", expected 0.45");
+                    AttributeModifier calleeCharge = calleeChargeModifier(customAid);
+                    require(Math.abs(calleeCharge.amount() + 0.05D) < 0.0001D,
+                            "custom callee reinforcement-charge modifier amount was "
+                                    + calleeCharge.amount() + ", expected -0.05 (effective chance "
+                                    + customAid.getAttributeValue(Attributes.SPAWN_REINFORCEMENTS_CHANCE)
+                                    + ", base chance "
+                                    + customAid.getAttribute(Attributes.SPAWN_REINFORCEMENTS_CHANCE).getBaseValue()
+                                    + ")");
+                    require(calleeCharge.operation() == AttributeModifier.Operation.ADD_VALUE,
+                            "custom callee reinforcement-charge operation was "
+                                    + calleeCharge.operation() + ", expected ADD_VALUE");
                 }
             } else {
                 require(addedZombies.isEmpty(),
@@ -304,6 +313,28 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
             return modifier.amount();
         } catch (ReflectiveOperationException ex) {
             throw new IllegalStateException("could not read target caller reinforcement-charge modifier id", ex);
+        }
+    }
+
+    /**
+     * Reads the actual vanilla callee-charge modifier attached to the spawned
+     * Zombie. The effective attribute value is not a reliable assertion here:
+     * finalizeSpawn may leave a non-leader at zero, and the vanilla -0.05
+     * modifier is then clamped by the attribute's lower bound.
+     */
+    private static AttributeModifier calleeChargeModifier(Zombie zombie) {
+        try {
+            var field = Zombie.class.getDeclaredField("ZOMBIE_REINFORCEMENT_CALLEE_CHARGE");
+            field.setAccessible(true);
+            var expected = (AttributeModifier) field.get(null);
+            var applied = zombie.getAttribute(Attributes.SPAWN_REINFORCEMENTS_CHANCE)
+                    .getModifier(expected.id());
+            require(applied != null,
+                    "target callee reinforcement-charge modifier was not installed on the exact aid Zombie");
+            return applied;
+        } catch (ReflectiveOperationException ex) {
+            throw new IllegalStateException(
+                    "could not read target callee reinforcement-charge modifier", ex);
         }
     }
 
