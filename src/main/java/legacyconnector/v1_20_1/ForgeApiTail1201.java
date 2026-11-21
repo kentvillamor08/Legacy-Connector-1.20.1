@@ -545,6 +545,41 @@ public final class ForgeApiTail1201 {
                         && vanillaResult);
     }
 
+    /**
+     * Forge 1.20.1's zombie reinforcement event. It is deliberately posted
+     * before the vanilla attacker/difficulty/chance/game-rule gates.
+     */
+    public static legacyconnector.v1_20_1.net.minecraftforge.event.entity.living.ZombieEvent$SummonAidEvent
+            fireZombieSummonAid(
+                    net.minecraft.world.entity.monster.Zombie zombie,
+                    net.minecraft.world.level.Level level,
+                    int x,
+                    int y,
+                    int z,
+                    net.minecraft.world.entity.LivingEntity attacker,
+                    double summonChance) {
+        return fireZombieSummonAid(
+                net.neoforged.neoforge.common.NeoForge.EVENT_BUS,
+                zombie, level, x, y, z, attacker, summonChance);
+    }
+
+    /** Package-private bus seam for isolated event-result and dispatch tests. */
+    static legacyconnector.v1_20_1.net.minecraftforge.event.entity.living.ZombieEvent$SummonAidEvent
+            fireZombieSummonAid(
+                    net.neoforged.bus.api.IEventBus eventBus,
+                    net.minecraft.world.entity.monster.Zombie zombie,
+                    net.minecraft.world.level.Level level,
+                    int x,
+                    int y,
+                    int z,
+                    net.minecraft.world.entity.LivingEntity attacker,
+                    double summonChance) {
+        var event = new legacyconnector.v1_20_1.net.minecraftforge.event.entity.living.ZombieEvent$SummonAidEvent(
+                zombie, level, x, y, z, attacker, summonChance);
+        eventBus.post(event);
+        return event;
+    }
+
     /** Brewing recipes are registered through RegisterBrewingRecipesEvent now; recipes added the old way are accepted and not brewed. */
     public static boolean brewAddRecipe(net.minecraft.world.item.crafting.Ingredient ingredient, net.minecraft.world.item.crafting.Ingredient input, net.minecraft.world.item.ItemStack output) {
         return true;
