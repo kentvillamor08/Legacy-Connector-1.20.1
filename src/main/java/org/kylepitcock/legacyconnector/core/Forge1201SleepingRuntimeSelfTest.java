@@ -384,13 +384,13 @@ public final class Forge1201SleepingRuntimeSelfTest {
             remember(foot);
             remember(head);
 
-            level.setBlock(foot.below(), Blocks.STONE.defaultBlockState(), 3);
-            level.setBlock(head.below(), Blocks.STONE.defaultBlockState(), 3);
+            level.setBlock(foot.below(), Blocks.STONE.defaultBlockState(), 2);
+            level.setBlock(head.below(), Blocks.STONE.defaultBlockState(), 2);
             BlockState base = Blocks.RED_BED.defaultBlockState()
                     .setValue(BedBlock.FACING, Direction.NORTH)
                     .setValue(BedBlock.OCCUPIED, false);
-            level.setBlock(foot, base.setValue(BedBlock.PART, BedPart.FOOT), 3);
-            level.setBlock(head, base.setValue(BedBlock.PART, BedPart.HEAD), 3);
+            level.setBlock(foot, base.setValue(BedBlock.PART, BedPart.FOOT), 2);
+            level.setBlock(head, base.setValue(BedBlock.PART, BedPart.HEAD), 2);
         }
 
         private void remember(BlockPos pos) {
@@ -401,7 +401,7 @@ public final class Forge1201SleepingRuntimeSelfTest {
             List<Map.Entry<BlockPos, BlockState>> entries = new ArrayList<>(previous.entrySet());
             for (int i = entries.size() - 1; i >= 0; i--) {
                 Map.Entry<BlockPos, BlockState> entry = entries.get(i);
-                level.setBlock(entry.getKey(), entry.getValue(), 3);
+                level.setBlock(entry.getKey(), entry.getValue(), 2);
             }
             previous.clear();
         }
