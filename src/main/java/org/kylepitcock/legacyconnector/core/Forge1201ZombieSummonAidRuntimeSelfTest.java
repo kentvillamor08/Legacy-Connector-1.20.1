@@ -99,8 +99,7 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                             Event$Result.DENY, Difficulty.HARD, true, 1.0D, false));
 
             runCase(failures, level, arena, listeners, attacker,
-                    Scenario.expectSpawnWithFirstPlacementSequence(
-                            "ALLOW bypasses difficulty, chance and gamerule gates before the vanilla chance roll",
+                    Scenario.expectSpawn("ALLOW bypasses difficulty, chance and gamerule gates",
                             Event$Result.ALLOW, Difficulty.NORMAL, false, 0.0D, false,
                             MobSpawnEvent.SpawnPlacementCheck.Result.SUCCEED, false, true));
 
@@ -115,8 +114,9 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                             MobSpawnEvent.SpawnPlacementCheck.Result.SUCCEED));
 
             runCase(failures, level, arena, listeners, attacker,
-                    Scenario.expectNativeVeto("native SpawnPlacementCheck FAIL vetoes ALLOW after exactly 50 attempts",
-                            Event$Result.ALLOW, Difficulty.NORMAL, false, 0.0D, false,
+                    Scenario.expectNativeVeto(
+                            "native SpawnPlacementCheck FAIL vetoes ALLOW after exactly 50 attempts without consuming the vanilla chance roll",
+                            Event$Result.ALLOW, Difficulty.HARD, true, 0.0D, false,
                             MobSpawnEvent.SpawnPlacementCheck.Result.FAIL));
 
         } catch (RuntimeException | LinkageError ex) {
@@ -459,25 +459,15 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                     false, placementResult, true, false, false);
         }
 
-        static Scenario expectSpawnWithFirstPlacementSequence(
-                String name, Event$Result result, Difficulty difficulty,
-                boolean mobSpawning, double chance, boolean nullAttacker,
-                MobSpawnEvent.SpawnPlacementCheck.Result placementResult,
-                boolean customAid, boolean expectTarget
-        ) {
-            Scenario scenario = expectSpawn(name, result, difficulty, mobSpawning, chance,
-                    nullAttacker, placementResult, customAid, expectTarget);
-            scenario.verifyFirstPlacementSequence = true;
-            return scenario;
-        }
-
         static Scenario expectNativeVeto(
                 String name, Event$Result result, Difficulty difficulty,
                 boolean mobSpawning, double chance, boolean nullAttacker,
                 MobSpawnEvent.SpawnPlacementCheck.Result placementResult
         ) {
-            return new Scenario(name, result, difficulty, mobSpawning, chance, nullAttacker,
+            Scenario scenario = new Scenario(name, result, difficulty, mobSpawning, chance, nullAttacker,
                     false, placementResult, false, false, true);
+            scenario.verifyFirstPlacementSequence = true;
+            return scenario;
         }
     }
 
