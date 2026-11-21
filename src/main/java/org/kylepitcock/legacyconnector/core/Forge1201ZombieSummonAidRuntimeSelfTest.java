@@ -254,6 +254,16 @@ public final class Forge1201ZombieSummonAidRuntimeSelfTest {
                                 + ", finalizedAidIsCustom=" + (customAid != null && scenario.finalizedAid == customAid)
                                 + ", joinedAidAddedToLevel=" + (scenario.joinedAid != null && scenario.joinedAid.isAddedToLevel())
                                 + ", joinedAidRemoved=" + (scenario.joinedAid != null && scenario.joinedAid.isRemoved())
+                                + ", joinedAidLevelMatches=" + (scenario.joinedAid != null && scenario.joinedAid.level() == level)
+                                + ", joinedAidIsFinalized=" + (scenario.joinedAid != null && scenario.joinedAid == scenario.finalizedAid)
+                                + ", joinedAidInArena=" + (scenario.joinedAid != null && arena.contains(scenario.joinedAid.blockPosition()))
+                                + ", joinedAidPos=" + (scenario.joinedAid == null ? null : scenario.joinedAid.blockPosition())
+                                + ", joinedAidBounds=" + (scenario.joinedAid == null ? null : scenario.joinedAid.getBoundingBox())
+                                + ", joinedAidLookupById=" + (scenario.joinedAid != null && level.getEntity(scenario.joinedAid.getId()) == scenario.joinedAid)
+                                + ", joinedAidLookupByUuid=" + (scenario.joinedAid != null && level.getEntity(scenario.joinedAid.getUUID()) == scenario.joinedAid)
+                                + ", joinedAidExactQueryCount=" + (scenario.joinedAid == null ? 0
+                                : level.getEntitiesOfClass(Zombie.class, scenario.joinedAid.getBoundingBox().inflate(1.0D)).size())
+                                + ", arenaQueryCount=" + arena.zombies().size()
                                 + ", order=" + scenario.order
                                 + ", hurtZombiePos=" + hurtZombie.blockPosition()
                                 + ", customAidProvided=" + (customAid != null)
