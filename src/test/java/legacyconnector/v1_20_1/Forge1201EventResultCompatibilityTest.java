@@ -23,6 +23,7 @@ import legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.EntityItem
 import legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.FillBucketEvent;
 import legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.SleepingLocationCheckEvent;
 import legacyconnector.v1_20_1.net.minecraftforge.event.entity.player.SleepingTimeCheckEvent;
+import legacyconnector.v1_20_1.net.minecraftforge.event.entity.living.ZombieEvent$SummonAidEvent;
 import net.neoforged.neoforge.common.util.TriState;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -217,6 +218,70 @@ class Forge1201EventResultCompatibilityTest {
         assertSame(heldBucket, canceled.getObject());
         assertNull(next.get(), "the event bus should consume the cancellation directive");
         assertEquals(3, posts.get(), "every invocation must post one FillBucketEvent");
+    }
+
+    @Test
+    void zombieSummonAidShimPreservesForgeContextResultAndNonCancelableContracts() {
+        var event = new legacyconnector.v1_20_1.net.minecraftforge.event.entity.living.ZombieEvent$SummonAidEvent(
+                null, null, -4, 65, 12, null, 0.375D);
+
+        assertNull(event.getEntity());
+        assertNull(event.getLevel());
+        assertEquals(-4, event.getX());
+        assertEquals(65, event.getY());
+        assertEquals(12, event.getZ());
+        assertNull(event.getAttacker(), "the source call site can dispatch with a null attacker");
+        assertEquals(0.375D, event.getSummonChance(), 0.0D);
+        assertNull(event.getCustomSummonedAid());
+
+        assertSame(Event$Result.DEFAULT, event.getResult());
+        assertSame(Event$Result.DEFAULT, ForgeApi1201.eventGetResult(event));
+        assertTrue(event.hasResult());
+        assertTrue(ForgeApi1201.eventHasResult(event));
+        assertFalse(ForgeApi1201.eventIsCancelable(event));
+        assertFalse(ForgeApi1201.eventIsCanceled(event));
+
+        for (Event$Result result : List.of(Event$Result.DEFAULT, Event$Result.DENY, Event$Result.ALLOW)) {
+            ForgeApi1201.eventSetResult(event, result);
+            assertSame(result, event.getResult());
+            assertSame(result, ForgeApi1201.eventGetResult(event));
+            assertFalse(ForgeApi1201.eventIsCanceled(event),
+                    "SummonAidEvent.Result must not imply cancellation");
+        }
+
+        assertThrows(UnsupportedOperationException.class,
+                () -> ForgeApi1201.eventSetCanceled(event, true));
+        assertFalse(ForgeApi1201.eventIsCanceled(event));
+    }
+
+    @Test
+    void zombieSummonAidHelperPostsOnceAndReturnsTheMutatedEventWithNullableAttacker() {
+        var bus = net.neoforged.bus.api.BusBuilder.builder().build();
+        var captured = new AtomicReference<
+                legacyconnector.v1_20_1.net.minecraftforge.event.entity.living.ZombieEvent$SummonAidEvent>();
+        var posts = new AtomicInteger();
+        bus.addListener(
+                legacyconnector.v1_20_1.net.minecraftforge.event.entity.living.ZombieEvent$SummonAidEvent.class,
+                event -> {
+                    posts.incrementAndGet();
+                    captured.set(event);
+                    assertNull(event.getAttacker());
+                    event.setResult(Event$Result.ALLOW);
+                });
+
+        var posted = ForgeApiTail1201.fireZombieSummonAid(
+                bus, null, null, 7, 64, -9, null, 0.625D);
+
+        assertSame(captured.get(), posted, "the helper must return the exact event instance posted to listeners");
+        assertEquals(1, posts.get(), "one hurt call must post exactly one SummonAidEvent");
+        assertNull(posted.getEntity());
+        assertNull(posted.getLevel());
+        assertEquals(7, posted.getX());
+        assertEquals(64, posted.getY());
+        assertEquals(-9, posted.getZ());
+        assertNull(posted.getAttacker());
+        assertEquals(0.625D, posted.getSummonChance(), 0.0D);
+        assertSame(Event$Result.ALLOW, ForgeApi1201.eventGetResult(posted));
     }
 
     @Test
