@@ -990,7 +990,10 @@ public final class Forge1201TargetApiVerifier {
             return new CallHelperResolution(null, true, "METHOD_HANDLE_REDIRECT_NOT_VERIFIED");
         }
         if (sites.isEmpty()) {
-            return new CallHelperResolution(null, true, "NO_DIRECT_CALLSITE_EVIDENCE");
+            // Preserve the direct target lookup result. Without an observed invocation opcode,
+            // no helper redirect can be verified, but that uncertainty does not erase an
+            // independently established missing or incomplete target signature.
+            return new CallHelperResolution(null, false, "NO_DIRECT_CALLSITE_EVIDENCE");
         }
 
         Mc1201ApiMappings.CallMapping selected = null;
