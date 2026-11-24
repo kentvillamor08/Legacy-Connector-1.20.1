@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import org.kylepitcock.legacyconnector.loader.mapping.SrgMojangTable;
+import org.kylepitcock.legacyconnector.loader.transform.Mc1201ApiMappings;
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.MethodVisitor;
@@ -592,6 +593,131 @@ final class Forge1201TargetApiVerifierTest {
         assertTrue(result.verifiedMethods().getFirst().mappingRule().contains("MC1201_MEMBER_NAME_MAPPING"));
         assertEquals(holderDescriptor, result.verifiedFields().getFirst().targetDescriptor());
         assertTrue(result.verifiedFields().getFirst().mappingRule().contains("MC1201_STATIC_FIELD_ADAPTER"));
+    }
+
+    @Test
+    void verifiesExistingMinecraftCallHelperRedirectsAgainstConnectorRuntime() throws Exception {
+        String owner = "net/minecraft/network/FriendlyByteBuf";
+        String helperOwner = "org/kylepitcock/legacyconnector/v1_20_1/migrate/MiscCompat";
+        String descriptor =
+                "(Lnet/minecraft/world/item/ItemStack;)Lnet/minecraft/network/FriendlyByteBuf;";
+        var mapping = Mc1201ApiMappings.callMapping(
+                owner, "writeItem", descriptor, Opcodes.INVOKEVIRTUAL);
+        assertNotNull(mapping);
+
+        ClassWriter helperWriter = new ClassWriter(0);
+        helperWriter.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, helperOwner, null, "java/lang/Object", null);
+        helperWriter.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                mapping.helperName(), mapping.helperDescriptor(), null, null).visitEnd();
+        helperWriter.visitEnd();
+
+        var callSite = new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                "fixture/Caller", "encode", "()V",
+                owner, "m_130055_", descriptor, Opcodes.INVOKEVIRTUAL, 1);
+        var result = verify(
+                analysis(
+                        List.of(owner),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                owner, "m_130055_", descriptor, 1)),
+                        List.of(),
+                        List.of(callSite),
+                        List.of()),
+                Map.of(
+                        owner, targetEmptyClass(owner, "java/lang/Object"),
+                        helperOwner, helperWriter.toByteArray()));
+
+        assertEquals(1, result.verifiedMethodReferences());
+        assertTrue(result.methodIssues().isEmpty());
+        assertEquals(helperOwner, result.verifiedMethods().getFirst().targetOwner());
+        assertEquals("writeItem", result.verifiedMethods().getFirst().targetName());
+        assertTrue(result.verifiedMethods().getFirst().mappingRule()
+                .contains("MC1201_CALL_HELPER_REDIRECT"));
+    }
+
+    @Test
+    void verifiesMappedStaticFieldAndItsPostAdapterHelper() throws Exception {
+        String owner = "net/minecraft/world/item/enchantment/Enchantments";
+        String helperOwner = "org/kylepitcock/legacyconnector/v1_20_1/migrate/HolderCompat";
+        String sourceDescriptor = "Lnet/minecraft/world/item/enchantment/Enchantment;";
+        var mapping = Mc1201ApiMappings.staticFieldMapping(owner, "KNOCKBACK", sourceDescriptor);
+        assertNotNull(mapping);
+
+        ClassWriter ownerWriter = new ClassWriter(0);
+        ownerWriter.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, owner, null, "java/lang/Object", null);
+        ownerWriter.visitField(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                mapping.targetName(), mapping.targetDescriptor(), null, null).visitEnd();
+        ownerWriter.visitEnd();
+
+        ClassWriter helperWriter = new ClassWriter(0);
+        helperWriter.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, helperOwner, null, "java/lang/Object", null);
+        helperWriter.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                mapping.helperName(), mapping.helperDescriptor(), null, null).visitEnd();
+        helperWriter.visitEnd();
+
+        var callSite = new Forge1201ApiUsageAnalyzer.ApiFieldCallSite(
+                "fixture/Caller", "readKnockback", "()V",
+                owner, "f_44980_", sourceDescriptor, Opcodes.GETSTATIC, 1);
+        var result = verify(
+                analysis(
+                        List.of(owner),
+                        List.of(),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                owner, "f_44980_", sourceDescriptor, 1)),
+                        List.of(),
+                        List.of(callSite)),
+                Map.of(
+                        owner, ownerWriter.toByteArray(),
+                        helperOwner, helperWriter.toByteArray()));
+
+        assertEquals(1, result.verifiedFieldReferences());
+        assertTrue(result.fieldIssues().isEmpty());
+        assertEquals(owner, result.verifiedFields().getFirst().targetOwner());
+        assertEquals("KNOCKBACK", result.verifiedFields().getFirst().targetName());
+        assertEquals(mapping.targetDescriptor(), result.verifiedFields().getFirst().targetDescriptor());
+        assertTrue(result.verifiedFields().getFirst().mappingRule()
+                .contains("MC1201_STATIC_FIELD_POST_HELPER"));
+    }
+
+    @Test
+    void leavesConstructorHelperRouteUncheckedWithoutNewDupEvidence() throws Exception {
+        String owner = "net/minecraft/world/effect/MobEffectInstance";
+        String helperOwner = "org/kylepitcock/legacyconnector/v1_20_1/migrate/HolderCompat";
+        String descriptor = "(Lnet/minecraft/world/effect/MobEffect;II)V";
+        var mapping = Mc1201ApiMappings.callMapping(
+                owner, "<init>", descriptor, Opcodes.INVOKESPECIAL);
+        assertNotNull(mapping);
+
+        ClassWriter helperWriter = new ClassWriter(0);
+        helperWriter.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, helperOwner, null, "java/lang/Object", null);
+        helperWriter.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                mapping.helperName(), mapping.helperDescriptor(), null, null).visitEnd();
+        helperWriter.visitEnd();
+
+        var callSite = new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                "fixture/Caller", "makeEffect", "()V",
+                owner, "<init>", descriptor, Opcodes.INVOKESPECIAL, 1);
+        var result = verify(
+                analysis(
+                        List.of(owner),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                owner, "<init>", descriptor, 1)),
+                        List.of(),
+                        List.of(callSite),
+                        List.of()),
+                Map.of(
+                        owner, targetEmptyClass(owner, "java/lang/Object"),
+                        helperOwner, helperWriter.toByteArray()));
+
+        assertEquals(0, result.verifiedMethodReferences());
+        assertEquals(1, result.methodIssues().size());
+        assertEquals(Forge1201TargetApiVerifier.MemberStatus.NOT_CHECKED_INSUFFICIENT_CALLSITE_CONTEXT,
+                result.methodIssues().getFirst().status());
+        assertTrue(result.methodIssues().getFirst().mappingRule()
+                .contains("CONSTRUCTOR_NEW_DUP_EVIDENCE_REQUIRED"));
     }
 
     @Test
