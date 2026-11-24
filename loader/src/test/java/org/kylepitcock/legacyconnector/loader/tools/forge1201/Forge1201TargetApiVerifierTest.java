@@ -115,6 +115,8 @@ final class Forge1201TargetApiVerifierTest {
         assertEquals(1, result.methodIssues().size());
         assertEquals(Forge1201TargetApiVerifier.MemberStatus.MISSING,
                 result.methodIssues().get(0).status());
+        assertTrue(result.methodIssues().get(0).mappingRule()
+                .contains("NO_DIRECT_CALLSITE_EVIDENCE"));
     }
 
     @Test
@@ -142,6 +144,8 @@ final class Forge1201TargetApiVerifierTest {
                 result.methodIssues().get(0).status());
         assertEquals(List.of(TARGET_MOD, "net/neoforged/fml/UnseenParent"),
                 result.methodIssues().get(0).hierarchyVisited());
+        assertTrue(result.methodIssues().get(0).mappingRule()
+                .contains("NO_DIRECT_CALLSITE_EVIDENCE"));
     }
 
     @Test
