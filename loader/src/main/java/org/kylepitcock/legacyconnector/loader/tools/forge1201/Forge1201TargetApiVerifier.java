@@ -981,17 +981,20 @@ public final class Forge1201TargetApiVerifier {
                         && callSite.targetName().equals(reference.name())
                         && callSite.targetDescriptor().equals(reference.descriptor()))
                 .toList();
+        boolean matchingHandle = analysis.dynamicReferences().stream().anyMatch(handle ->
+                handle.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.METHOD_HANDLE
+                        && reference.owner().equals(handle.owner())
+                        && reference.name().equals(handle.name())
+                        && reference.descriptor().equals(handle.descriptor()));
+        if (matchingHandle) {
+            return new CallHelperResolution(null, true, "METHOD_HANDLE_REDIRECT_NOT_VERIFIED");
+        }
         if (sites.isEmpty()) {
-            boolean matchingHandle = analysis.dynamicReferences().stream().anyMatch(handle ->
-                    handle.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.METHOD_HANDLE
-                            && reference.owner().equals(handle.owner())
-                            && reference.name().equals(handle.name())
-                            && reference.descriptor().equals(handle.descriptor()));
-            return new CallHelperResolution(null, matchingHandle,
-                    matchingHandle ? "METHOD_HANDLE_REDIRECT_NOT_VERIFIED" : null);
+            return new CallHelperResolution(null, true, "NO_DIRECT_CALLSITE_EVIDENCE");
         }
 
         Mc1201ApiMappings.CallMapping selected = null;
+        boolean uncoveredCallsite = false;
         for (Forge1201ApiUsageAnalyzer.ApiMethodCallSite site : sites) {
             String mappedOwner = mapType(site.targetOwner());
             String mappedDescriptor = mapMethodDescriptor(
@@ -999,7 +1002,8 @@ public final class Forge1201TargetApiVerifier {
             Mc1201ApiMappings.CallMapping candidate = Mc1201ApiMappings.callMapping(
                     mappedOwner, targetName, mappedDescriptor, site.opcode());
             if (candidate == null || candidate.inPlace()) {
-                return new CallHelperResolution(null, false, null);
+                uncoveredCallsite = true;
+                continue;
             }
             if (!candidate.usesHelper()) {
                 return new CallHelperResolution(null, true, "CALL_HELPER_SIGNATURE_UNAVAILABLE");
@@ -1014,6 +1018,12 @@ public final class Forge1201TargetApiVerifier {
                     || !selected.helperDescriptor().equals(candidate.helperDescriptor())) {
                 return new CallHelperResolution(null, true, "CALLSITES_RESOLVE_TO_DIFFERENT_HELPERS");
             }
+        }
+        if (selected == null) {
+            return new CallHelperResolution(null, false, null);
+        }
+        if (uncoveredCallsite) {
+            return new CallHelperResolution(null, true, "CALLSITE_SET_NOT_FULLY_COVERED_BY_ONE_HELPER_RULE");
         }
         return new CallHelperResolution(
                 selected, false,
