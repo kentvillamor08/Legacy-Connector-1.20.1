@@ -448,13 +448,78 @@ public final class Forge1201TargetApiVerifier {
                         reference.owner(), reference.name(), reference.descriptor(),
                         targetOwner, targetDescriptor, new ArrayList<>(hierarchyVisited),
                         callSites, mappingRule, targetName));
-            } else {
+                continue;
+            }
+
+            CallHelperResolution helperResolution = resolveCallHelper(
+                    analysis, reference, targetName);
+            if (helperResolution.insufficientContext()) {
                 methodIssues.add(new MemberIssue(
                         reference.owner(), reference.name(), reference.descriptor(),
-                        targetOwner, targetDescriptor,
-                        lookup.complete() ? MemberStatus.MISSING : MemberStatus.INCOMPLETE_HIERARCHY,
-                        new ArrayList<>(hierarchyVisited), callSites, mappingRule, targetName));
+                        targetOwner, targetDescriptor, MemberStatus.NOT_CHECKED_INSUFFICIENT_CALLSITE_CONTEXT,
+                        new ArrayList<>(hierarchyVisited), callSites,
+                        combineMappingRules(mappingRule, helperResolution.mappingRule()),
+                        targetName));
+                continue;
             }
+            if (helperResolution.mapping() != null) {
+                Mc1201ApiMappings.CallMapping helper = helperResolution.mapping();
+                String helperOwner = helper.helperOwner();
+                String helperName = helper.helperName();
+                String helperDescriptor = helper.helperDescriptor();
+                String helperMappingRule = combineMappingRules(
+                        mappingRule,
+                        "MC1201_CALL_HELPER_REDIRECT:" + helper.declaringOwner(),
+                        helperResolution.mappingRule());
+
+                // The migration rewrites constructors only when it sees NEW, DUP, and the matching
+                // INVOKESPECIAL in the expected sequence. A method-reference summary does not retain
+                // allocation pairing, so constructor helper availability is not enough to verify it.
+                if ("<init>".equals(targetName)) {
+                    methodIssues.add(new MemberIssue(
+                            reference.owner(), reference.name(), reference.descriptor(),
+                            helperOwner, helperDescriptor,
+                            MemberStatus.NOT_CHECKED_INSUFFICIENT_CALLSITE_CONTEXT,
+                            List.of(), callSites,
+                            combineMappingRules(helperMappingRule, "CONSTRUCTOR_NEW_DUP_EVIDENCE_REQUIRED"),
+                            helperName));
+                    continue;
+                }
+                if (isUnavailableClass(helperOwner)) {
+                    methodIssues.add(new MemberIssue(
+                            reference.owner(), reference.name(), reference.descriptor(),
+                            helperOwner, helperDescriptor,
+                            MemberStatus.NOT_CHECKED_NO_CONNECTOR_RUNTIME_OUTPUT,
+                            List.of(), callSites, helperMappingRule, helperName));
+                    continue;
+                }
+                Set<String> helperHierarchy = new LinkedHashSet<>();
+                Lookup helperLookup = readClass(helperOwner) == null
+                        ? new Lookup(false, true)
+                        : findMethod(helperOwner, new MemberKey(helperName, helperDescriptor), helperHierarchy);
+                if (helperLookup.found()) {
+                    verifiedMethods++;
+                    verifiedMethodMatches.add(new MemberMatch(
+                            reference.owner(), reference.name(), reference.descriptor(),
+                            helperOwner, helperDescriptor, new ArrayList<>(helperHierarchy),
+                            callSites, helperMappingRule, helperName));
+                } else {
+                    methodIssues.add(new MemberIssue(
+                            reference.owner(), reference.name(), reference.descriptor(),
+                            helperOwner, helperDescriptor,
+                            helperLookup.complete() ? MemberStatus.MISSING : MemberStatus.INCOMPLETE_HIERARCHY,
+                            new ArrayList<>(helperHierarchy), callSites, helperMappingRule, helperName));
+                }
+                continue;
+            }
+
+            methodIssues.add(new MemberIssue(
+                    reference.owner(), reference.name(), reference.descriptor(),
+                    targetOwner, targetDescriptor,
+                    lookup.complete() ? MemberStatus.MISSING : MemberStatus.INCOMPLETE_HIERARCHY,
+                    new ArrayList<>(hierarchyVisited), callSites,
+                    combineMappingRules(mappingRule, helperResolution.mappingRule()),
+                    targetName));
         }
 
         List<MemberIssue> fieldIssues = new ArrayList<>();
@@ -480,6 +545,10 @@ public final class Forge1201TargetApiVerifier {
                     !sourceName.name().equals(targetName) ? "MC1201_MEMBER_NAME_MAPPING" : null);
 
             boolean staticFieldHelper = false;
+            boolean staticFieldPostHelper = false;
+            String postHelperOwner = null;
+            String postHelperName = null;
+            String postHelperDescriptor = null;
             Mc1201ApiMappings.StaticFieldMapping staticFieldMapping =
                     Mc1201ApiMappings.staticFieldMapping(reference.owner(), sourceName.name(), reference.descriptor());
             if (staticFieldMapping != null) {
@@ -515,6 +584,15 @@ public final class Forge1201TargetApiVerifier {
                     targetDescriptor = mapFieldDescriptor(staticFieldMapping.targetDescriptor());
                     mappingRule = combineMappingRules(mappingRule,
                             "MC1201_STATIC_FIELD_ADAPTER:" + staticFieldMapping.postAdapter());
+                    if (staticFieldMapping.usesHelper()) {
+                        staticFieldPostHelper = true;
+                        postHelperOwner = staticFieldMapping.helperOwner();
+                        postHelperName = staticFieldMapping.helperName();
+                        postHelperDescriptor = mapMethodDescriptor(
+                                postHelperOwner, postHelperName, staticFieldMapping.helperDescriptor());
+                        mappingRule = combineMappingRules(
+                                mappingRule, "MC1201_STATIC_FIELD_POST_HELPER:" + staticFieldMapping.postAdapter());
+                    }
                 }
             }
 
@@ -538,6 +616,30 @@ public final class Forge1201TargetApiVerifier {
                     : staticFieldHelper
                             ? findMethod(targetOwner, new MemberKey(targetName, targetDescriptor), hierarchyVisited)
                             : findField(targetOwner, new MemberKey(targetName, targetDescriptor), hierarchyVisited);
+            if (lookup.found() && staticFieldPostHelper) {
+                if (isUnavailableClass(postHelperOwner)) {
+                    fieldIssues.add(new MemberIssue(
+                            reference.owner(), reference.name(), reference.descriptor(),
+                            postHelperOwner, postHelperDescriptor,
+                            MemberStatus.NOT_CHECKED_NO_CONNECTOR_RUNTIME_OUTPUT,
+                            new ArrayList<>(hierarchyVisited), callSites, mappingRule, postHelperName));
+                    continue;
+                }
+                Set<String> postHelperHierarchy = new LinkedHashSet<>();
+                Lookup postHelperLookup = readClass(postHelperOwner) == null
+                        ? new Lookup(false, true)
+                        : findMethod(postHelperOwner,
+                                new MemberKey(postHelperName, postHelperDescriptor), postHelperHierarchy);
+                if (!postHelperLookup.found()) {
+                    fieldIssues.add(new MemberIssue(
+                            reference.owner(), reference.name(), reference.descriptor(),
+                            postHelperOwner, postHelperDescriptor,
+                            postHelperLookup.complete() ? MemberStatus.MISSING : MemberStatus.INCOMPLETE_HIERARCHY,
+                            new ArrayList<>(postHelperHierarchy), callSites, mappingRule, postHelperName));
+                    continue;
+                }
+                hierarchyVisited.addAll(postHelperHierarchy);
+            }
             if (lookup.found()) {
                 verifiedFields++;
                 verifiedFieldMatches.add(new MemberMatch(
@@ -863,6 +965,59 @@ public final class Forge1201TargetApiVerifier {
             complete &= lookup.complete();
         }
         return new Lookup(false, complete);
+    }
+
+    private record CallHelperResolution(
+            Mc1201ApiMappings.CallMapping mapping,
+            boolean insufficientContext,
+            String mappingRule) {}
+
+    private CallHelperResolution resolveCallHelper(
+            Forge1201ApiUsageAnalyzer.Analysis analysis,
+            Forge1201ApiUsageAnalyzer.ApiMemberReference reference,
+            String targetName) {
+        List<Forge1201ApiUsageAnalyzer.ApiMethodCallSite> sites = analysis.methodCallSites().stream()
+                .filter(callSite -> callSite.targetOwner().equals(reference.owner())
+                        && callSite.targetName().equals(reference.name())
+                        && callSite.targetDescriptor().equals(reference.descriptor()))
+                .toList();
+        if (sites.isEmpty()) {
+            boolean matchingHandle = analysis.dynamicReferences().stream().anyMatch(handle ->
+                    handle.kind() == Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.METHOD_HANDLE
+                            && reference.owner().equals(handle.owner())
+                            && reference.name().equals(handle.name())
+                            && reference.descriptor().equals(handle.descriptor()));
+            return new CallHelperResolution(null, matchingHandle,
+                    matchingHandle ? "METHOD_HANDLE_REDIRECT_NOT_VERIFIED" : null);
+        }
+
+        Mc1201ApiMappings.CallMapping selected = null;
+        for (Forge1201ApiUsageAnalyzer.ApiMethodCallSite site : sites) {
+            String mappedOwner = mapType(site.targetOwner());
+            String mappedDescriptor = mapMethodDescriptor(
+                    site.targetOwner(), targetName, site.targetDescriptor());
+            Mc1201ApiMappings.CallMapping candidate = Mc1201ApiMappings.callMapping(
+                    mappedOwner, targetName, mappedDescriptor, site.opcode());
+            if (candidate == null || candidate.inPlace()) {
+                return new CallHelperResolution(null, false, null);
+            }
+            if (!candidate.usesHelper()) {
+                return new CallHelperResolution(null, true, "CALL_HELPER_SIGNATURE_UNAVAILABLE");
+            }
+            if ("<init>".equals(targetName) && site.opcode() != Opcodes.INVOKESPECIAL) {
+                return new CallHelperResolution(null, true, "CONSTRUCTOR_CALLSITE_OPCODE_UNEXPECTED");
+            }
+            if (selected == null) {
+                selected = candidate;
+            } else if (!selected.helperOwner().equals(candidate.helperOwner())
+                    || !selected.helperName().equals(candidate.helperName())
+                    || !selected.helperDescriptor().equals(candidate.helperDescriptor())) {
+                return new CallHelperResolution(null, true, "CALLSITES_RESOLVE_TO_DIFFERENT_HELPERS");
+            }
+        }
+        return new CallHelperResolution(
+                selected, false,
+                "MC1201_CALL_RULE:" + selected.declaringOwner());
     }
 
     private static List<String> methodCallSites(
