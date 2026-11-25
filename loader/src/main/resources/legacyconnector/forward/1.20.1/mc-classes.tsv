@@ -84,3 +84,5 @@ net/minecraft/world/level/block/StemGrownBlock	org/kylepitcock/legacyconnector/v
 net/minecraft/world/scores/Score	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyScore
 net/minecraft/world/item/crafting/SimpleCookingSerializer$CookieBaker	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyCookieBaker
 net/minecraft/world/item/crafting/SimpleCraftingRecipeSerializer$Factory	org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyCraftingFactory
+# Forge 1.20.1's nested finalize event was promoted to a top-level NeoForge event.
+net/neoforged/neoforge/event/entity/living/MobSpawnEvent$FinalizeSpawn	net/neoforged/neoforge/event/entity/living/FinalizeSpawnEvent
