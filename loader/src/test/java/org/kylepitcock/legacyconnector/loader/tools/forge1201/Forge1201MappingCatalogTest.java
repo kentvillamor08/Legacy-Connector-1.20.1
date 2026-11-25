@@ -52,7 +52,6 @@ final class Forge1201MappingCatalogTest {
                 "net/minecraftforge/fml/common/Mod$EventBusSubscriber",
                 "net/minecraftforge/fml/common/Mod$EventBusSubscriber$Bus",
                 "net/minecraftforge/event/entity/living/LivingAttackEvent",
-                "net/minecraftforge/event/entity/living/MobSpawnEvent$FinalizeSpawn",
                 "net/minecraftforge/network/NetworkHooks",
                 "net/minecraftforge/registries/IForgeRegistry")) {
             var decision = Forge1201MappingCatalog.classify(type);
@@ -60,6 +59,20 @@ final class Forge1201MappingCatalogTest {
             assertNull(decision.targetInternalName(), type);
             assertNotNull(decision.reason(), type);
         }
+    }
+
+    @Test
+    void mapsFinalizeSpawnToReviewedNeoForgeTopLevelEvent() {
+        String source = "net/minecraftforge/event/entity/living/MobSpawnEvent$FinalizeSpawn";
+        String target = "net/neoforged/neoforge/event/entity/living/FinalizeSpawnEvent";
+
+        var decision = Forge1201MappingCatalog.classify(source);
+
+        assertEquals(Forge1201MappingCatalog.Kind.EXPLICIT_TYPE_REPLACEMENT, decision.kind());
+        assertEquals(target, decision.targetInternalName());
+        assertEquals(null, Forge1201MappingCatalog.manualAdapterReason(source));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                Forge1201MappingCatalog.isReviewedTargetApiType(target));
     }
 
     @Test
@@ -117,6 +130,7 @@ final class Forge1201MappingCatalogTest {
                 java.util.Map.entry("net/minecraftforge/common/ForgeConfigSpec$DoubleValue", "net/neoforged/neoforge/common/ModConfigSpec$DoubleValue"),
                 java.util.Map.entry("net/minecraftforge/registries/RegistryObject", "java/util/function/Supplier"),
                 java.util.Map.entry("net/minecraftforge/common/extensions/IForgeMenuType", "net/neoforged/neoforge/common/extensions/IMenuTypeExtension"),
+                java.util.Map.entry("net/minecraftforge/event/entity/living/MobSpawnEvent$FinalizeSpawn", "net/neoforged/neoforge/event/entity/living/FinalizeSpawnEvent"),
                 java.util.Map.entry("net/minecraftforge/network/NetworkRegistry", "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkRegistry"),
                 java.util.Map.entry("net/minecraftforge/network/NetworkDirection", "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkDirection"),
                 java.util.Map.entry("net/minecraftforge/network/NetworkEvent", "legacyconnector/v1_20_1/net/minecraftforge/network/NetworkEvent"),
@@ -137,7 +151,7 @@ final class Forge1201MappingCatalogTest {
             assertNull(Forge1201MappingCatalog.manualAdapterReason(source), source);
         });
 
-        assertEquals(15, replacements.size());
+        assertEquals(16, replacements.size());
         org.junit.jupiter.api.Assertions.assertFalse(
                 Forge1201MappingCatalog.isNeoForgeRelocationTarget("java/util/function/Supplier"));
     }
