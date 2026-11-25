@@ -11,6 +11,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
+import legacyconnector.v1_20_1.ForgeApi1201;
+import legacyconnector.v1_20_1.net.minecraftforge.registries.ForgeRegistries;
+import legacyconnector.v1_20_1.net.minecraftforge.registries.IForgeRegistry;
+import net.neoforged.neoforge.registries.DeferredRegister;
 import org.junit.jupiter.api.Test;
 import org.kylepitcock.legacyconnector.loader.shim.ShimIndex;
 import org.objectweb.asm.Opcodes;
@@ -201,6 +205,38 @@ class Forge1201ApiTest {
                     if (!f.equals("forge-call-rewrites.tsv") && !f.equals("forge-members.tsv")) assertTrue(a[0].startsWith("net/minecraftforge/") && a[1].startsWith("net/neoforged/"), f + ": " + l);
                 }
             }
+        }
+    }
+
+    @Test
+    void deferredRegisterIForgeRegistryFactoryCallUsesTheForgeCompatibilityHelper() {
+        String descriptor = "(Llegacyconnector/v1_20_1/net/minecraftforge/registries/IForgeRegistry;"
+                + "Ljava/lang/String;)Lnet/neoforged/neoforge/registries/DeferredRegister;";
+        ClassNode node = with(new MethodInsnNode(Opcodes.INVOKESTATIC,
+                "net/neoforged/neoforge/registries/DeferredRegister", "create", descriptor, false));
+
+        assertEquals(1, ForgeApiRewrites1201.apply(node));
+        MethodInsnNode rewritten = firstCall(node);
+        assertEquals(Opcodes.INVOKESTATIC, rewritten.getOpcode());
+        assertEquals("legacyconnector/v1_20_1/ForgeApi1201", rewritten.owner);
+        assertEquals("createDeferred", rewritten.name);
+        assertEquals(descriptor, rewritten.desc);
+    }
+
+    @Test
+    void deferredRegisterFactoryPreservesAllSixForgeBuiltinRegistryKeysAndNamespace() {
+        List<IForgeRegistry<?>> registries = List.of(
+                ForgeRegistries.BLOCK_ENTITY_TYPES,
+                ForgeRegistries.BLOCKS,
+                ForgeRegistries.ENTITY_TYPES,
+                ForgeRegistries.ITEMS,
+                ForgeRegistries.MENU_TYPES,
+                ForgeRegistries.SOUND_EVENTS);
+
+        for (IForgeRegistry<?> registry : registries) {
+            DeferredRegister<?> actual = ForgeApi1201.createDeferred(registry, "symbiote");
+            assertEquals(registry.getRegistryKey(), actual.getRegistryKey());
+            assertEquals("symbiote", actual.getNamespace());
         }
     }
 
