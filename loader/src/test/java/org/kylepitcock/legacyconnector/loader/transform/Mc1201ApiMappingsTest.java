@@ -33,6 +33,24 @@ final class Mc1201ApiMappingsTest {
     }
 
     @Test
+    void resolvesDeferredRegisterFactoryThroughForgeApiRewriteCatalog() {
+        String owner = "net/neoforged/neoforge/registries/DeferredRegister";
+        String registry = "legacyconnector/v1_20_1/net/minecraftforge/registries/IForgeRegistry";
+        String descriptor = "(L" + registry + ";Ljava/lang/String;)L" + owner + ";";
+
+        var mapping = Mc1201ApiMappings.forgeApiCallMapping(
+                owner, "create", descriptor, Opcodes.INVOKESTATIC);
+
+        assertNotNull(mapping);
+        assertTrue(mapping.usesHelper());
+        assertEquals(owner, mapping.declaringOwner());
+        assertEquals("legacyconnector/v1_20_1/ForgeApi1201", mapping.helperOwner());
+        assertEquals("createDeferred", mapping.helperName());
+        assertEquals(descriptor, mapping.helperDescriptor());
+        assertTrue(mapping.ruleKey().startsWith("FORGE_API_REWRITE_TABLE:"));
+    }
+
+    @Test
     void resolvesDirectStaticCallRules() {
         var mapping = Mc1201ApiMappings.callMapping(
                 "net/minecraft/network/FriendlyByteBuf",
