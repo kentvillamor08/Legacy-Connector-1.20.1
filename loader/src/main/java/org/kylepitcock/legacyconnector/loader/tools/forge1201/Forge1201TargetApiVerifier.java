@@ -424,12 +424,20 @@ public final class Forge1201TargetApiVerifier {
                     sourceName.mappingRule(),
                     methodDescriptorMappingRule(reference.owner(), sourceName.name(), reference.descriptor()),
                     !sourceName.name().equals(targetName) ? "MC1201_MEMBER_NAME_MAPPING" : null);
+            CallHelperResolution descriptorHelperResolution = null;
             if (descriptorNeedsManualAdapter(reference.descriptor(), true)) {
-                methodIssues.add(new MemberIssue(
-                        reference.owner(), reference.name(), reference.descriptor(),
-                        targetOwner, targetDescriptor, MemberStatus.REQUIRES_MANUAL_DESCRIPTOR_ADAPTER,
-                        List.of(), callSites, "MANUAL_ADAPTER_CATALOG", targetName));
-                continue;
+                // A reviewed call helper may deliberately erase or adapt a legacy-only
+                // descriptor type (for example Forge Event.Result -> Object). Only bypass
+                // the descriptor gate when the complete observed callsite set resolves
+                // to one concrete helper rule; otherwise retain the manual-adapter status.
+                descriptorHelperResolution = resolveCallHelper(analysis, reference, targetName);
+                if (descriptorHelperResolution.mapping() == null) {
+                    methodIssues.add(new MemberIssue(
+                            reference.owner(), reference.name(), reference.descriptor(),
+                            targetOwner, targetDescriptor, MemberStatus.REQUIRES_MANUAL_DESCRIPTOR_ADAPTER,
+                            List.of(), callSites, "MANUAL_ADAPTER_CATALOG", targetName));
+                    continue;
+                }
             }
             if (isUnavailableClass(targetOwner)) {
                 methodIssues.add(new MemberIssue(
@@ -451,8 +459,9 @@ public final class Forge1201TargetApiVerifier {
                 continue;
             }
 
-            CallHelperResolution helperResolution = resolveCallHelper(
-                    analysis, reference, targetName);
+            CallHelperResolution helperResolution = descriptorHelperResolution != null
+                    ? descriptorHelperResolution
+                    : resolveCallHelper(analysis, reference, targetName);
             if (helperResolution.insufficientContext()) {
                 methodIssues.add(new MemberIssue(
                         reference.owner(), reference.name(), reference.descriptor(),
