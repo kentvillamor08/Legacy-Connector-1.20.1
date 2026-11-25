@@ -132,6 +132,14 @@ public final class Mc1201ApiMappings {
     }
 
     /**
+     * Resolves an exact Forge API rewrite-catalog helper. This is deliberately separate from
+     * {@link #callMapping(String, String, String, int)}, whose rules are loaded from mc-calls.tsv.
+     */
+    public static CallMapping forgeApiCallMapping(String owner, String name, String descriptor, int opcode) {
+        return ForgeApiRewrites1201.callMapping(owner, name, descriptor, opcode);
+    }
+
+    /**
      * Returns a known static-field shape migration. These rows are consumed by the bytecode
      * migrator for GETSTATIC instructions only; callers must verify the observed opcode and
      * absence of matching field handles before treating the mapping as applicable.
