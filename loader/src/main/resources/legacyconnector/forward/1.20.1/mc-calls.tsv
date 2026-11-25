@@ -638,7 +638,8 @@ net/minecraft/commands/functions/CommandFunction	fromLines	(Lnet/minecraft/resou
 # Redirect only when the old result is discarded; call sites that consume the integer are intentionally left soft-linked.
 net/minecraft/server/ServerFunctionManager	execute	(Lnet/minecraft/commands/functions/CommandFunction;Lnet/minecraft/commands/CommandSourceStack;)I	CommandFunctionCompat	execute	(Lnet/minecraft/server/ServerFunctionManager;Lnet/minecraft/commands/functions/CommandFunction;Lnet/minecraft/commands/CommandSourceStack;)V
 net/minecraft/advancements/AdvancementType	getTexture	()I	PalladiumFrameTypeCompat	getTexture	(Lnet/minecraft/advancements/AdvancementType;)I
-# Forge PlayerInteractEvent cancellation capability and non-result result setter.
+# Forge PlayerInteractEvent cancellation and legacy Event.Result state.
 net/neoforged/neoforge/event/entity/player/PlayerInteractEvent	isCancelable	()Z	PlayerInteractCompat	isCancelable	(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;)Z
 net/neoforged/neoforge/event/entity/player/PlayerInteractEvent	setCanceled	(Z)V	PlayerInteractCompat	setCanceled	(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;Z)V
-net/neoforged/neoforge/event/entity/player/PlayerInteractEvent	setResult	(Lnet/minecraftforge/eventbus/api/Event$Result;)V	PlayerInteractCompat	ignoreResult	(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;Ljava/lang/Object;)V
+net/neoforged/neoforge/event/entity/player/PlayerInteractEvent	setResult	(Llegacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result;)V	PlayerInteractCompat	setResult	(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;Llegacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result;)V
+net/neoforged/neoforge/event/entity/player/PlayerInteractEvent	getResult	()Llegacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result;	PlayerInteractCompat	getResult	(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;)Llegacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result;
