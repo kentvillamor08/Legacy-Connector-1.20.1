@@ -97,13 +97,14 @@ class Mc1201MigrationTest implements Opcodes {
     }
 
     @Test
-    void redirectsPlayerInteractEventCancellationAndLegacyResultCalls() {
+    void redirectsPlayerInteractEventCancellationAndLegacyResultAccessors() {
         String event = "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent";
         String compat = "org/kylepitcock/legacyconnector/v1_20_1/migrate/PlayerInteractCompat";
-        String result = "net/minecraftforge/eventbus/api/Event$Result";
+        String result = "legacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result";
         ClassNode caller = cls("test/PlayerInteractEventCalls", "java/lang/Object");
         MethodNode method = method(
-                caller, ACC_PUBLIC | ACC_STATIC, "adapt", "(L" + event + ";)V");
+                caller, ACC_PUBLIC | ACC_STATIC, "adapt",
+                "(L" + event + ";)L" + result + ";");
 
         method.instructions.add(new VarInsnNode(ALOAD, 0));
         method.instructions.add(new MethodInsnNode(INVOKEVIRTUAL, event, "isCancelable", "()Z", false));
@@ -114,28 +115,33 @@ class Mc1201MigrationTest implements Opcodes {
         method.instructions.add(new MethodInsnNode(INVOKEVIRTUAL, event, "setCanceled", "(Z)V", false));
 
         method.instructions.add(new VarInsnNode(ALOAD, 0));
-        method.instructions.add(new InsnNode(ACONST_NULL));
+        method.instructions.add(new FieldInsnNode(GETSTATIC, result, "DENY", "L" + result + ";"));
         method.instructions.add(new MethodInsnNode(
                 INVOKEVIRTUAL, event, "setResult", "(L" + result + ";)V", false));
-        method.instructions.add(new InsnNode(RETURN));
+
+        method.instructions.add(new VarInsnNode(ALOAD, 0));
+        method.instructions.add(new MethodInsnNode(
+                INVOKEVIRTUAL, event, "getResult", "()L" + result + ";", false));
+        method.instructions.add(new InsnNode(ARETURN));
         method.maxStack = 2;
         method.maxLocals = 1;
 
         Mc1201Migration.Counts counts = apply(caller);
 
-        assertEquals(3, counts.calls);
+        assertEquals(4, counts.calls);
         List<MethodInsnNode> calls = java.util.Arrays.stream(method.instructions.toArray())
                 .filter(MethodInsnNode.class::isInstance)
                 .map(MethodInsnNode.class::cast)
                 .toList();
-        assertEquals(3, calls.size());
-        assertEquals(List.of("isCancelable", "setCanceled", "ignoreResult"),
+        assertEquals(4, calls.size());
+        assertEquals(List.of("isCancelable", "setCanceled", "setResult", "getResult"),
                 calls.stream().map(call -> call.name).toList());
         assertTrue(calls.stream().allMatch(call ->
                 call.getOpcode() == INVOKESTATIC && call.owner.equals(compat)));
         assertEquals("(L" + event + ";)Z", calls.get(0).desc);
         assertEquals("(L" + event + ";Z)V", calls.get(1).desc);
-        assertEquals("(L" + event + ";Ljava/lang/Object;)V", calls.get(2).desc);
+        assertEquals("(L" + event + ";L" + result + ";)V", calls.get(2).desc);
+        assertEquals("(L" + event + ";)L" + result + ";", calls.get(3).desc);
     }
 
     @Test
