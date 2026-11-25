@@ -472,19 +472,6 @@ public final class Forge1201TargetApiVerifier {
                         "MC1201_CALL_HELPER_REDIRECT:" + helper.declaringOwner(),
                         helperResolution.mappingRule());
 
-                // The migration rewrites constructors only when it sees NEW, DUP, and the matching
-                // INVOKESPECIAL in the expected sequence. A method-reference summary does not retain
-                // allocation pairing, so constructor helper availability is not enough to verify it.
-                if ("<init>".equals(targetName)) {
-                    methodIssues.add(new MemberIssue(
-                            reference.owner(), reference.name(), reference.descriptor(),
-                            helperOwner, helperDescriptor,
-                            MemberStatus.NOT_CHECKED_INSUFFICIENT_CALLSITE_CONTEXT,
-                            List.of(), callSites,
-                            combineMappingRules(helperMappingRule, "CONSTRUCTOR_NEW_DUP_EVIDENCE_REQUIRED"),
-                            helperName));
-                    continue;
-                }
                 if (isUnavailableClass(helperOwner)) {
                     methodIssues.add(new MemberIssue(
                             reference.owner(), reference.name(), reference.descriptor(),
@@ -1028,9 +1015,68 @@ public final class Forge1201TargetApiVerifier {
         if (uncoveredCallsite) {
             return new CallHelperResolution(null, true, "CALLSITE_SET_NOT_FULLY_COVERED_BY_ONE_HELPER_RULE");
         }
-        return new CallHelperResolution(
-                selected, false,
-                "MC1201_CALL_RULE:" + selected.declaringOwner());
+        String mappingRule = "MC1201_CALL_RULE:" + selected.declaringOwner();
+        if ("<init>".equals(targetName)) {
+            String evidenceIssue = constructorAllocationEvidenceIssue(analysis, reference, sites);
+            if (evidenceIssue != null) {
+                return new CallHelperResolution(null, true, evidenceIssue);
+            }
+            mappingRule += "+CONSTRUCTOR_NEW_DUP_ALLOCATION_EVIDENCE";
+        }
+        return new CallHelperResolution(selected, false, mappingRule);
+    }
+
+    /**
+     * Requires a distinct bytecode evidence row for every aggregated constructor invocation.
+     * This mirrors Mc1201Migration's LIFO NEW stack and direct made.getNext() == DUP check.
+     */
+    private static String constructorAllocationEvidenceIssue(
+            Forge1201ApiUsageAnalyzer.Analysis analysis,
+            Forge1201ApiUsageAnalyzer.ApiMemberReference reference,
+            List<Forge1201ApiUsageAnalyzer.ApiMethodCallSite> sites) {
+        List<Forge1201ApiUsageAnalyzer.ApiConstructorCallSite> evidence = analysis.constructorCallSites().stream()
+                .filter(value -> value.targetOwner().equals(reference.owner())
+                        && value.targetName().equals(reference.name())
+                        && value.targetDescriptor().equals(reference.descriptor()))
+                .toList();
+        if (evidence.isEmpty()) return "CONSTRUCTOR_NEW_DUP_EVIDENCE_REQUIRED";
+
+        int expectedInvocations = 0;
+        Set<String> instructionIdentities = new HashSet<>();
+        for (Forge1201ApiUsageAnalyzer.ApiMethodCallSite site : sites) {
+            if (site.opcode() != Opcodes.INVOKESPECIAL) {
+                return "CONSTRUCTOR_CALLSITE_OPCODE_UNEXPECTED";
+            }
+            if (site.count() < 1) return "CONSTRUCTOR_CALLSITE_COUNT_INVALID";
+            expectedInvocations += site.count();
+            List<Forge1201ApiUsageAnalyzer.ApiConstructorCallSite> siteEvidence = evidence.stream()
+                    .filter(value -> value.callerClass().equals(site.callerClass())
+                            && value.callerMethod().equals(site.callerMethod())
+                            && value.callerDescriptor().equals(site.callerDescriptor())
+                            && value.targetOwner().equals(site.targetOwner())
+                            && value.targetName().equals(site.targetName())
+                            && value.targetDescriptor().equals(site.targetDescriptor())
+                            && value.opcode() == site.opcode())
+                    .toList();
+            if (siteEvidence.size() != site.count()) {
+                return "CONSTRUCTOR_ALLOCATION_EVIDENCE_COUNT_MISMATCH";
+            }
+            for (Forge1201ApiUsageAnalyzer.ApiConstructorCallSite value : siteEvidence) {
+                String identity = value.archivePath() + "!/" + value.classEntryPath()
+                        + "#" + value.callerClass() + "#" + value.callerMethod()
+                        + value.callerDescriptor() + "@" + value.instructionOrdinal();
+                if (!instructionIdentities.add(identity)) {
+                    return "CONSTRUCTOR_ALLOCATION_EVIDENCE_DUPLICATE_INSTRUCTION";
+                }
+                if (!value.provesMigrationRewrite()) {
+                    return "CONSTRUCTOR_ALLOCATION_PAIR_NOT_PROVEN";
+                }
+            }
+        }
+        if (evidence.size() != expectedInvocations) {
+            return "CONSTRUCTOR_ALLOCATION_EVIDENCE_SET_MISMATCH";
+        }
+        return null;
     }
 
     private static List<String> methodCallSites(

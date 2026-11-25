@@ -69,6 +69,38 @@ public final class Forge1201ApiUsageAnalyzer {
         }
     }
 
+    /**
+     * Instruction-level evidence for one API constructor invocation. This is emitted once per
+     * INVOKESPECIAL so consumers can prove that every invocation has the allocation sequence
+     * required by Mc1201Migration instead of relying on aggregated caller counts.
+     */
+    public record ApiConstructorCallSite(
+            String archivePath,
+            String classEntryPath,
+            String callerClass,
+            String callerMethod,
+            String callerDescriptor,
+            String targetOwner,
+            String targetName,
+            String targetDescriptor,
+            int opcode,
+            int instructionOrdinal,
+            String allocationOwner,
+            int allocationInstructionOrdinal,
+            boolean matchedNewInstruction,
+            boolean allocationImmediatelyFollowedByDup) {
+        public boolean provesMigrationRewrite() {
+            return opcode == Opcodes.INVOKESPECIAL
+                    && "<init>".equals(targetName)
+                    && matchedNewInstruction
+                    && allocationOwner != null
+                    && targetOwner.equals(allocationOwner)
+                    && allocationInstructionOrdinal >= 0
+                    && allocationInstructionOrdinal < instructionOrdinal
+                    && allocationImmediatelyFollowedByDup;
+        }
+    }
+
     public record ApiFieldCallSite(
             String callerClass,
             String callerMethod,
@@ -171,6 +203,17 @@ public final class Forge1201ApiUsageAnalyzer {
     }
 
 
+    private static final class PendingNewInstruction {
+        private final String owner;
+        private final int instructionOrdinal;
+        private boolean immediatelyFollowedByDup;
+
+        private PendingNewInstruction(String owner, int instructionOrdinal) {
+            this.owner = owner;
+            this.instructionOrdinal = instructionOrdinal;
+        }
+    }
+
     private record CallSiteKey(
             String callerClass,
             String callerMethod,
@@ -201,7 +244,8 @@ public final class Forge1201ApiUsageAnalyzer {
             List<ApiFieldCallSite> fieldCallSites,
             List<ApiMemberReference> methodReferences,
             List<ApiMemberReference> fieldReferences,
-            List<ApiDynamicReference> dynamicReferences) {
+            List<ApiDynamicReference> dynamicReferences,
+            List<ApiConstructorCallSite> constructorCallSites) {
 
         /** Source-compatible constructor for tools that create synthetic Analysis values. */
         public Analysis(
@@ -218,7 +262,26 @@ public final class Forge1201ApiUsageAnalyzer {
                 List<ApiMemberReference> fieldReferences) {
             this(metadata, classCount, modEntrypoints, mixinConfigs, coreModClass,
                     packageReferences, referencedApiClasses, methodCallSites, fieldCallSites,
-                    methodReferences, fieldReferences, List.of());
+                    methodReferences, fieldReferences, List.of(), List.of());
+        }
+
+        /** Source-compatible constructor for callers that already supply dynamic references. */
+        public Analysis(
+                Forge1201JarInfo metadata,
+                int classCount,
+                List<String> modEntrypoints,
+                List<String> mixinConfigs,
+                String coreModClass,
+                Map<String, Integer> packageReferences,
+                List<String> referencedApiClasses,
+                List<ApiMethodCallSite> methodCallSites,
+                List<ApiFieldCallSite> fieldCallSites,
+                List<ApiMemberReference> methodReferences,
+                List<ApiMemberReference> fieldReferences,
+                List<ApiDynamicReference> dynamicReferences) {
+            this(metadata, classCount, modEntrypoints, mixinConfigs, coreModClass,
+                    packageReferences, referencedApiClasses, methodCallSites, fieldCallSites,
+                    methodReferences, fieldReferences, dynamicReferences, List.of());
         }
 
         public Analysis {
@@ -231,6 +294,7 @@ public final class Forge1201ApiUsageAnalyzer {
             methodReferences = List.copyOf(methodReferences);
             fieldReferences = List.copyOf(fieldReferences);
             dynamicReferences = List.copyOf(dynamicReferences);
+            constructorCallSites = List.copyOf(constructorCallSites);
         }
     }
 
@@ -244,6 +308,7 @@ public final class Forge1201ApiUsageAnalyzer {
         private final Map<CallSiteKey, Integer> callSites = new HashMap<>();
         private final Map<FieldCallSiteKey, Integer> fieldCallSites = new HashMap<>();
         private final Map<DynamicReferenceKey, Integer> dynamicReferences = new HashMap<>();
+        private final List<ApiConstructorCallSite> constructorCallSites = new ArrayList<>();
         private final Map<MemberKey, Set<ApiReferenceLocation>> methodLocations = new HashMap<>();
         private final Map<MemberKey, Set<ApiReferenceLocation>> fieldLocations = new HashMap<>();
         private String currentArchivePath;
@@ -436,6 +501,30 @@ public final class Forge1201ApiUsageAnalyzer {
             fieldCallSites.merge(key, 1, Integer::sum);
         }
 
+        private void recordConstructorCallSite(
+                String archivePath,
+                String classEntryPath,
+                String callerClass,
+                String callerMethod,
+                String callerDescriptor,
+                String targetOwner,
+                String targetName,
+                String targetDescriptor,
+                int opcode,
+                int instructionOrdinal,
+                String allocationOwner,
+                int allocationInstructionOrdinal,
+                boolean matchedNewInstruction,
+                boolean allocationImmediatelyFollowedByDup) {
+            if (!"<init>".equals(targetName)
+                    || (!isGameApi(targetOwner) && !isForgeOrOptionalApi(targetOwner))) return;
+            constructorCallSites.add(new ApiConstructorCallSite(
+                    archivePath, classEntryPath, callerClass, callerMethod, callerDescriptor,
+                    targetOwner, targetName, targetDescriptor, opcode, instructionOrdinal,
+                    allocationOwner, allocationInstructionOrdinal, matchedNewInstruction,
+                    allocationImmediatelyFollowedByDup));
+        }
+
         private static boolean isForgeOrOptionalApi(String name) {
             return name.startsWith("net/minecraftforge/")
                     || name.startsWith("legacyconnector/v1_20_1/net/minecraftforge/")
@@ -481,6 +570,17 @@ public final class Forge1201ApiUsageAnalyzer {
                             .thenComparing(ApiMethodCallSite::callerMethod)
                             .thenComparing(ApiMethodCallSite::callerDescriptor)
                             .thenComparingInt(ApiMethodCallSite::opcode))
+                    .toList();
+        }
+
+        List<ApiConstructorCallSite> constructorCallSiteList() {
+            return constructorCallSites.stream()
+                    .sorted(Comparator.comparing(ApiConstructorCallSite::targetOwner)
+                            .thenComparing(ApiConstructorCallSite::targetDescriptor)
+                            .thenComparing(ApiConstructorCallSite::callerClass)
+                            .thenComparing(ApiConstructorCallSite::callerMethod)
+                            .thenComparing(ApiConstructorCallSite::callerDescriptor)
+                            .thenComparingInt(ApiConstructorCallSite::instructionOrdinal))
                     .toList();
         }
 
@@ -903,27 +1003,90 @@ public final class Forge1201ApiUsageAnalyzer {
                             }
 
                             private int instructionOrdinal;
+                            private final List<PendingNewInstruction> newInstructions = new ArrayList<>();
+                            private PendingNewInstruction pendingImmediateSuccessor;
 
                             private int nextInstruction() {
                                 return instructionOrdinal++;
                             }
 
-                            @Override public void visitInsn(int opcode) { nextInstruction(); }
-                            @Override public void visitIntInsn(int opcode, int operand) { nextInstruction(); }
-                            @Override public void visitVarInsn(int opcode, int var) { nextInstruction(); }
-                            @Override public void visitTypeInsn(int opcode, String type) { nextInstruction(); }
+                            /**
+                             * Labels, line numbers, and frames become real nodes in ASM's tree
+                             * InsnList. The production transformer checks made.getNext() directly,
+                             * so these nodes must break NEW-to-DUP adjacency rather than be skipped.
+                             */
+                            private void beginInstructionNode(boolean isDup) {
+                                if (pendingImmediateSuccessor != null) {
+                                    pendingImmediateSuccessor.immediatelyFollowedByDup = isDup;
+                                    pendingImmediateSuccessor = null;
+                                }
+                            }
+
+                            @Override public void visitLabel(org.objectweb.asm.Label label) {
+                                beginInstructionNode(false);
+                            }
+
+                            @Override public void visitFrame(
+                                    int type, int numLocal, Object[] local, int numStack, Object[] stack) {
+                                beginInstructionNode(false);
+                            }
+
+                            @Override public void visitLineNumber(int line, org.objectweb.asm.Label start) {
+                                beginInstructionNode(false);
+                            }
+
+                            @Override public void visitInsn(int opcode) {
+                                beginInstructionNode(opcode == Opcodes.DUP);
+                                nextInstruction();
+                            }
+
+                            @Override public void visitIntInsn(int opcode, int operand) {
+                                beginInstructionNode(false);
+                                nextInstruction();
+                            }
+
+                            @Override public void visitVarInsn(int opcode, int var) {
+                                beginInstructionNode(false);
+                                nextInstruction();
+                            }
+
+                            @Override public void visitTypeInsn(int opcode, String type) {
+                                beginInstructionNode(false);
+                                int ordinal = nextInstruction();
+                                if (opcode == Opcodes.NEW) {
+                                    PendingNewInstruction allocation = new PendingNewInstruction(type, ordinal);
+                                    newInstructions.add(allocation);
+                                    pendingImmediateSuccessor = allocation;
+                                }
+                            }
 
                             @Override
                             public void visitMethodInsn(int opcode, String owner, String targetName,
                                                         String targetDescriptor, boolean isInterface) {
-                                nextInstruction();
+                                beginInstructionNode(false);
+                                int ordinal = nextInstruction();
                                 references.recordCallSite(callerClass, callerMethod, callerDescriptor,
                                         opcode, owner, targetName, targetDescriptor);
+                                if ("<init>".equals(targetName)) {
+                                    PendingNewInstruction allocation = newInstructions.isEmpty()
+                                            ? null : newInstructions.get(newInstructions.size() - 1);
+                                    boolean matched = opcode == Opcodes.INVOKESPECIAL
+                                            && allocation != null && allocation.owner.equals(owner);
+                                    if (matched) newInstructions.remove(newInstructions.size() - 1);
+                                    references.recordConstructorCallSite(
+                                            archivePath, classEntryPath, callerClass, callerMethod, callerDescriptor,
+                                            owner, targetName, targetDescriptor, opcode, ordinal,
+                                            allocation == null ? null : allocation.owner,
+                                            allocation == null ? -1 : allocation.instructionOrdinal,
+                                            matched,
+                                            allocation != null && allocation.immediatelyFollowedByDup);
+                                }
                             }
 
                             @Override
                             public void visitFieldInsn(int opcode, String owner, String targetName,
                                                        String targetDescriptor) {
+                                beginInstructionNode(false);
                                 nextInstruction();
                                 references.recordFieldCallSite(callerClass, callerMethod, callerDescriptor,
                                         opcode, owner, targetName, targetDescriptor);
@@ -933,6 +1096,7 @@ public final class Forge1201ApiUsageAnalyzer {
                             public void visitInvokeDynamicInsn(String targetName, String targetDescriptor,
                                                                org.objectweb.asm.Handle bootstrapMethodHandle,
                                                                Object... bootstrapMethodArguments) {
+                                beginInstructionNode(false);
                                 int ordinal = nextInstruction();
                                 references.recordDynamic(archivePath, classEntryPath,
                                         callerClass, callerMethod, callerDescriptor,
@@ -950,33 +1114,41 @@ public final class Forge1201ApiUsageAnalyzer {
                             }
 
                             @Override public void visitJumpInsn(int opcode, org.objectweb.asm.Label label) {
+                                beginInstructionNode(false);
                                 nextInstruction();
                             }
 
                             @Override
                             public void visitLdcInsn(Object value) {
+                                beginInstructionNode(false);
                                 int ordinal = nextInstruction();
                                 references.recordDynamicValue(archivePath, classEntryPath,
                                         callerClass, callerMethod, callerDescriptor, "ldc", value, ordinal, 0);
                             }
 
-                            @Override public void visitIincInsn(int var, int increment) { nextInstruction(); }
+                            @Override public void visitIincInsn(int var, int increment) {
+                                beginInstructionNode(false);
+                                nextInstruction();
+                            }
 
                             @Override
                             public void visitTableSwitchInsn(int min, int max,
                                                               org.objectweb.asm.Label defaultLabel,
                                                               org.objectweb.asm.Label... labels) {
+                                beginInstructionNode(false);
                                 nextInstruction();
                             }
 
                             @Override
                             public void visitLookupSwitchInsn(org.objectweb.asm.Label defaultLabel,
                                                               int[] keys, org.objectweb.asm.Label[] labels) {
+                                beginInstructionNode(false);
                                 nextInstruction();
                             }
 
                             @Override
                             public void visitMultiANewArrayInsn(String descriptor, int dimensions) {
+                                beginInstructionNode(false);
                                 nextInstruction();
                             }
                         };
@@ -1014,7 +1186,8 @@ public final class Forge1201ApiUsageAnalyzer {
                     references.fieldCallSiteList(),
                     references.methodList(),
                     references.fieldList(),
-                    references.dynamicReferenceList());
+                    references.dynamicReferenceList(),
+                    references.constructorCallSiteList());
         }
     }
 

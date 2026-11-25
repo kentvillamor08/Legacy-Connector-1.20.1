@@ -726,6 +726,142 @@ final class Forge1201TargetApiVerifierTest {
     }
 
     @Test
+    void verifiesConstructorHelperRouteOnlyWithCompleteNewDupAllocationEvidence() throws Exception {
+        String owner = "net/minecraft/world/effect/MobEffectInstance";
+        String helperOwner = "org/kylepitcock/legacyconnector/v1_20_1/migrate/HolderCompat";
+        String descriptor = "(Lnet/minecraft/world/effect/MobEffect;II)V";
+        var mapping = Mc1201ApiMappings.callMapping(owner, "<init>", descriptor, Opcodes.INVOKESPECIAL);
+        assertNotNull(mapping);
+
+        ClassWriter helperWriter = new ClassWriter(0);
+        helperWriter.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, helperOwner, null, "java/lang/Object", null);
+        helperWriter.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                mapping.helperName(), mapping.helperDescriptor(), null, null).visitEnd();
+        helperWriter.visitEnd();
+
+        var callSite = new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                "fixture/Caller", "makeEffect", "()V",
+                owner, "<init>", descriptor, Opcodes.INVOKESPECIAL, 2);
+        var first = constructorEvidence(owner, descriptor, 4, 0, owner, true, true);
+        var second = constructorEvidence(owner, descriptor, 9, 6, owner, true, true);
+        var result = verify(
+                analysis(List.of(owner),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(owner, "<init>", descriptor, 2)),
+                        List.of(), List.of(callSite), List.of(),
+                        List.of(first, second), List.of()),
+                Map.of(owner, targetEmptyClass(owner, "java/lang/Object"),
+                        helperOwner, helperWriter.toByteArray()));
+
+        assertEquals(1, result.verifiedMethodReferences());
+        assertTrue(result.methodIssues().isEmpty());
+        assertEquals(helperOwner, result.verifiedMethods().getFirst().targetOwner());
+        assertTrue(result.verifiedMethods().getFirst().mappingRule()
+                .contains("CONSTRUCTOR_NEW_DUP_ALLOCATION_EVIDENCE"));
+    }
+
+    @Test
+    void keepsConstructorHelperUncheckedWhenAnyInvocationLacksExactAllocationPairing() throws Exception {
+        String owner = "net/minecraft/world/effect/MobEffectInstance";
+        String helperOwner = "org/kylepitcock/legacyconnector/v1_20_1/migrate/HolderCompat";
+        String descriptor = "(Lnet/minecraft/world/effect/MobEffect;II)V";
+        var mapping = Mc1201ApiMappings.callMapping(owner, "<init>", descriptor, Opcodes.INVOKESPECIAL);
+        assertNotNull(mapping);
+        ClassWriter helperWriter = new ClassWriter(0);
+        helperWriter.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, helperOwner, null, "java/lang/Object", null);
+        helperWriter.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                mapping.helperName(), mapping.helperDescriptor(), null, null).visitEnd();
+        helperWriter.visitEnd();
+
+        var callSite = new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                "fixture/Caller", "makeEffect", "()V",
+                owner, "<init>", descriptor, Opcodes.INVOKESPECIAL, 2);
+        var paired = constructorEvidence(owner, descriptor, 4, 0, owner, true, true);
+        var missingDup = constructorEvidence(owner, descriptor, 9, 6, owner, true, false);
+        var result = verify(
+                analysis(List.of(owner),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(owner, "<init>", descriptor, 2)),
+                        List.of(), List.of(callSite), List.of(),
+                        List.of(paired, missingDup), List.of()),
+                Map.of(owner, targetEmptyClass(owner, "java/lang/Object"),
+                        helperOwner, helperWriter.toByteArray()));
+
+        assertEquals(0, result.verifiedMethodReferences());
+        assertEquals(1, result.methodIssues().size());
+        assertEquals(Forge1201TargetApiVerifier.MemberStatus.NOT_CHECKED_INSUFFICIENT_CALLSITE_CONTEXT,
+                result.methodIssues().getFirst().status());
+        assertTrue(result.methodIssues().getFirst().mappingRule()
+                .contains("CONSTRUCTOR_ALLOCATION_PAIR_NOT_PROVEN"));
+    }
+
+    @Test
+    void keepsConstructorHelperUncheckedWhenAllocationEvidenceCountDoesNotCoverEveryInvocation() throws Exception {
+        String owner = "net/minecraft/world/effect/MobEffectInstance";
+        String helperOwner = "org/kylepitcock/legacyconnector/v1_20_1/migrate/HolderCompat";
+        String descriptor = "(Lnet/minecraft/world/effect/MobEffect;II)V";
+        var mapping = Mc1201ApiMappings.callMapping(owner, "<init>", descriptor, Opcodes.INVOKESPECIAL);
+        assertNotNull(mapping);
+        ClassWriter helperWriter = new ClassWriter(0);
+        helperWriter.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, helperOwner, null, "java/lang/Object", null);
+        helperWriter.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                mapping.helperName(), mapping.helperDescriptor(), null, null).visitEnd();
+        helperWriter.visitEnd();
+
+        var callSite = new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                "fixture/Caller", "makeEffect", "()V",
+                owner, "<init>", descriptor, Opcodes.INVOKESPECIAL, 2);
+        var onlyEvidence = constructorEvidence(owner, descriptor, 4, 0, owner, true, true);
+        var result = verify(
+                analysis(List.of(owner),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(owner, "<init>", descriptor, 2)),
+                        List.of(), List.of(callSite), List.of(),
+                        List.of(onlyEvidence), List.of()),
+                Map.of(owner, targetEmptyClass(owner, "java/lang/Object"),
+                        helperOwner, helperWriter.toByteArray()));
+
+        assertEquals(0, result.verifiedMethodReferences());
+        assertEquals(Forge1201TargetApiVerifier.MemberStatus.NOT_CHECKED_INSUFFICIENT_CALLSITE_CONTEXT,
+                result.methodIssues().getFirst().status());
+        assertTrue(result.methodIssues().getFirst().mappingRule()
+                .contains("CONSTRUCTOR_ALLOCATION_EVIDENCE_COUNT_MISMATCH"));
+    }
+
+    @Test
+    void doesNotVerifyConstructorHelperWhenMatchingMethodHandleExistsEvenWithAllocationEvidence() throws Exception {
+        String owner = "net/minecraft/world/effect/MobEffectInstance";
+        String helperOwner = "org/kylepitcock/legacyconnector/v1_20_1/migrate/HolderCompat";
+        String descriptor = "(Lnet/minecraft/world/effect/MobEffect;II)V";
+        var mapping = Mc1201ApiMappings.callMapping(owner, "<init>", descriptor, Opcodes.INVOKESPECIAL);
+        assertNotNull(mapping);
+        ClassWriter helperWriter = new ClassWriter(0);
+        helperWriter.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, helperOwner, null, "java/lang/Object", null);
+        helperWriter.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                mapping.helperName(), mapping.helperDescriptor(), null, null).visitEnd();
+        helperWriter.visitEnd();
+
+        var callSite = new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                "fixture/Caller", "makeEffect", "()V",
+                owner, "<init>", descriptor, Opcodes.INVOKESPECIAL, 1);
+        var evidence = constructorEvidence(owner, descriptor, 4, 0, owner, true, true);
+        var handle = new Forge1201ApiUsageAnalyzer.ApiDynamicReference(
+                "source/fixture.jar", "fixture/Caller.class", "fixture/Caller", "makeEffect", "()V",
+                Forge1201ApiUsageAnalyzer.ApiDynamicReferenceKind.METHOD_HANDLE,
+                "ldc", owner, "<init>", descriptor, Opcodes.H_NEWINVOKESPECIAL, false, 10, 1);
+        var result = verify(
+                analysis(List.of(owner),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(owner, "<init>", descriptor, 1)),
+                        List.of(), List.of(callSite), List.of(),
+                        List.of(evidence), List.of(handle)),
+                Map.of(owner, targetEmptyClass(owner, "java/lang/Object"),
+                        helperOwner, helperWriter.toByteArray()));
+
+        assertEquals(0, result.verifiedMethodReferences());
+        assertEquals(Forge1201TargetApiVerifier.MemberStatus.NOT_CHECKED_INSUFFICIENT_CALLSITE_CONTEXT,
+                result.methodIssues().getFirst().status());
+        assertTrue(result.methodIssues().getFirst().mappingRule()
+                .contains("METHOD_HANDLE_REDIRECT_NOT_VERIFIED"));
+    }
+
+    @Test
     void mapsRemovedMinecraftClassesToConnectorMigrationHelpers() throws Exception {
         String sourceMobType = "net/minecraft/world/entity/MobType";
         String helperMobType = "org/kylepitcock/legacyconnector/v1_20_1/migrate/LegacyMobType";
@@ -791,6 +927,22 @@ final class Forge1201TargetApiVerifierTest {
                 .contains("MC1201_STATIC_FIELD_RULE_REQUIRES_GETSTATIC_CALLSITE_EVIDENCE"));
     }
 
+    private static Forge1201ApiUsageAnalyzer.ApiConstructorCallSite constructorEvidence(
+            String owner,
+            String descriptor,
+            int instructionOrdinal,
+            int allocationInstructionOrdinal,
+            String allocationOwner,
+            boolean matchedNewInstruction,
+            boolean allocationImmediatelyFollowedByDup) {
+        return new Forge1201ApiUsageAnalyzer.ApiConstructorCallSite(
+                "source/fixture.jar", "fixture/Caller.class",
+                "fixture/Caller", "makeEffect", "()V",
+                owner, "<init>", descriptor, Opcodes.INVOKESPECIAL, instructionOrdinal,
+                allocationOwner, allocationInstructionOrdinal, matchedNewInstruction,
+                allocationImmediatelyFollowedByDup);
+    }
+
     private static Forge1201ApiUsageAnalyzer.Analysis analysis(
             List<String> classes,
             List<Forge1201ApiUsageAnalyzer.ApiMemberReference> methods,
@@ -804,6 +956,17 @@ final class Forge1201TargetApiVerifierTest {
             List<Forge1201ApiUsageAnalyzer.ApiMemberReference> fields,
             List<Forge1201ApiUsageAnalyzer.ApiMethodCallSite> methodCallSites,
             List<Forge1201ApiUsageAnalyzer.ApiFieldCallSite> fieldCallSites) {
+        return analysis(classes, methods, fields, methodCallSites, fieldCallSites, List.of(), List.of());
+    }
+
+    private static Forge1201ApiUsageAnalyzer.Analysis analysis(
+            List<String> classes,
+            List<Forge1201ApiUsageAnalyzer.ApiMemberReference> methods,
+            List<Forge1201ApiUsageAnalyzer.ApiMemberReference> fields,
+            List<Forge1201ApiUsageAnalyzer.ApiMethodCallSite> methodCallSites,
+            List<Forge1201ApiUsageAnalyzer.ApiFieldCallSite> fieldCallSites,
+            List<Forge1201ApiUsageAnalyzer.ApiConstructorCallSite> constructorCallSites,
+            List<Forge1201ApiUsageAnalyzer.ApiDynamicReference> dynamicReferences) {
         Forge1201JarInfo metadata = new Forge1201JarInfo(
                 Path.of("synthetic.jar"),
                 "javafml",
@@ -813,7 +976,7 @@ final class Forge1201TargetApiVerifierTest {
                 List.of(new Forge1201JarInfo.Mod("fixture", "1.0", "Fixture", List.of())));
         return new Forge1201ApiUsageAnalyzer.Analysis(
                 metadata, 1, List.of(), List.of(), null, Map.of(), classes,
-                methodCallSites, fieldCallSites, methods, fields);
+                methodCallSites, fieldCallSites, methods, fields, dynamicReferences, constructorCallSites);
     }
 
     private static byte[] forgeHandleReferenceClass() {

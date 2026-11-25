@@ -466,6 +466,52 @@ final class Forge1201PreflightAnalyzerTest {
     }
 
     @Test
+    void capturesConstructorAllocationEvidenceUsingExactTreeAdjacencyAndLifoPairing() {
+        var inventory = new Forge1201ApiUsageAnalyzer.Inventory();
+        assertTrue(inventory.scanNestedClass("source/fixture.jar!/nested.jar",
+                "fixture/ConstructorEvidence.class", constructorAllocationEvidenceClass()));
+
+        var result = inventory.finish(null);
+        var effectCalls = result.constructorCallSites().stream()
+                .filter(value -> value.targetOwner().equals("net/minecraft/world/effect/MobEffectInstance"))
+                .toList();
+
+        var paired = effectCalls.stream().filter(value -> value.callerMethod().equals("paired")).findFirst().orElseThrow();
+        assertTrue(paired.matchedNewInstruction());
+        assertTrue(paired.allocationImmediatelyFollowedByDup());
+        assertTrue(paired.provesMigrationRewrite());
+
+        var missingDup = effectCalls.stream()
+                .filter(value -> value.callerMethod().equals("missingDup")).findFirst().orElseThrow();
+        assertTrue(missingDup.matchedNewInstruction());
+        assertFalse(missingDup.allocationImmediatelyFollowedByDup());
+        assertFalse(missingDup.provesMigrationRewrite());
+
+        var labelBetween = effectCalls.stream()
+                .filter(value -> value.callerMethod().equals("labelBetween")).findFirst().orElseThrow();
+        assertTrue(labelBetween.matchedNewInstruction());
+        assertFalse(labelBetween.allocationImmediatelyFollowedByDup());
+        assertFalse(labelBetween.provesMigrationRewrite());
+
+        var mismatched = effectCalls.stream()
+                .filter(value -> value.callerMethod().equals("mismatchedOwner")).findFirst().orElseThrow();
+        assertEquals("net/minecraft/world/entity/Entity", mismatched.allocationOwner());
+        assertFalse(mismatched.matchedNewInstruction());
+        assertFalse(mismatched.provesMigrationRewrite());
+
+        var nestedEffect = effectCalls.stream()
+                .filter(value -> value.callerMethod().equals("nested")).findFirst().orElseThrow();
+        var nestedModifier = result.constructorCallSites().stream()
+                .filter(value -> value.callerMethod().equals("nested")
+                        && value.targetOwner().equals("net/minecraft/world/entity/ai/attributes/AttributeModifier"))
+                .findFirst().orElseThrow();
+        assertTrue(nestedEffect.provesMigrationRewrite());
+        assertTrue(nestedModifier.provesMigrationRewrite());
+        assertTrue(nestedEffect.allocationInstructionOrdinal() < nestedModifier.instructionOrdinal());
+        assertTrue(nestedModifier.allocationInstructionOrdinal() < nestedEffect.instructionOrdinal());
+    }
+
+    @Test
     void classRemapperCapturesStructuralReferencesAndNestedAnnotationValues() {
         var inventory = new Forge1201ApiUsageAnalyzer.Inventory();
         assertTrue(inventory.scanNestedClass("source/fixture.jar!/nested.jar",
@@ -1536,6 +1582,63 @@ final class Forge1201PreflightAnalyzerTest {
         output.write((value >>> 8) & 0xff);
         output.write((value >>> 16) & 0xff);
         output.write((value >>> 24) & 0xff);
+    }
+
+    private static byte[] constructorAllocationEvidenceClass() {
+        String effect = "net/minecraft/world/effect/MobEffectInstance";
+        String modifier = "net/minecraft/world/entity/ai/attributes/AttributeModifier";
+        String entity = "net/minecraft/world/entity/Entity";
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC,
+                "fixture/ConstructorEvidence", null, "java/lang/Object", null);
+
+        emitConstructorPair(writer, "paired", effect, effect, false, false);
+        emitConstructorPair(writer, "missingDup", effect, effect, true, false);
+        emitConstructorPair(writer, "labelBetween", effect, effect, false, true);
+        emitConstructorPair(writer, "mismatchedOwner", entity, effect, false, false);
+
+        MethodVisitor nested = writer.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, "nested", "()V", null, null);
+        nested.visitCode();
+        nested.visitTypeInsn(Opcodes.NEW, effect);
+        nested.visitInsn(Opcodes.DUP);
+        nested.visitTypeInsn(Opcodes.NEW, modifier);
+        nested.visitInsn(Opcodes.DUP);
+        nested.visitMethodInsn(Opcodes.INVOKESPECIAL, modifier, "<init>", "()V", false);
+        nested.visitInsn(Opcodes.POP);
+        nested.visitMethodInsn(Opcodes.INVOKESPECIAL, effect, "<init>", "()V", false);
+        nested.visitInsn(Opcodes.POP);
+        nested.visitInsn(Opcodes.RETURN);
+        nested.visitMaxs(4, 0);
+        nested.visitEnd();
+
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static void emitConstructorPair(
+            ClassWriter writer,
+            String methodName,
+            String allocationOwner,
+            String invocationOwner,
+            boolean insertNop,
+            boolean insertLabelAndLine) {
+        MethodVisitor method = writer.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, methodName, "()V", null, null);
+        method.visitCode();
+        method.visitTypeInsn(Opcodes.NEW, allocationOwner);
+        if (insertLabelAndLine) {
+            org.objectweb.asm.Label label = new org.objectweb.asm.Label();
+            method.visitLabel(label);
+            method.visitLineNumber(37, label);
+        }
+        if (insertNop) method.visitInsn(Opcodes.NOP);
+        method.visitInsn(Opcodes.DUP);
+        method.visitMethodInsn(Opcodes.INVOKESPECIAL, invocationOwner, "<init>", "()V", false);
+        method.visitInsn(Opcodes.POP);
+        method.visitInsn(Opcodes.RETURN);
+        method.visitMaxs(3, 0);
+        method.visitEnd();
     }
 
     private static byte[] sampleModClass() {
