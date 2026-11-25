@@ -172,15 +172,23 @@ public final class Forge1201Transformer {
         return name;
     }
 
+    /**
+     * Applies the complete class mapping used for class-file references: side-by-side relocation,
+     * Forge package/class moves, then the Minecraft/NeoForge class alias table. The latter is keyed
+     * after Forge package relocation so it can express nested-to-top-level API replacements.
+     */
+    String mapType(String internalName) {
+        String moved = plan.isEmpty() ? null : plan.mapClass(VER, internalName);
+        if (moved != null) return moved;
+        String renamed = mapClass(internalName);
+        String mc = Mc1201Tables.get().classes.get(renamed);
+        return mc != null ? mc : renamed;
+    }
+
     private final class Mapper extends Remapper {
         @Override
         public String map(String internalName) {
-            String moved = plan.isEmpty() ? null : plan.mapClass(VER, internalName);
-            if (moved != null) return moved;
-            String r = mapClass(internalName);
-            // mc-classes.tsv is keyed by the name after the Forge renames (a NeoForge class that has no counterpart in 1.21.1 maps on to a stand-in)
-            String mc = Mc1201Tables.get().classes.get(r);
-            return mc != null ? mc : r;
+            return mapType(internalName);
         }
 
         @Override
