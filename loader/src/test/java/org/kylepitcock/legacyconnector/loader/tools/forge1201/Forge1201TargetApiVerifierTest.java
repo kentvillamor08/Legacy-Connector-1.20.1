@@ -176,6 +176,68 @@ final class Forge1201TargetApiVerifierTest {
     }
 
     @Test
+    void verifiesDeferredRegisterFactoryHelperForAllSixStaticCallsites() throws Exception {
+        String sourceOwner = "net/minecraftforge/registries/DeferredRegister";
+        String targetOwner = "net/neoforged/neoforge/registries/DeferredRegister";
+        String sourceRegistry = "net/minecraftforge/registries/IForgeRegistry";
+        String shimRegistry = "legacyconnector/v1_20_1/net/minecraftforge/registries/IForgeRegistry";
+        String sourceDescriptor = "(L" + sourceRegistry + ";Ljava/lang/String;)L" + sourceOwner + ";";
+        String helperDescriptor = "(L" + shimRegistry + ";Ljava/lang/String;)L" + targetOwner + ";";
+        String helperOwner = "legacyconnector/v1_20_1/ForgeApi1201";
+
+        ClassWriter helperWriter = new ClassWriter(0);
+        helperWriter.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, helperOwner, null, "java/lang/Object", null);
+        helperWriter.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "createDeferred", helperDescriptor, null, null).visitEnd();
+        helperWriter.visitEnd();
+
+        List<Forge1201ApiUsageAnalyzer.ApiMethodCallSite> callSites = List.of(
+                new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                        "symbiote/ModBlockEntities", "<clinit>", "()V",
+                        sourceOwner, "create", sourceDescriptor, Opcodes.INVOKESTATIC, 1),
+                new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                        "symbiote/ModBlocks", "<clinit>", "()V",
+                        sourceOwner, "create", sourceDescriptor, Opcodes.INVOKESTATIC, 1),
+                new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                        "symbiote/ModEntities", "<clinit>", "()V",
+                        sourceOwner, "create", sourceDescriptor, Opcodes.INVOKESTATIC, 1),
+                new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                        "symbiote/ModItems", "<clinit>", "()V",
+                        sourceOwner, "create", sourceDescriptor, Opcodes.INVOKESTATIC, 1),
+                new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                        "symbiote/ModMenus", "<clinit>", "()V",
+                        sourceOwner, "create", sourceDescriptor, Opcodes.INVOKESTATIC, 1),
+                new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                        "symbiote/ModSounds", "<clinit>", "()V",
+                        sourceOwner, "create", sourceDescriptor, Opcodes.INVOKESTATIC, 1));
+
+        var result = verify(
+                analysis(
+                        List.of(sourceOwner),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                sourceOwner, "create", sourceDescriptor, 6)),
+                        List.of(),
+                        callSites,
+                        List.of()),
+                Map.of(
+                        targetOwner, targetEmptyClass(targetOwner, "java/lang/Object"),
+                        shimRegistry, targetEmptyClass(shimRegistry, "java/lang/Object"),
+                        helperOwner, helperWriter.toByteArray()));
+
+        assertEquals(1, result.uniqueMethodReferences());
+        assertEquals(1, result.verifiedMethodReferences());
+        assertTrue(result.methodIssues().isEmpty());
+        var verified = result.verifiedMethods().getFirst();
+        assertEquals(helperOwner, verified.targetOwner());
+        assertEquals("createDeferred", verified.targetName());
+        assertEquals(helperDescriptor, verified.targetDescriptor());
+        assertTrue(verified.mappingRule().contains("FORGE_API_CALL_HELPER_REDIRECT"));
+        assertTrue(verified.mappingRule().contains("FORGE_API_REWRITE_TABLE"));
+        assertTrue(verified.mappingRule().contains("CONNECTOR_SHIM_DESCRIPTOR_MAPPING"));
+    }
+
+    @Test
     void verifiesPlayerInteractEventHelperAgainstTheRelocatedResultShimDescriptor() throws Exception {
         String sourceOwner = "net/minecraftforge/event/entity/player/PlayerInteractEvent";
         String targetOwner = "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent";
