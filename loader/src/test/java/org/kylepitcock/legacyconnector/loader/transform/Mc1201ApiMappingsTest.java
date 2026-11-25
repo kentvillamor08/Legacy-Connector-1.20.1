@@ -73,10 +73,22 @@ final class Mc1201ApiMappingsTest {
     }
 
     @Test
-    void doesNotInventCallRulesForUnmappedConstructorOrEventMethods() {
-        assertNull(Mc1201ApiMappings.callMapping(
-                "net/minecraft/resources/ResourceLocation",
-                "<init>", "(Ljava/lang/String;)V", Opcodes.INVOKESPECIAL));
+    void mapsResourceLocationStringConstructorToParseFactory() {
+        String owner = "net/minecraft/resources/ResourceLocation";
+        var mapping = Mc1201ApiMappings.callMapping(
+                owner, "<init>", "(Ljava/lang/String;)V", Opcodes.INVOKESPECIAL);
+
+        assertNotNull(mapping);
+        assertTrue(mapping.usesHelper());
+        assertEquals(owner, mapping.helperOwner());
+        assertEquals("parse", mapping.helperName());
+        assertEquals(
+                "(Ljava/lang/String;)L" + owner + ";",
+                mapping.helperDescriptor());
+    }
+
+    @Test
+    void doesNotInventCallRulesForUnmappedEventMethods() {
         assertNull(Mc1201ApiMappings.callMapping(
                 "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent",
                 "isCancelable", "()Z", Opcodes.INVOKEVIRTUAL));
