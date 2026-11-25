@@ -88,10 +88,51 @@ final class Mc1201ApiMappingsTest {
     }
 
     @Test
+    void mapsPlayerInteractEventCancellationCapabilityQueryToHelper() {
+        String owner = "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent";
+        var mapping = Mc1201ApiMappings.callMapping(
+                owner, "isCancelable", "()Z", Opcodes.INVOKEVIRTUAL);
+
+        assertNotNull(mapping);
+        assertTrue(mapping.usesHelper());
+        assertEquals("net/neoforged/neoforge/event/entity/player/PlayerInteractEvent", mapping.declaringOwner());
+        assertEquals("org/kylepitcock/legacyconnector/v1_20_1/migrate/PlayerInteractCompat", mapping.helperOwner());
+        assertEquals("isCancelable", mapping.helperName());
+        assertEquals("(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;)Z", mapping.helperDescriptor());
+    }
+
+    @Test
+    void mapsPlayerInteractEventCancellationMutationToHelper() {
+        String owner = "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent";
+        var mapping = Mc1201ApiMappings.callMapping(
+                owner, "setCanceled", "(Z)V", Opcodes.INVOKEVIRTUAL);
+
+        assertNotNull(mapping);
+        assertTrue(mapping.usesHelper());
+        assertEquals("org/kylepitcock/legacyconnector/v1_20_1/migrate/PlayerInteractCompat", mapping.helperOwner());
+        assertEquals("setCanceled", mapping.helperName());
+        assertEquals("(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;Z)V", mapping.helperDescriptor());
+    }
+
+    @Test
+    void erasesTheNonSemanticPlayerInteractEventLegacyResultArgument() {
+        String owner = "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent";
+        String descriptor = "(Lnet/minecraftforge/eventbus/api/Event$Result;)V";
+        var mapping = Mc1201ApiMappings.callMapping(
+                owner, "setResult", descriptor, Opcodes.INVOKEVIRTUAL);
+
+        assertNotNull(mapping);
+        assertTrue(mapping.usesHelper());
+        assertEquals("org/kylepitcock/legacyconnector/v1_20_1/migrate/PlayerInteractCompat", mapping.helperOwner());
+        assertEquals("ignoreResult", mapping.helperName());
+        assertEquals("(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;Ljava/lang/Object;)V", mapping.helperDescriptor());
+    }
+
+    @Test
     void doesNotInventCallRulesForUnmappedEventMethods() {
         assertNull(Mc1201ApiMappings.callMapping(
                 "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent",
-                "isCancelable", "()Z", Opcodes.INVOKEVIRTUAL));
+                "getResult", "()Lnet/minecraftforge/eventbus/api/Event$Result;", Opcodes.INVOKEVIRTUAL));
     }
 
     @Test
