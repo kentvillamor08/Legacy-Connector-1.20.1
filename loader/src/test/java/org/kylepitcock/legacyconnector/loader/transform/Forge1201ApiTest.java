@@ -63,6 +63,27 @@ class Forge1201ApiTest {
     }
 
     @Test
+    void mapsForgeFinalizeSpawnNestedEventToNeoForgeTopLevelEvent() {
+        Forge1201Transformer transformer = new Forge1201Transformer(ShimIndex.empty());
+
+        assertEquals(
+                "net/neoforged/neoforge/event/entity/living/FinalizeSpawnEvent",
+                transformer.mapType("net/minecraftforge/event/entity/living/MobSpawnEvent$FinalizeSpawn"));
+    }
+
+    @Test
+    void preservesOtherMobSpawnEventsAsNestedTypes() {
+        Forge1201Transformer transformer = new Forge1201Transformer(ShimIndex.empty());
+
+        assertEquals(
+                "net/neoforged/neoforge/event/entity/living/MobSpawnEvent$PositionCheck",
+                transformer.mapType("net/minecraftforge/event/entity/living/MobSpawnEvent$PositionCheck"));
+        assertEquals(
+                "net/neoforged/neoforge/event/entity/living/MobSpawnEvent$SpawnPlacementCheck",
+                transformer.mapType("net/minecraftforge/event/entity/living/MobSpawnEvent$SpawnPlacementCheck"));
+    }
+
+    @Test
     void tableLoadsAndLinesAreClean() {
         Map<String, String> table = ForgeApiRewrites1201.table();
         assertFalse(table.isEmpty());
