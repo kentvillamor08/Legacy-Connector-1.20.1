@@ -1012,7 +1012,7 @@ public final class Forge1201TargetApiVerifier {
     private CallHelperResolution resolveCallHelper(
             Forge1201ApiUsageAnalyzer.Analysis analysis,
             Forge1201ApiUsageAnalyzer.ApiMemberReference reference,
-            String targetName) {
+            String targetName) throws IOException {
         List<Forge1201ApiUsageAnalyzer.ApiMethodCallSite> sites = analysis.methodCallSites().stream()
                 .filter(callSite -> callSite.targetOwner().equals(reference.owner())
                         && callSite.targetName().equals(reference.name())
