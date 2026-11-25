@@ -42,6 +42,68 @@ final class ForgeApiRewrites1201 {
         return table = map;
     }
 
+    /**
+     * Resolves a Forge API call rewrite without modifying bytecode. The target API verifier uses
+     * this same catalog and mirrors the exact owner/opcode/receiver rules used by {@link #apply}.
+     */
+    static Mc1201ApiMappings.CallMapping callMapping(String owner, String name, String descriptor, int opcode) {
+        if (owner == null || name == null || descriptor == null) {
+            throw new IllegalArgumentException("A Forge call owner, name, and descriptor are required");
+        }
+        if (opcode != Opcodes.INVOKEVIRTUAL && opcode != Opcodes.INVOKEINTERFACE
+                && opcode != Opcodes.INVOKESTATIC && opcode != Opcodes.INVOKESPECIAL) {
+            throw new IllegalArgumentException("Unsupported method-call opcode: " + opcode);
+        }
+
+        Map<String, String> rules = table();
+        String ruleKey = owner + "." + name + descriptor;
+        String helper = rules.get(ruleKey);
+        boolean anyReceiver = false;
+        if (helper == null) {
+            ruleKey = "*." + name + descriptor;
+            helper = rules.get(ruleKey);
+            anyReceiver = helper != null;
+        }
+        if (helper == null && opcode == Opcodes.INVOKEVIRTUAL && owner.startsWith("net/neoforged/")
+                && !owner.equals("net/neoforged/bus/api/ICancellableEvent")) {
+            ruleKey = "@event." + name + descriptor;
+            helper = rules.get(ruleKey);
+            anyReceiver = helper != null;
+        }
+        if (helper == null) return null;
+
+        String helperOwner = null;
+        if (helper.startsWith("TailClient.")) {
+            helperOwner = TAIL_CLIENT;
+            helper = helper.substring(11);
+        } else if (helper.startsWith("Tail.")) {
+            helperOwner = TAIL;
+            helper = helper.substring(5);
+        }
+
+        if (opcode == Opcodes.INVOKESPECIAL) {
+            if (name.equals("<init>") || !(owner.startsWith("net/minecraft/") || owner.startsWith("net/neoforged/"))) {
+                return null;
+            }
+            helper = "super" + Character.toUpperCase(helper.charAt(0)) + helper.substring(1);
+        }
+
+        String helperDescriptor = descriptor;
+        if (opcode != Opcodes.INVOKESTATIC) {
+            Type[] args = Type.getArgumentTypes(descriptor);
+            Type[] withReceiver = new Type[args.length + 1];
+            withReceiver[0] = anyReceiver ? Type.getObjectType("java/lang/Object") : Type.getObjectType(owner);
+            System.arraycopy(args, 0, withReceiver, 1, args.length);
+            helperDescriptor = Type.getMethodDescriptor(Type.getReturnType(descriptor), withReceiver);
+        }
+
+        if (helperOwner == null) {
+            helperOwner = helper.toLowerCase().contains("getcapability") ? CAPS : HELPERS;
+        }
+        return new Mc1201ApiMappings.CallMapping(
+                owner, helperOwner, helper, helperDescriptor, false, "FORGE_API_REWRITE_TABLE:" + ruleKey);
+    }
+
     /** Rewrites the calls of one class; returns how many. */
     static int apply(ClassNode node) {
         return apply(node, table());
