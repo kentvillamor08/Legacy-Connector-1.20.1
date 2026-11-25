@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.LinkedHashSet;
 import org.kylepitcock.legacyconnector.loader.mapping.SrgMojangTable;
+import org.kylepitcock.legacyconnector.loader.LegacyVersion;
 import org.kylepitcock.legacyconnector.loader.transform.Mc1201ApiMappings;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassVisitor;
@@ -968,6 +969,46 @@ public final class Forge1201TargetApiVerifier {
             boolean insufficientContext,
             String mappingRule) {}
 
+    private record CallSiteDescriptor(String descriptor, boolean connectorShimDescriptor) {}
+
+    /**
+     * Mirrors the transformer’s facade-first descriptor relocation for call-helper lookup.
+     * A manual Forge API type stays manual in the report unless the exact 1.20.1 shim class
+     * exists in the supplied Connector runtime classpath; when it does, the transformed mod
+     * descriptor refers to that shim class and the call catalog must use the same descriptor.
+     */
+    private CallSiteDescriptor mapCallSiteDescriptor(String descriptor) throws IOException {
+        Type method = Type.getMethodType(descriptor);
+        Type[] arguments = method.getArgumentTypes();
+        boolean[] shimmed = {false};
+        for (int i = 0; i < arguments.length; i++) {
+            arguments[i] = mapCallSiteDescriptorType(arguments[i], shimmed);
+        }
+        Type returnType = mapCallSiteDescriptorType(method.getReturnType(), shimmed);
+        return new CallSiteDescriptor(
+                Type.getMethodDescriptor(returnType, arguments),
+                shimmed[0]);
+    }
+
+    private Type mapCallSiteDescriptorType(Type type, boolean[] shimmed) throws IOException {
+        if (type.getSort() == Type.ARRAY) {
+            Type element = mapCallSiteDescriptorType(type.getElementType(), shimmed);
+            return Type.getType("[".repeat(type.getDimensions()) + element.getDescriptor());
+        }
+        if (type.getSort() != Type.OBJECT) return type;
+
+        String internalName = type.getInternalName();
+        if (internalName.startsWith("net/minecraftforge/")
+                && mapType(internalName).equals(internalName)) {
+            String shimName = LegacyVersion.V1_20_1.shimPrefix() + internalName;
+            if (readClass(shimName) != null) {
+                shimmed[0] = true;
+                return Type.getObjectType(shimName);
+            }
+        }
+        return type;
+    }
+
     private CallHelperResolution resolveCallHelper(
             Forge1201ApiUsageAnalyzer.Analysis analysis,
             Forge1201ApiUsageAnalyzer.ApiMemberReference reference,
@@ -998,10 +1039,14 @@ public final class Forge1201TargetApiVerifier {
 
         Mc1201ApiMappings.CallMapping selected = null;
         boolean uncoveredCallsite = false;
+        boolean connectorShimDescriptor = false;
         for (Forge1201ApiUsageAnalyzer.ApiMethodCallSite site : sites) {
             String mappedOwner = mapType(site.targetOwner());
             String mappedDescriptor = mapMethodDescriptor(
                     site.targetOwner(), targetName, site.targetDescriptor());
+            CallSiteDescriptor callSiteDescriptor = mapCallSiteDescriptor(mappedDescriptor);
+            mappedDescriptor = callSiteDescriptor.descriptor();
+            connectorShimDescriptor |= callSiteDescriptor.connectorShimDescriptor();
             Mc1201ApiMappings.CallMapping candidate = Mc1201ApiMappings.callMapping(
                     mappedOwner, targetName, mappedDescriptor, site.opcode());
             if (candidate == null || candidate.inPlace()) {
@@ -1029,6 +1074,7 @@ public final class Forge1201TargetApiVerifier {
             return new CallHelperResolution(null, true, "CALLSITE_SET_NOT_FULLY_COVERED_BY_ONE_HELPER_RULE");
         }
         String mappingRule = "MC1201_CALL_RULE:" + selected.declaringOwner();
+        if (connectorShimDescriptor) mappingRule += "+CONNECTOR_SHIM_DESCRIPTOR_MAPPING";
         if ("<init>".equals(targetName)) {
             String evidenceIssue = constructorAllocationEvidenceIssue(analysis, reference, sites);
             if (evidenceIssue != null) {
