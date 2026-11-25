@@ -102,6 +102,32 @@ final class Mc1201ApiMappingsTest {
     }
 
     @Test
+    void mapsPlayerInteractEventCancellationStateQueryToHelper() {
+        String owner = "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent";
+        var mapping = Mc1201ApiMappings.callMapping(
+                owner, "isCanceled", "()Z", Opcodes.INVOKEVIRTUAL);
+
+        assertNotNull(mapping);
+        assertTrue(mapping.usesHelper());
+        assertEquals("org/kylepitcock/legacyconnector/v1_20_1/migrate/PlayerInteractCompat", mapping.helperOwner());
+        assertEquals("isCanceled", mapping.helperName());
+        assertEquals("(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;)Z", mapping.helperDescriptor());
+    }
+
+    @Test
+    void mapsPlayerInteractEventHasResultCapabilityQueryToHelper() {
+        String owner = "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent";
+        var mapping = Mc1201ApiMappings.callMapping(
+                owner, "hasResult", "()Z", Opcodes.INVOKEVIRTUAL);
+
+        assertNotNull(mapping);
+        assertTrue(mapping.usesHelper());
+        assertEquals("org/kylepitcock/legacyconnector/v1_20_1/migrate/PlayerInteractCompat", mapping.helperOwner());
+        assertEquals("hasResult", mapping.helperName());
+        assertEquals("(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;)Z", mapping.helperDescriptor());
+    }
+
+    @Test
     void mapsPlayerInteractEventCancellationMutationToHelper() {
         String owner = "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent";
         var mapping = Mc1201ApiMappings.callMapping(
@@ -146,7 +172,7 @@ final class Mc1201ApiMappingsTest {
     void doesNotInventCallRulesForUnmappedEventMethods() {
         assertNull(Mc1201ApiMappings.callMapping(
                 "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent",
-                "hasResult", "()Z", Opcodes.INVOKEVIRTUAL));
+                "unknownEventAccessor", "()Z", Opcodes.INVOKEVIRTUAL));
     }
 
     @Test
