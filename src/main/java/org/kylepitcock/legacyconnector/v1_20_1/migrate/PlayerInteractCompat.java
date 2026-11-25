@@ -22,7 +22,7 @@ import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
  * incorrectly translating DENY into an InteractionResult or TriState.</p>
  */
 public final class PlayerInteractCompat {
-    private static final Map<PlayerInteractEvent, Result> LEGACY_RESULTS =
+    private static final Map<PlayerInteractEvent, Event$Result> LEGACY_RESULTS =
             Collections.synchronizedMap(new WeakHashMap<>());
 
     private PlayerInteractCompat() {}
@@ -51,18 +51,18 @@ public final class PlayerInteractCompat {
     }
 
     /** Preserves the legacy Event#setResult value for consumers that subsequently call getResult. */
-    public static void setResult(PlayerInteractEvent event, Result result) {
+    public static void setResult(PlayerInteractEvent event, Event$Result result) {
         Objects.requireNonNull(event, "event");
         LEGACY_RESULTS.put(event, result);
     }
 
     /** Returns Forge's default result until a legacy setResult call stores another value. */
-    public static Result getResult(PlayerInteractEvent event) {
+    public static Event$Result getResult(PlayerInteractEvent event) {
         Objects.requireNonNull(event, "event");
         synchronized (LEGACY_RESULTS) {
             return LEGACY_RESULTS.containsKey(event)
                     ? LEGACY_RESULTS.get(event)
-                    : Result.DEFAULT;
+                    : Event$Result.DEFAULT;
         }
     }
 }
