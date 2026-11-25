@@ -106,11 +106,11 @@ public final class Forge1201Runtime {
     // ---- tick events ------------------------------------------------------------------------------------------------------
 
     private static void onServerTickPre(ServerTickEvent.Pre e) {
-        NeoForge.EVENT_BUS.post(new TickEvent.ServerTickEvent(TickEvent.Phase.START, e::hasTime));
+        NeoForge.EVENT_BUS.post(new TickEvent.ServerTickEvent(TickEvent.Phase.START, e::hasTime, e::getServer));
     }
 
     private static void onServerTickPost(ServerTickEvent.Post e) {
-        NeoForge.EVENT_BUS.post(new TickEvent.ServerTickEvent(TickEvent.Phase.END, e::hasTime));
+        NeoForge.EVENT_BUS.post(new TickEvent.ServerTickEvent(TickEvent.Phase.END, e::hasTime, e::getServer));
     }
 
     private static void onLevelTickPre(LevelTickEvent.Pre e) {
