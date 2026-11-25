@@ -97,6 +97,37 @@ class Mc1201MigrationTest implements Opcodes {
     }
 
     @Test
+    void resourceLocationStringConstructorBecomesParseFactoryCall() {
+        String resourceLocation = "net/minecraft/resources/ResourceLocation";
+        ClassNode c = cls("test/ResourceLocationCalls", "java/lang/Object");
+        MethodNode m = method(c, ACC_PUBLIC | ACC_STATIC, "parse",
+                "(Ljava/lang/String;)L" + resourceLocation + ";");
+        m.instructions.add(new TypeInsnNode(NEW, resourceLocation));
+        m.instructions.add(new InsnNode(DUP));
+        m.instructions.add(new VarInsnNode(ALOAD, 0));
+        m.instructions.add(new MethodInsnNode(
+                INVOKESPECIAL, resourceLocation, "<init>", "(Ljava/lang/String;)V", false));
+        m.instructions.add(new InsnNode(ARETURN));
+
+        assertEquals(1, apply(c).constructors);
+
+        MethodInsnNode factory = find(m, resourceLocation, "parse");
+        assertNotNull(factory);
+        assertEquals(INVOKESTATIC, factory.getOpcode());
+        assertEquals(
+                "(Ljava/lang/String;)L" + resourceLocation + ";",
+                factory.desc);
+        assertNull(find(m, resourceLocation, "<init>"),
+                "the removed one-string constructor must not remain");
+        for (AbstractInsnNode instruction : m.instructions) {
+            if (instruction instanceof TypeInsnNode type) {
+                assertFalse(type.getOpcode() == NEW && type.desc.equals(resourceLocation),
+                        "the ResourceLocation allocation is replaced by the parse factory");
+            }
+        }
+    }
+
+    @Test
     void legacyAabbBlockPosConstructorBecomesCompatFactoryCall() {
         String pos = "net/minecraft/core/BlockPos";
         String aabb = "net/minecraft/world/phys/AABB";
