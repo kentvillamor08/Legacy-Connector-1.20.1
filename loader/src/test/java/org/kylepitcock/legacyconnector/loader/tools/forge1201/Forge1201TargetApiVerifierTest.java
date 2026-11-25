@@ -95,6 +95,40 @@ final class Forge1201TargetApiVerifierTest {
     }
 
     @Test
+    void verifiesFinalizeSpawnNestedTypeAliasAndInheritedGetEntityMember() throws Exception {
+        String sourceEvent = "net/minecraftforge/event/entity/living/MobSpawnEvent$FinalizeSpawn";
+        String targetEvent = "net/neoforged/neoforge/event/entity/living/FinalizeSpawnEvent";
+        String targetBase = "net/neoforged/neoforge/event/entity/living/MobSpawnEvent";
+        String getEntityDescriptor = "()Lnet/minecraft/world/entity/Mob;";
+
+        Map<String, byte[]> classes = Map.of(
+                targetEvent, targetFinalizeSpawnEventClass(targetEvent, targetBase),
+                targetBase, targetFinalizeSpawnBaseClass(targetBase));
+
+        Forge1201TargetApiVerifier.Result result = verify(
+                analysis(
+                        List.of(sourceEvent),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                sourceEvent, "getEntity", getEntityDescriptor, 1)),
+                        List.of()),
+                classes);
+
+        assertEquals(1, result.candidateClassCount());
+        assertEquals(1, result.verifiedClassCount());
+        assertTrue(result.missingTargetClasses().isEmpty());
+        assertEquals(1, result.uniqueMethodReferences());
+        assertEquals(1, result.verifiedMethodReferences());
+        assertTrue(result.methodIssues().isEmpty());
+        assertEquals(1, result.verifiedMethods().size());
+
+        var match = result.verifiedMethods().getFirst();
+        assertEquals(sourceEvent, match.sourceOwner());
+        assertEquals(targetEvent, match.targetOwner());
+        assertEquals(getEntityDescriptor, match.targetDescriptor());
+        assertEquals(List.of(targetEvent, targetBase), match.hierarchyVisited());
+    }
+
+    @Test
     void reportsChangedOrMissingTargetMemberSignatures() throws Exception {
         Map<String, byte[]> classes = Map.of(
                 TARGET_MOD, targetModClass("java/lang/Object", false, true),
@@ -1266,6 +1300,22 @@ final class Forge1201TargetApiVerifierTest {
                     null,
                     null).visitEnd();
         }
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] targetFinalizeSpawnEventClass(String name, String superName) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, name, null, superName, null);
+        writer.visitEnd();
+        return writer.toByteArray();
+    }
+
+    private static byte[] targetFinalizeSpawnBaseClass(String name) {
+        ClassWriter writer = new ClassWriter(0);
+        writer.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, name, null, "java/lang/Object", null);
+        writer.visitMethod(Opcodes.ACC_PUBLIC, "getEntity",
+                "()Lnet/minecraft/world/entity/Mob;", null, null).visitEnd();
         writer.visitEnd();
         return writer.toByteArray();
     }
