@@ -15,10 +15,11 @@ import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
  * <p>Forge exposed cancellability as a capability query on Event. NeoForge expresses
  * that capability through ICancellableEvent on each concrete event subtype.</p>
  *
- * <p>PlayerInteractEvent is cancellable but is not a Forge @HasResult event. Its result
- * value therefore does not steer the interaction pipeline. Forge still stores the
- * value for callers of Event#getResult(), so this adapter preserves that observable
- * state without incorrectly translating DENY into an InteractionResult or TriState.</p>
+ * <p>Only selected PlayerInteractEvent subtypes are cancellable, and the hierarchy
+ * is not a Forge @HasResult event. Its legacy result value therefore does not steer
+ * the interaction pipeline. Forge still stores that value for callers of
+ * Event#getResult(), so this adapter preserves the observable state without
+ * incorrectly translating DENY into an InteractionResult or TriState.</p>
  */
 public final class PlayerInteractCompat {
     private static final Map<PlayerInteractEvent, Result> LEGACY_RESULTS =
