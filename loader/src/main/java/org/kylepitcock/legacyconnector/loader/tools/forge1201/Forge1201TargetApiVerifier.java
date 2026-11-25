@@ -477,9 +477,13 @@ public final class Forge1201TargetApiVerifier {
                 String helperOwner = helper.helperOwner();
                 String helperName = helper.helperName();
                 String helperDescriptor = helper.helperDescriptor();
+                String helperRedirectRule = helper.ruleKey() != null
+                        && helper.ruleKey().startsWith("FORGE_API_REWRITE_TABLE:")
+                                ? "FORGE_API_CALL_HELPER_REDIRECT:"
+                                : "MC1201_CALL_HELPER_REDIRECT:";
                 String helperMappingRule = combineMappingRules(
                         mappingRule,
-                        "MC1201_CALL_HELPER_REDIRECT:" + helper.declaringOwner(),
+                        helperRedirectRule + helper.declaringOwner(),
                         helperResolution.mappingRule());
 
                 if (isUnavailableClass(helperOwner)) {
@@ -1049,6 +1053,10 @@ public final class Forge1201TargetApiVerifier {
             connectorShimDescriptor |= callSiteDescriptor.connectorShimDescriptor();
             Mc1201ApiMappings.CallMapping candidate = Mc1201ApiMappings.callMapping(
                     mappedOwner, targetName, mappedDescriptor, site.opcode());
+            if (candidate == null) {
+                candidate = Mc1201ApiMappings.forgeApiCallMapping(
+                        mappedOwner, targetName, mappedDescriptor, site.opcode());
+            }
             if (candidate == null || candidate.inPlace()) {
                 uncoveredCallsite = true;
                 continue;
@@ -1073,7 +1081,10 @@ public final class Forge1201TargetApiVerifier {
         if (uncoveredCallsite) {
             return new CallHelperResolution(null, true, "CALLSITE_SET_NOT_FULLY_COVERED_BY_ONE_HELPER_RULE");
         }
-        String mappingRule = "MC1201_CALL_RULE:" + selected.declaringOwner();
+        String mappingRule = selected.ruleKey() != null
+                && selected.ruleKey().startsWith("FORGE_API_REWRITE_TABLE:")
+                        ? selected.ruleKey()
+                        : "MC1201_CALL_RULE:" + selected.declaringOwner();
         if (connectorShimDescriptor) mappingRule += "+CONNECTOR_SHIM_DESCRIPTOR_MAPPING";
         if ("<init>".equals(targetName)) {
             String evidenceIssue = constructorAllocationEvidenceIssue(analysis, reference, sites);
