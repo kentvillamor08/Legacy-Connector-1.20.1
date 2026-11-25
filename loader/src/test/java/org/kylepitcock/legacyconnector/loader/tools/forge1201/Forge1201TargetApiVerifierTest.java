@@ -794,6 +794,59 @@ final class Forge1201TargetApiVerifierTest {
     }
 
     @Test
+    void keepsConstructorHelperUncheckedWhenAllocationOwnerDoesNotMatchInvocationOwner() throws Exception {
+        String owner = "net/minecraft/world/effect/MobEffectInstance";
+        String helperOwner = "org/kylepitcock/legacyconnector/v1_20_1/migrate/HolderCompat";
+        String descriptor = "(Lnet/minecraft/world/effect/MobEffect;II)V";
+        var mapping = Mc1201ApiMappings.callMapping(owner, "<init>", descriptor, Opcodes.INVOKESPECIAL);
+        assertNotNull(mapping);
+        ClassWriter helperWriter = new ClassWriter(0);
+        helperWriter.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, helperOwner, null, "java/lang/Object", null);
+        helperWriter.visitMethod(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                mapping.helperName(), mapping.helperDescriptor(), null, null).visitEnd();
+        helperWriter.visitEnd();
+
+        var callSite = new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                "fixture/Caller", "makeEffect", "()V",
+                owner, "<init>", descriptor, Opcodes.INVOKESPECIAL, 1);
+        var mismatchedOwner = constructorEvidence(
+                owner, descriptor, 4, 0, "net/minecraft/world/entity/Entity", false, true);
+        var result = verify(
+                analysis(List.of(owner),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(owner, "<init>", descriptor, 1)),
+                        List.of(), List.of(callSite), List.of(),
+                        List.of(mismatchedOwner), List.of()),
+                Map.of(owner, targetEmptyClass(owner, "java/lang/Object"),
+                        helperOwner, helperWriter.toByteArray()));
+
+        assertEquals(0, result.verifiedMethodReferences());
+        assertEquals(Forge1201TargetApiVerifier.MemberStatus.NOT_CHECKED_INSUFFICIENT_CALLSITE_CONTEXT,
+                result.methodIssues().getFirst().status());
+        assertTrue(result.methodIssues().getFirst().mappingRule()
+                .contains("CONSTRUCTOR_ALLOCATION_PAIR_NOT_PROVEN"));
+    }
+
+    @Test
+    void keepsConstructorHelperUncheckedWhenInvocationOpcodeIsNotInvokeSpecial() throws Exception {
+        String owner = "net/minecraft/world/effect/MobEffectInstance";
+        String descriptor = "(Lnet/minecraft/world/effect/MobEffect;II)V";
+        var callSite = new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                "fixture/Caller", "makeEffect", "()V",
+                owner, "<init>", descriptor, Opcodes.INVOKEVIRTUAL, 1);
+        var result = verify(
+                analysis(List.of(owner),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(owner, "<init>", descriptor, 1)),
+                        List.of(), List.of(callSite), List.of()),
+                Map.of(owner, targetEmptyClass(owner, "java/lang/Object")));
+
+        assertEquals(0, result.verifiedMethodReferences());
+        assertEquals(Forge1201TargetApiVerifier.MemberStatus.NOT_CHECKED_INSUFFICIENT_CALLSITE_CONTEXT,
+                result.methodIssues().getFirst().status());
+        assertTrue(result.methodIssues().getFirst().mappingRule()
+                .contains("CONSTRUCTOR_CALLSITE_OPCODE_UNEXPECTED"));
+    }
+
+    @Test
     void keepsConstructorHelperUncheckedWhenAllocationEvidenceCountDoesNotCoverEveryInvocation() throws Exception {
         String owner = "net/minecraft/world/effect/MobEffectInstance";
         String helperOwner = "org/kylepitcock/legacyconnector/v1_20_1/migrate/HolderCompat";

@@ -982,6 +982,10 @@ public final class Forge1201TargetApiVerifier {
             // independently established missing or incomplete target signature.
             return new CallHelperResolution(null, false, "NO_DIRECT_CALLSITE_EVIDENCE");
         }
+        if ("<init>".equals(targetName)
+                && sites.stream().anyMatch(site -> site.opcode() != Opcodes.INVOKESPECIAL)) {
+            return new CallHelperResolution(null, true, "CONSTRUCTOR_CALLSITE_OPCODE_UNEXPECTED");
+        }
 
         Mc1201ApiMappings.CallMapping selected = null;
         boolean uncoveredCallsite = false;
