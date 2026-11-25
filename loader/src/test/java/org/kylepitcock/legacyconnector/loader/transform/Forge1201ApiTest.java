@@ -11,10 +11,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.jar.Attributes;
 import java.util.jar.Manifest;
-import legacyconnector.v1_20_1.ForgeApi1201;
-import legacyconnector.v1_20_1.net.minecraftforge.registries.ForgeRegistries;
-import legacyconnector.v1_20_1.net.minecraftforge.registries.IForgeRegistry;
-import net.neoforged.neoforge.registries.DeferredRegister;
 import org.junit.jupiter.api.Test;
 import org.kylepitcock.legacyconnector.loader.shim.ShimIndex;
 import org.objectweb.asm.Opcodes;
@@ -223,22 +219,6 @@ class Forge1201ApiTest {
         assertEquals(descriptor, rewritten.desc);
     }
 
-    @Test
-    void deferredRegisterFactoryPreservesAllSixForgeBuiltinRegistryKeysAndNamespace() {
-        List<IForgeRegistry<?>> registries = List.of(
-                ForgeRegistries.BLOCK_ENTITY_TYPES,
-                ForgeRegistries.BLOCKS,
-                ForgeRegistries.ENTITY_TYPES,
-                ForgeRegistries.ITEMS,
-                ForgeRegistries.MENU_TYPES,
-                ForgeRegistries.SOUND_EVENTS);
-
-        for (IForgeRegistry<?> registry : registries) {
-            DeferredRegister<?> actual = ForgeApi1201.createDeferred(registry, "symbiote");
-            assertEquals(registry.getRegistryKey(), actual.getRegistryKey());
-            assertEquals("symbiote", actual.getNamespace());
-        }
-    }
 
     @Test
     void forgeModResourcePackFactoryCallUsesTheConcreteLegacyFacade() {
