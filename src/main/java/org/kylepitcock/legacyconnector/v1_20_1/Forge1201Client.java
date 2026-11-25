@@ -27,6 +27,8 @@ final class Forge1201Client {
     static void init(IEventBus modBus) {
         NeoForge.EVENT_BUS.addListener(Forge1201Client::onClientTickPre);
         NeoForge.EVENT_BUS.addListener(Forge1201Client::onClientTickPost);
+        NeoForge.EVENT_BUS.addListener(Forge1201Client::onRenderFramePre);
+        NeoForge.EVENT_BUS.addListener(Forge1201Client::onRenderFramePost);
         modBus.addListener(Forge1201Client::onRegisterLayers);
         modBus.addListener(Forge1201Client::onClientSetup);
         NeoForge.EVENT_BUS.addListener(EventPriority.HIGH, Forge1201Client::onLayerPre);
@@ -39,6 +41,31 @@ final class Forge1201Client {
 
     private static void onClientTickPost(ClientTickEvent.Post e) {
         NeoForge.EVENT_BUS.post(new TickEvent.ClientTickEvent(TickEvent.Phase.END));
+    }
+
+    /**
+     * Forge 1.20.1 emitted RenderTickEvent around each GameRenderer frame. NeoForge's
+     * RenderFrameEvent has the same before/after frame boundaries; translate its
+     * partial tick into the legacy event's renderTickTime.
+     */
+    private static void onRenderFramePre(net.neoforged.neoforge.client.event.RenderFrameEvent.Pre event) {
+        NeoForge.EVENT_BUS.post(toLegacyRenderTick(event));
+    }
+
+    private static void onRenderFramePost(net.neoforged.neoforge.client.event.RenderFrameEvent.Post event) {
+        NeoForge.EVENT_BUS.post(toLegacyRenderTick(event));
+    }
+
+    static TickEvent.RenderTickEvent toLegacyRenderTick(
+            net.neoforged.neoforge.client.event.RenderFrameEvent.Pre event) {
+        return new TickEvent.RenderTickEvent(TickEvent.Phase.START,
+                event.getPartialTick().getGameTimeDeltaPartialTick(false));
+    }
+
+    static TickEvent.RenderTickEvent toLegacyRenderTick(
+            net.neoforged.neoforge.client.event.RenderFrameEvent.Post event) {
+        return new TickEvent.RenderTickEvent(TickEvent.Phase.END,
+                event.getPartialTick().getGameTimeDeltaPartialTick(false));
     }
 
     /** Forge's overlay registration event goes to the mods that listen to it, on their own mod buses. */
