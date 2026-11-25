@@ -219,6 +219,47 @@ final class Forge1201TargetApiVerifierTest {
     }
 
     @Test
+    void verifiesPlayerInteractEventLegacyResultGetterAgainstTheRelocatedShimDescriptor() throws Exception {
+        String sourceOwner = "net/minecraftforge/event/entity/player/PlayerInteractEvent";
+        String targetOwner = "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent";
+        String helperOwner = "org/kylepitcock/legacyconnector/v1_20_1/migrate/PlayerInteractCompat";
+        String shimResult = "legacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result";
+        String sourceDescriptor = "()Lnet/minecraftforge/eventbus/api/Event$Result;";
+        String helperDescriptor = "(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;)Llegacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result;";
+
+        ClassWriter helperWriter = new ClassWriter(0);
+        helperWriter.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, helperOwner, null, "java/lang/Object", null);
+        helperWriter.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "getResult", helperDescriptor, null, null).visitEnd();
+        helperWriter.visitEnd();
+
+        var callSite = new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                "fixture/Caller", "inspect", "(L" + sourceOwner + ";)V",
+                sourceOwner, "getResult", sourceDescriptor, Opcodes.INVOKEVIRTUAL, 1);
+        var result = verify(
+                analysis(
+                        List.of(sourceOwner),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                sourceOwner, "getResult", sourceDescriptor, 1)),
+                        List.of(),
+                        List.of(callSite),
+                        List.of()),
+                Map.of(
+                        targetOwner, targetEmptyClass(targetOwner, "java/lang/Object"),
+                        shimResult, targetEmptyClass(shimResult, "java/lang/Object"),
+                        helperOwner, helperWriter.toByteArray()));
+
+        assertEquals(1, result.verifiedMethodReferences());
+        assertTrue(result.methodIssues().isEmpty());
+        var verified = result.verifiedMethods().getFirst();
+        assertEquals(helperOwner, verified.targetOwner());
+        assertEquals("getResult", verified.targetName());
+        assertEquals(helperDescriptor, verified.targetDescriptor());
+        assertTrue(verified.mappingRule().contains("CONNECTOR_SHIM_DESCRIPTOR_MAPPING"));
+    }
+
+    @Test
     void doesNotVerifyManualEventResultHelperWithoutItsConnectorShimClass() throws Exception {
         String sourceOwner = "net/minecraftforge/event/entity/player/PlayerInteractEvent";
         String targetOwner = "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent";
