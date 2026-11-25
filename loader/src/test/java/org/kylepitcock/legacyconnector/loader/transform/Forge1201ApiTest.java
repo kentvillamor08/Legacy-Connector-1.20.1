@@ -68,7 +68,7 @@ class Forge1201ApiTest {
 
         assertEquals(
                 "net/neoforged/neoforge/event/entity/living/FinalizeSpawnEvent",
-                transformer.mapType("net/minecraftforge/event/entity/living/MobSpawnEvent$FinalizeSpawn"));
+                transformer.mapClass("net/minecraftforge/event/entity/living/MobSpawnEvent$FinalizeSpawn"));
     }
 
     @Test
@@ -77,10 +77,10 @@ class Forge1201ApiTest {
 
         assertEquals(
                 "net/neoforged/neoforge/event/entity/living/MobSpawnEvent$PositionCheck",
-                transformer.mapType("net/minecraftforge/event/entity/living/MobSpawnEvent$PositionCheck"));
+                transformer.mapClass("net/minecraftforge/event/entity/living/MobSpawnEvent$PositionCheck"));
         assertEquals(
                 "net/neoforged/neoforge/event/entity/living/MobSpawnEvent$SpawnPlacementCheck",
-                transformer.mapType("net/minecraftforge/event/entity/living/MobSpawnEvent$SpawnPlacementCheck"));
+                transformer.mapClass("net/minecraftforge/event/entity/living/MobSpawnEvent$SpawnPlacementCheck"));
     }
 
     @Test
