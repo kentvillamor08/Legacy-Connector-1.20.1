@@ -1,11 +1,15 @@
 package legacyconnector.v1_20_1;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 import java.util.List;
 import java.util.Map;
 import legacyconnector.v1_20_1.net.minecraftforge.registries.ForgeRegistries;
 import legacyconnector.v1_20_1.net.minecraftforge.registries.IForgeRegistry;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Blocks;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.fml.loading.FMLLoader;
 import net.neoforged.fml.loading.LoadingModList;
@@ -38,6 +42,16 @@ class ForgeApi1201DeferredRegisterTest {
             assertEquals("symbiote", actual.getNamespace(),
                     "mod namespace must be preserved for " + registry.getRegistryName());
         }
+
+        // Forge IForgeRegistry#getKey/getValue must round-trip through the
+        // NeoForge-backed facade for ordinary built-in registry entries.
+        ResourceLocation diamondKey = ResourceLocation.fromNamespaceAndPath("minecraft", "diamond");
+        assertEquals(diamondKey, ForgeRegistries.ITEMS.getKey(Items.DIAMOND));
+        assertSame(Items.DIAMOND, ForgeRegistries.ITEMS.getValue(diamondKey));
+
+        ResourceLocation stoneKey = ResourceLocation.fromNamespaceAndPath("minecraft", "stone");
+        assertEquals(stoneKey, ForgeRegistries.BLOCKS.getKey(Blocks.STONE));
+        assertSame(Blocks.STONE, ForgeRegistries.BLOCKS.getValue(stoneKey));
     }
     /**
      * The root project's ordinary JUnit runtime does not launch Minecraft/FML.
