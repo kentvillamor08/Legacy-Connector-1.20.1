@@ -1,10 +1,13 @@
 package legacyconnector.v1_20_1.net.minecraftforge.event;
 
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.neoforged.bus.api.Event;
 import net.neoforged.fml.LogicalSide;
+import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
 /**
  * Forge 1.20.1's tick event: one class per kind with a {@code phase} field. NeoForge 1.21.1 split every kind into {@code Pre} and {@code Post}
@@ -31,18 +34,28 @@ public abstract class TickEvent extends Event {
 
     public static class ServerTickEvent extends TickEvent {
         private final BooleanSupplier haveTime;
+        private final Supplier<MinecraftServer> server;
 
+        /**
+         * Retains the original facade constructor for callers that create an event directly.
+         * Runtime-adapted events use the native NeoForge event's server accessor instead.
+         */
         public ServerTickEvent(Phase phase, BooleanSupplier haveTime) {
+            this(phase, haveTime, ServerLifecycleHooks::getCurrentServer);
+        }
+
+        public ServerTickEvent(Phase phase, BooleanSupplier haveTime, Supplier<MinecraftServer> server) {
             super(Type.SERVER, LogicalSide.SERVER, phase);
             this.haveTime = haveTime;
+            this.server = server;
         }
 
         public boolean haveTime() {
             return haveTime.getAsBoolean();
         }
 
-        public net.minecraft.server.MinecraftServer getServer() {
-            return net.neoforged.neoforge.server.ServerLifecycleHooks.getCurrentServer();
+        public MinecraftServer getServer() {
+            return server.get();
         }
     }
 
