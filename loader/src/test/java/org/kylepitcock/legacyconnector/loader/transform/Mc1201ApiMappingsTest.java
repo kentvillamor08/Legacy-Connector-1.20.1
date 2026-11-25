@@ -115,24 +115,38 @@ final class Mc1201ApiMappingsTest {
     }
 
     @Test
-    void erasesTheNonSemanticPlayerInteractEventLegacyResultArgument() {
+    void mapsPlayerInteractEventLegacyResultSetterToWeakSidecarState() {
         String owner = "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent";
-        String descriptor = "(Lnet/minecraftforge/eventbus/api/Event$Result;)V";
+        String result = "legacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result";
         var mapping = Mc1201ApiMappings.callMapping(
-                owner, "setResult", descriptor, Opcodes.INVOKEVIRTUAL);
+                owner, "setResult", "(L" + result + ";)V", Opcodes.INVOKEVIRTUAL);
 
         assertNotNull(mapping);
         assertTrue(mapping.usesHelper());
         assertEquals("org/kylepitcock/legacyconnector/v1_20_1/migrate/PlayerInteractCompat", mapping.helperOwner());
-        assertEquals("ignoreResult", mapping.helperName());
-        assertEquals("(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;Ljava/lang/Object;)V", mapping.helperDescriptor());
+        assertEquals("setResult", mapping.helperName());
+        assertEquals("(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;L" + result + ";)V", mapping.helperDescriptor());
+    }
+
+    @Test
+    void mapsPlayerInteractEventLegacyResultGetterToWeakSidecarState() {
+        String owner = "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent";
+        String result = "legacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result";
+        var mapping = Mc1201ApiMappings.callMapping(
+                owner, "getResult", "()L" + result + ";", Opcodes.INVOKEVIRTUAL);
+
+        assertNotNull(mapping);
+        assertTrue(mapping.usesHelper());
+        assertEquals("org/kylepitcock/legacyconnector/v1_20_1/migrate/PlayerInteractCompat", mapping.helperOwner());
+        assertEquals("getResult", mapping.helperName());
+        assertEquals("(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;)L" + result + ";", mapping.helperDescriptor());
     }
 
     @Test
     void doesNotInventCallRulesForUnmappedEventMethods() {
         assertNull(Mc1201ApiMappings.callMapping(
                 "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent",
-                "getResult", "()Lnet/minecraftforge/eventbus/api/Event$Result;", Opcodes.INVOKEVIRTUAL));
+                "hasResult", "()Z", Opcodes.INVOKEVIRTUAL));
     }
 
     @Test
