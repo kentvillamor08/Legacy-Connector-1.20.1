@@ -176,18 +176,61 @@ final class Forge1201TargetApiVerifierTest {
     }
 
     @Test
-    void verifiesPlayerInteractEventHelperThatErasesLegacyResultDescriptor() throws Exception {
+    void verifiesPlayerInteractEventHelperAgainstTheRelocatedResultShimDescriptor() throws Exception {
         String sourceOwner = "net/minecraftforge/event/entity/player/PlayerInteractEvent";
         String targetOwner = "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent";
         String helperOwner = "org/kylepitcock/legacyconnector/v1_20_1/migrate/PlayerInteractCompat";
+        String shimResult = "legacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result";
         String sourceDescriptor = "(Lnet/minecraftforge/eventbus/api/Event$Result;)V";
-        String helperDescriptor = "(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;Ljava/lang/Object;)V";
+        String helperDescriptor = "(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;Llegacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result;)V";
 
         ClassWriter helperWriter = new ClassWriter(0);
         helperWriter.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, helperOwner, null, "java/lang/Object", null);
         helperWriter.visitMethod(
                 Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
-                "ignoreResult", helperDescriptor, null, null).visitEnd();
+                "setResult", helperDescriptor, null, null).visitEnd();
+        helperWriter.visitEnd();
+
+        var callSite = new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
+                "fixture/Caller", "deny", "(L" + sourceOwner + ";)V",
+                sourceOwner, "setResult", sourceDescriptor, Opcodes.INVOKEVIRTUAL, 1);
+        var result = verify(
+                analysis(
+                        List.of(sourceOwner),
+                        List.of(new Forge1201ApiUsageAnalyzer.ApiMemberReference(
+                                sourceOwner, "setResult", sourceDescriptor, 1)),
+                        List.of(),
+                        List.of(callSite),
+                        List.of()),
+                Map.of(
+                        targetOwner, targetEmptyClass(targetOwner, "java/lang/Object"),
+                        shimResult, targetEmptyClass(shimResult, "java/lang/Object"),
+                        helperOwner, helperWriter.toByteArray()));
+
+        assertEquals(1, result.uniqueMethodReferences());
+        assertEquals(1, result.verifiedMethodReferences());
+        assertTrue(result.methodIssues().isEmpty());
+        var verified = result.verifiedMethods().getFirst();
+        assertEquals(helperOwner, verified.targetOwner());
+        assertEquals("setResult", verified.targetName());
+        assertEquals(helperDescriptor, verified.targetDescriptor());
+        assertTrue(verified.mappingRule().contains("MC1201_CALL_HELPER_REDIRECT"));
+        assertTrue(verified.mappingRule().contains("CONNECTOR_SHIM_DESCRIPTOR_MAPPING"));
+    }
+
+    @Test
+    void doesNotVerifyManualEventResultHelperWithoutItsConnectorShimClass() throws Exception {
+        String sourceOwner = "net/minecraftforge/event/entity/player/PlayerInteractEvent";
+        String targetOwner = "net/neoforged/neoforge/event/entity/player/PlayerInteractEvent";
+        String helperOwner = "org/kylepitcock/legacyconnector/v1_20_1/migrate/PlayerInteractCompat";
+        String sourceDescriptor = "(Lnet/minecraftforge/eventbus/api/Event$Result;)V";
+        String helperDescriptor = "(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;Llegacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result;)V";
+
+        ClassWriter helperWriter = new ClassWriter(0);
+        helperWriter.visit(Opcodes.V17, Opcodes.ACC_PUBLIC, helperOwner, null, "java/lang/Object", null);
+        helperWriter.visitMethod(
+                Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
+                "setResult", helperDescriptor, null, null).visitEnd();
         helperWriter.visitEnd();
 
         var callSite = new Forge1201ApiUsageAnalyzer.ApiMethodCallSite(
@@ -205,14 +248,10 @@ final class Forge1201TargetApiVerifierTest {
                         targetOwner, targetEmptyClass(targetOwner, "java/lang/Object"),
                         helperOwner, helperWriter.toByteArray()));
 
-        assertEquals(1, result.uniqueMethodReferences());
-        assertEquals(1, result.verifiedMethodReferences());
-        assertTrue(result.methodIssues().isEmpty());
-        var verified = result.verifiedMethods().getFirst();
-        assertEquals(helperOwner, verified.targetOwner());
-        assertEquals("ignoreResult", verified.targetName());
-        assertEquals(helperDescriptor, verified.targetDescriptor());
-        assertTrue(verified.mappingRule().contains("MC1201_CALL_HELPER_REDIRECT"));
+        assertEquals(0, result.verifiedMethodReferences());
+        assertEquals(1, result.methodIssues().size());
+        assertEquals(Forge1201TargetApiVerifier.MemberStatus.REQUIRES_MANUAL_DESCRIPTOR_ADAPTER,
+                result.methodIssues().getFirst().status());
     }
 
     @Test
