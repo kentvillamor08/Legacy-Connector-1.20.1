@@ -32,6 +32,16 @@ public final class PlayerInteractCompat {
         return event instanceof ICancellableEvent;
     }
 
+    public static boolean isCanceled(PlayerInteractEvent event) {
+        Objects.requireNonNull(event, "event");
+        return event instanceof ICancellableEvent cancellable && cancellable.isCanceled();
+    }
+
+    public static boolean hasResult(PlayerInteractEvent event) {
+        Objects.requireNonNull(event, "event");
+        return false;
+    }
+
     public static void setCanceled(PlayerInteractEvent event, boolean canceled) {
         Objects.requireNonNull(event, "event");
         if (!(event instanceof ICancellableEvent cancellable)) {
