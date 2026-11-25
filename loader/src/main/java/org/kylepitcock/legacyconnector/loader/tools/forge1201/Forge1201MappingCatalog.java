@@ -68,8 +68,9 @@ public final class Forge1201MappingCatalog {
     /**
      * Explicit type substitutions reviewed against the Forge 47.x and NeoForge 21.1.x APIs.
      * These are not namespace-wide moves: the config-spec family maps to ModConfigSpec,
-     * RegistryObject maps to Supplier because the audited usage only calls get(), and
-     * IForgeMenuType maps to the target IMenuTypeExtension contract.
+     * RegistryObject maps to Supplier because the audited usage only calls get(),
+     * IForgeMenuType maps to the target IMenuTypeExtension contract, and the nested
+     * MobSpawnEvent.FinalizeSpawn maps to NeoForge's top-level FinalizeSpawnEvent.
      */
     private static final Map<String, String> EXPLICIT_TYPE_REPLACEMENTS = Map.ofEntries(
             Map.entry("net/minecraftforge/common/ForgeConfigSpec", "net/neoforged/neoforge/common/ModConfigSpec"),
