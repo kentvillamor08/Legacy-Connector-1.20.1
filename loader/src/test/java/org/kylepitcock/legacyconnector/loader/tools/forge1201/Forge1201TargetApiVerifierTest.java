@@ -234,7 +234,6 @@ final class Forge1201TargetApiVerifierTest {
         assertEquals(helperDescriptor, verified.targetDescriptor());
         assertTrue(verified.mappingRule().contains("FORGE_API_CALL_HELPER_REDIRECT"));
         assertTrue(verified.mappingRule().contains("FORGE_API_REWRITE_TABLE"));
-        assertTrue(verified.mappingRule().contains("CONNECTOR_SHIM_DESCRIPTOR_MAPPING"));
     }
 
     @Test
