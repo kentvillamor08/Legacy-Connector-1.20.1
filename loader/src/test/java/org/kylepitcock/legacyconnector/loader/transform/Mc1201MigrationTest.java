@@ -111,8 +111,16 @@ class Mc1201MigrationTest implements Opcodes {
         method.instructions.add(new InsnNode(POP));
 
         method.instructions.add(new VarInsnNode(ALOAD, 0));
+        method.instructions.add(new MethodInsnNode(INVOKEVIRTUAL, event, "isCanceled", "()Z", false));
+        method.instructions.add(new InsnNode(POP));
+
+        method.instructions.add(new VarInsnNode(ALOAD, 0));
         method.instructions.add(new InsnNode(ICONST_1));
         method.instructions.add(new MethodInsnNode(INVOKEVIRTUAL, event, "setCanceled", "(Z)V", false));
+
+        method.instructions.add(new VarInsnNode(ALOAD, 0));
+        method.instructions.add(new MethodInsnNode(INVOKEVIRTUAL, event, "hasResult", "()Z", false));
+        method.instructions.add(new InsnNode(POP));
 
         method.instructions.add(new VarInsnNode(ALOAD, 0));
         method.instructions.add(new FieldInsnNode(GETSTATIC, result, "DENY", "L" + result + ";"));
@@ -128,20 +136,22 @@ class Mc1201MigrationTest implements Opcodes {
 
         Mc1201Migration.Counts counts = apply(caller);
 
-        assertEquals(4, counts.calls);
+        assertEquals(6, counts.calls);
         List<MethodInsnNode> calls = java.util.Arrays.stream(method.instructions.toArray())
                 .filter(MethodInsnNode.class::isInstance)
                 .map(MethodInsnNode.class::cast)
                 .toList();
-        assertEquals(4, calls.size());
-        assertEquals(List.of("isCancelable", "setCanceled", "setResult", "getResult"),
+        assertEquals(6, calls.size());
+        assertEquals(List.of("isCancelable", "isCanceled", "setCanceled", "hasResult", "setResult", "getResult"),
                 calls.stream().map(call -> call.name).toList());
         assertTrue(calls.stream().allMatch(call ->
                 call.getOpcode() == INVOKESTATIC && call.owner.equals(compat)));
         assertEquals("(L" + event + ";)Z", calls.get(0).desc);
-        assertEquals("(L" + event + ";Z)V", calls.get(1).desc);
-        assertEquals("(L" + event + ";L" + result + ";)V", calls.get(2).desc);
-        assertEquals("(L" + event + ";)L" + result + ";", calls.get(3).desc);
+        assertEquals("(L" + event + ";)Z", calls.get(1).desc);
+        assertEquals("(L" + event + ";Z)V", calls.get(2).desc);
+        assertEquals("(L" + event + ";)Z", calls.get(3).desc);
+        assertEquals("(L" + event + ";L" + result + ";)V", calls.get(4).desc);
+        assertEquals("(L" + event + ";)L" + result + ";", calls.get(5).desc);
     }
 
     @Test
