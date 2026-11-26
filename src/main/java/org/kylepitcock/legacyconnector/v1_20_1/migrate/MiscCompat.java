@@ -566,7 +566,19 @@ public final class MiscCompat {
         return com.mojang.datafixers.util.Either.right(result.error().get());
     }
 
-    /** Forge 1.20.1 exposed {@code EntityDimensions.fixed} as a public field; 1.21.1 exposes the record component through {@code fixed()}. */
+    /** Forge 1.20.1 exposed the dimensions as public fields; 1.21.1 exposes them as record components. */
+    public static float getWidth(net.minecraft.world.entity.EntityDimensions dimensions) {
+        return dimensions.width();
+    }
+
+    public static float getHeight(net.minecraft.world.entity.EntityDimensions dimensions) {
+        return dimensions.height();
+    }
+
+    public static float getEyeHeight(net.minecraft.world.entity.EntityDimensions dimensions) {
+        return dimensions.eyeHeight();
+    }
+
     public static boolean isFixed(net.minecraft.world.entity.EntityDimensions dimensions) {
         return dimensions.fixed();
     }
