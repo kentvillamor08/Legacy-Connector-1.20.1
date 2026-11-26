@@ -69,6 +69,50 @@ class ForgeGuiLayoutBridgeTest {
         assertEquals(53, liveGui.rightHeight);
     }
 
+    @Test
+    void vehicleHealthOffsetTracksTheMeasuredLayerDeltaAndResetsIfTheLayerIsCancelled() {
+        ForgeGui.mcc$resetVehicleHealthHeightDelta();
+
+        ForgeGui.mcc$beginVehicleHealthLayer(85);
+        assertEquals(0, ForgeGui.mcc$vehicleHealthRightHeightDelta());
+        ForgeGui.mcc$endVehicleHealthLayer(105);
+        assertEquals(20, ForgeGui.mcc$vehicleHealthRightHeightDelta());
+
+        // A new Pre without a matching Post represents a cancelled layer.
+        ForgeGui.mcc$beginVehicleHealthLayer(91);
+        assertEquals(0, ForgeGui.mcc$vehicleHealthRightHeightDelta());
+
+        ForgeGui.mcc$resetVehicleHealthHeightDelta();
+        assertEquals(0, ForgeGui.mcc$vehicleHealthRightHeightDelta());
+    }
+
+    @Test
+    void airAnchoredLegacyOverlaySeesPreVehicleHeightWithoutChangingLiveTargetCounter() throws Exception {
+        Gui liveGui = allocate(Gui.class);
+        ForgeGui forgeGui = allocate(ForgeGui.class);
+        liveGui.leftHeight = 64;
+        liveGui.rightHeight = 105;
+
+        ForgeGui.mcc$beginVehicleHealthLayer(85);
+        ForgeGui.mcc$endVehicleHealthLayer(105);
+        int adjustment = ForgeGui.mcc$vehicleHealthRightHeightDelta();
+
+        forgeGui.mcc$renderOverlay(
+                liveGui,
+                (gui, graphics, partialTick, width, height) -> {
+                    // Forge's overlay anchored above/below AIR_LEVEL ran before MOUNT_HEALTH.
+                    assertEquals(85, gui.rightHeight);
+                    assertEquals(85, ((Gui) gui).rightHeight);
+                    gui.rightHeight = 90;
+                },
+                null, 0.0F, 0, 0, adjustment);
+
+        // The callback's +5 is applied over the actual target value of 105,
+        // rather than replacing it with the legacy-adjusted value of 85.
+        assertEquals(110, liveGui.rightHeight);
+        assertEquals(64, liveGui.leftHeight);
+    }
+
     @SuppressWarnings("unchecked")
     private static <T> T allocate(Class<T> type) throws ReflectiveOperationException {
         Field field = Unsafe.class.getDeclaredField("theUnsafe");
