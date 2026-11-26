@@ -646,4 +646,7 @@ net/neoforged/neoforge/event/entity/player/PlayerInteractEvent	setCanceled	(Z)V	
 net/neoforged/neoforge/event/entity/player/PlayerInteractEvent	hasResult	()Z	PlayerInteractCompat	hasResult	(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;)Z
 net/neoforged/neoforge/event/entity/player/PlayerInteractEvent	setResult	(Llegacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result;)V	PlayerInteractCompat	setResult	(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;Llegacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result;)V
 net/neoforged/neoforge/event/entity/player/PlayerInteractEvent	getResult	()Llegacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result;	PlayerInteractCompat	getResult	(Lnet/neoforged/neoforge/event/entity/player/PlayerInteractEvent;)Llegacyconnector/v1_20_1/net/minecraftforge/eventbus/api/Event$Result;
+net/minecraft/world/entity/EntityDimensions	$get$width	()F	MiscCompat	getWidth	-
+net/minecraft/world/entity/EntityDimensions	$get$height	()F	MiscCompat	getHeight	-
+net/minecraft/world/entity/EntityDimensions	$get$eyeHeight	()F	MiscCompat	getEyeHeight	-
 net/minecraft/world/entity/EntityDimensions	$get$fixed	()Z	MiscCompat	isFixed	-
