@@ -23,4 +23,18 @@ class ClientCompat1201Test {
         assertTrue(MiscCompat.isFixed(net.minecraft.world.entity.EntityDimensions.fixed(1.0F, 2.0F)));
         assertFalse(MiscCompat.isFixed(net.minecraft.world.entity.EntityDimensions.scalable(1.0F, 2.0F)));
     }
+
+    @Test
+    void entityDimensionsShapeAccessorsReadTargetRecordComponents() {
+        var fixed = net.minecraft.world.entity.EntityDimensions.fixed(1.0F, 2.0F);
+        var scalable = net.minecraft.world.entity.EntityDimensions.scalable(3.0F, 4.0F);
+
+        assertEquals(fixed.width(), MiscCompat.getWidth(fixed));
+        assertEquals(fixed.height(), MiscCompat.getHeight(fixed));
+        assertEquals(fixed.eyeHeight(), MiscCompat.getEyeHeight(fixed));
+
+        assertEquals(scalable.width(), MiscCompat.getWidth(scalable));
+        assertEquals(scalable.height(), MiscCompat.getHeight(scalable));
+        assertEquals(scalable.eyeHeight(), MiscCompat.getEyeHeight(scalable));
+    }
 }
