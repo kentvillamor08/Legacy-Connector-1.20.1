@@ -19,6 +19,10 @@ public class ForgeGui extends Gui {
         return mcc$minecraft;
     }
 
+    private static int mcc$vehicleHealthRightHeightBefore;
+    private static boolean mcc$vehicleHealthLayerStarted;
+    private static volatile int mcc$vehicleHealthRightHeightDelta;
+
     /**
      * Render a legacy overlay against the live NeoForge HUD layout.
      *
@@ -29,10 +33,6 @@ public class ForgeGui extends Gui {
      * binary compatibility, while the superclass fields are synchronized too
      * for inherited Gui methods that use them.</p>
      */
-    private static int mcc$vehicleHealthRightHeightBefore;
-    private static boolean mcc$vehicleHealthLayerStarted;
-    private static volatile int mcc$vehicleHealthRightHeightDelta;
-
     /** Called from RenderFrameEvent.Pre so a cancelled/missing layer cannot reuse the previous frame's offset. */
     public static void mcc$resetVehicleHealthHeightDelta() {
         mcc$vehicleHealthLayerStarted = false;
