@@ -75,7 +75,7 @@ final class Mc1201Migration {
                     + selectionListPositionCalls + " selection-list position call(s) renamed to setX, "
                     + widgetNarrationOverrides + " AbstractWidget narration override(s) renamed to updateWidgetNarration, "
                     + constructors + " constructor(s) made factory calls, "
-                    + fields + " static field read(s) converted, "
+                    + fields + " field read(s) adapted, "
                     + bridges + " bridge method(s) for changed overrides, "
                     + providerCalls + " call(s) given the registry provider";
         }
