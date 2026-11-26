@@ -17,6 +17,7 @@ class ClientCompat1201Test {
         assertEquals(net.minecraft.client.resources.PlayerSkin.Model.WIDE, ClientCompat.skinModel("default"));
         assertEquals(net.minecraft.client.resources.PlayerSkin.Model.SLIM, ClientCompat.skinModel("slim"));
     }
+
     @Test
     void entityDimensionsFixedFlagUsesTargetRecordAccessor() {
         assertTrue(MiscCompat.isFixed(net.minecraft.world.entity.EntityDimensions.fixed(1.0F, 2.0F)));
