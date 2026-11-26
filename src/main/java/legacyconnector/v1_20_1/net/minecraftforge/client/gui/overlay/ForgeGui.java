@@ -23,16 +23,6 @@ public class ForgeGui extends Gui {
     private static boolean mcc$vehicleHealthLayerStarted;
     private static volatile int mcc$vehicleHealthRightHeightDelta;
 
-    /**
-     * Render a legacy overlay against the live NeoForge HUD layout.
-     *
-     * <p>NeoForge 1.21.1 moved {@code leftHeight}/{@code rightHeight} onto
-     * {@link Gui}. This Forge facade is a separate Gui instance, so its
-     * counters must be synchronized with the actual game Gui around every
-     * legacy overlay callback. The facade retains its Forge-owned fields for
-     * binary compatibility, while the superclass fields are synchronized too
-     * for inherited Gui methods that use them.</p>
-     */
     /** Called from RenderFrameEvent.Pre so a cancelled/missing layer cannot reuse the previous frame's offset. */
     public static void mcc$resetVehicleHealthHeightDelta() {
         mcc$vehicleHealthLayerStarted = false;
@@ -61,6 +51,16 @@ public class ForgeGui extends Gui {
         return mcc$vehicleHealthRightHeightDelta;
     }
 
+    /**
+     * Render a legacy overlay against the live NeoForge HUD layout.
+     *
+     * <p>NeoForge 1.21.1 moved {@code leftHeight}/{@code rightHeight} onto
+     * {@link Gui}. This Forge facade is a separate Gui instance, so its
+     * counters must be synchronized with the actual game Gui around every
+     * legacy overlay callback. The facade retains its Forge-owned fields for
+     * binary compatibility, while the superclass fields are synchronized too
+     * for inherited Gui methods that use them.</p>
+     */
     public void mcc$renderOverlay(
             Gui liveGui,
             IGuiOverlay overlay,
