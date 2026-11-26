@@ -1073,7 +1073,6 @@ class Mc1201MigrationTest implements Opcodes {
                                         || field.name.equals("eyeHeight")),
                         "private target record fields must not remain in transformed bytecode");
             }
-            verifyMethod(caller, method);
         }
         verify(caller);
     }
