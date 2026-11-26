@@ -75,3 +75,4 @@ net/minecraft/core/registries/Registries	DECORATED_POT_PATTERNS	:*	DECORATED_POT
 net/minecraft/core/registries/BuiltInRegistries	DECORATED_POT_PATTERNS	:*	DECORATED_POT_PATTERN
 # --- Minecraft 1.21.1 renamed shader getter (used by Palladium TexturedIcon)
 net/minecraft/client/renderer/GameRenderer	getPositionColorTexShader	()Lnet/minecraft/client/renderer/ShaderInstance;	getPositionTexColorShader
+net/minecraft/network/syncher/EntityDataAccessor	getId	()I	id
