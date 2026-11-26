@@ -4,6 +4,7 @@ import java.lang.reflect.Field;
 
 import legacyconnector.v1_20_1.net.minecraftforge.client.gui.overlay.ForgeGui;
 import legacyconnector.v1_20_1.net.minecraftforge.client.gui.overlay.IGuiOverlay;
+import legacyconnector.v1_20_1.net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.LayeredDraw;
@@ -75,17 +76,47 @@ public class RegisterGuiOverlaysEvent extends Event implements IModBusEvent {
         return result;
     }
 
+    /** Reset the per-frame vehicle-health offset before NeoForge starts rendering HUD layers. */
+    public static void mcc$resetVehicleHealthHeightDelta() {
+        ForgeGui.mcc$resetVehicleHealthHeightDelta();
+    }
+
+    /** Snapshot rightHeight immediately before the target vehicle-health layer. */
+    public static void mcc$beginVehicleHealthLayer() {
+        ForgeGui.mcc$beginVehicleHealthLayer(liveGui(Minecraft.getInstance()).rightHeight);
+    }
+
+    /** Record the target vehicle-health layer's actual rightHeight increment. */
+    public static void mcc$endVehicleHealthLayer() {
+        ForgeGui.mcc$endVehicleHealthLayer(liveGui(Minecraft.getInstance()).rightHeight);
+    }
+
+    private static boolean isAirLevelAnchor(ResourceLocation other) {
+        return VanillaGuiOverlay.AIR_LEVEL.id().equals(other);
+    }
+
     private static LayeredDraw.Layer layer(IGuiOverlay overlay) {
+        return layer(overlay, false);
+    }
+
+    /**
+     * Forge rendered MOUNT_HEALTH after AIR_LEVEL. NeoForge moved VEHICLE_HEALTH
+     * before AIR_LEVEL, so an overlay ordered directly around AIR_LEVEL must not
+     * see the target vehicle-health increment in its legacy rightHeight view.
+     */
+    private static LayeredDraw.Layer layer(IGuiOverlay overlay, boolean beforeLegacyMountHealth) {
         return (graphics, delta) -> {
             Minecraft mc = Minecraft.getInstance();
             Gui liveGui = liveGui(mc);
+            int adjustment = beforeLegacyMountHealth ? ForgeGui.mcc$vehicleHealthRightHeightDelta() : 0;
             ForgeGui.mcc$instance().mcc$renderOverlay(
                     liveGui,
                     overlay,
                     graphics,
                     delta.getGameTimeDeltaPartialTick(false),
                     mc.getWindow().getGuiScaledWidth(),
-                    mc.getWindow().getGuiScaledHeight());
+                    mc.getWindow().getGuiScaledHeight(),
+                    adjustment);
         };
     }
 
@@ -94,11 +125,11 @@ public class RegisterGuiOverlaysEvent extends Event implements IModBusEvent {
     }
 
     public void registerBelow(ResourceLocation other, String name, IGuiOverlay overlay) {
-        delegate.registerBelow(other, id(name), layer(overlay));
+        delegate.registerBelow(other, id(name), layer(overlay, isAirLevelAnchor(other)));
     }
 
     public void registerAbove(ResourceLocation other, String name, IGuiOverlay overlay) {
-        delegate.registerAbove(other, id(name), layer(overlay));
+        delegate.registerAbove(other, id(name), layer(overlay, isAirLevelAnchor(other)));
     }
 
     public void registerAboveAll(String name, IGuiOverlay overlay) {
