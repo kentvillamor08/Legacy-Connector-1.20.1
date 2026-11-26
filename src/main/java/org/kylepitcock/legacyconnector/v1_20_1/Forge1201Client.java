@@ -12,6 +12,7 @@ import net.neoforged.fml.ModList;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
 import net.neoforged.neoforge.client.event.RenderGuiLayerEvent;
+import net.neoforged.neoforge.client.gui.VanillaGuiLayers;
 import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.common.NeoForge;
 import org.slf4j.Logger;
@@ -49,6 +50,7 @@ final class Forge1201Client {
      * partial tick into the legacy event's renderTickTime.
      */
     private static void onRenderFramePre(net.neoforged.neoforge.client.event.RenderFrameEvent.Pre event) {
+        RegisterGuiOverlaysEvent.mcc$resetVehicleHealthHeightDelta();
         NeoForge.EVENT_BUS.post(toLegacyRenderTick(event));
     }
 
@@ -90,6 +92,10 @@ final class Forge1201Client {
     }
 
     private static void onLayerPre(RenderGuiLayerEvent.Pre e) {
+        if (VanillaGuiLayers.VEHICLE_HEALTH.equals(e.getName())) {
+            RegisterGuiOverlaysEvent.mcc$beginVehicleHealthLayer();
+        }
+
         VanillaGuiOverlay overlay = VanillaGuiOverlay.byLayer(e.getName());
         if (overlay == null) return;
         var window = Minecraft.getInstance().getWindow();
@@ -98,6 +104,10 @@ final class Forge1201Client {
     }
 
     private static void onLayerPost(RenderGuiLayerEvent.Post e) {
+        if (VanillaGuiLayers.VEHICLE_HEALTH.equals(e.getName())) {
+            RegisterGuiOverlaysEvent.mcc$endVehicleHealthLayer();
+        }
+
         VanillaGuiOverlay overlay = VanillaGuiOverlay.byLayer(e.getName());
         if (overlay == null) return;
         NeoForge.EVENT_BUS.post(new RenderGuiOverlayEvent.Post(Minecraft.getInstance().getWindow(), e.getGuiGraphics(), e.getPartialTick().getGameTimeDeltaPartialTick(false), overlay.type()));
