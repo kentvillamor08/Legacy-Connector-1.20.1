@@ -994,6 +994,28 @@ class Mc1201MigrationTest implements Opcodes {
         verify(c);
     }
 
+    @Test
+    void redirectsEntityDimensionsFixedFieldReadToLegacyAccessor() {
+        String dimensions = "net/minecraft/world/entity/EntityDimensions";
+        ClassNode caller = cls("test/EntityDimensionsCalls", "java/lang/Object");
+        MethodNode method = method(caller, ACC_PUBLIC | ACC_STATIC, "isFixed", "(L" + dimensions + ";)Z");
+        method.instructions.add(new VarInsnNode(ALOAD, 0));
+        method.instructions.add(new FieldInsnNode(GETFIELD, dimensions, "fixed", "Z"));
+        method.instructions.add(new InsnNode(IRETURN));
+        method.maxStack = 1;
+        method.maxLocals = 1;
+
+        Mc1201Migration.Counts counts = apply(caller);
+        assertEquals(1, counts.fields);
+
+        MethodInsnNode accessor = find(method, MIGRATE + "MiscCompat", "isFixed");
+        assertNotNull(accessor, "the legacy public field read must be routed through the target record accessor");
+        assertEquals(INVOKESTATIC, accessor.getOpcode());
+        assertEquals("(L" + dimensions + ";)Z", accessor.desc);
+        assertNull(find(method, dimensions, "fixed"), "the private target field access must not remain");
+        verify(caller);
+    }
+
     private static void verify(ClassNode c) {
         // structural check only (frames are not required for these straight-line methods at class version 17 when no branch exists)
         ClassWriter w = new ClassWriter(0);
