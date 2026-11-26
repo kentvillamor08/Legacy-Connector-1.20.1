@@ -566,6 +566,11 @@ public final class MiscCompat {
         return com.mojang.datafixers.util.Either.right(result.error().get());
     }
 
+    /** Forge 1.20.1 exposed {@code EntityDimensions.fixed} as a public field; 1.21.1 exposes the record component through {@code fixed()}. */
+    public static boolean isFixed(net.minecraft.world.entity.EntityDimensions dimensions) {
+        return dimensions.fixed();
+    }
+
     /** {@code Entity.canChangeDimensions()}: 1.21.1 asks for the two levels; the entity's own is the answer without a destination. */
     public static boolean canChangeDimensions(Entity entity) {
         return entity.canChangeDimensions(entity.level(), entity.level());
