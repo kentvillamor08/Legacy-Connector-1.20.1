@@ -3,7 +3,9 @@ package legacyconnector.v1_20_1.net.minecraftforge.client.event;
 import legacyconnector.v1_20_1.net.minecraftforge.client.gui.overlay.ForgeGui;
 import legacyconnector.v1_20_1.net.minecraftforge.client.gui.overlay.IGuiOverlay;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Gui;
 import net.minecraft.client.gui.LayeredDraw;
+import java.lang.reflect.Field;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.bus.api.Event;
 import net.neoforged.fml.ModLoadingContext;
@@ -24,10 +26,62 @@ public class RegisterGuiOverlaysEvent extends Event implements IModBusEvent {
         return ResourceLocation.fromNamespaceAndPath(namespace != null ? namespace : ModLoadingContext.get().getActiveNamespace(), name);
     }
 
+    private static volatile Field minecraftGuiField;
+
+    private static Gui liveGui(Minecraft minecraft) {
+        Field field = minecraftGuiField;
+        if (field == null) {
+            synchronized (RegisterGuiOverlaysEvent.class) {
+                field = minecraftGuiField;
+                if (field == null) {
+                    field = findMinecraftGuiField();
+                    minecraftGuiField = field;
+                }
+            }
+        }
+
+        try {
+            return (Gui) field.get(minecraft);
+        } catch (IllegalAccessException exception) {
+            throw new IllegalStateException("Cannot access Minecraft's live Gui instance for a Forge HUD overlay", exception);
+        }
+    }
+
+    /**
+     * Minecraft.gui is package-private in NeoForge 1.21.1. Locate it by
+     * declared field type rather than its name so runtime mapping does not
+     * affect the bridge.
+     */
+    private static Field findMinecraftGuiField() {
+        Field result = null;
+        for (Field field : Minecraft.class.getDeclaredFields()) {
+            if (field.getType() != Gui.class) continue;
+            if (result != null) {
+                throw new IllegalStateException("Minecraft declares more than one Gui field; cannot identify its live HUD layout");
+            }
+            result = field;
+        }
+
+        if (result == null) {
+            throw new IllegalStateException("Minecraft does not declare a Gui field; cannot synchronize Forge HUD layout");
+        }
+        if (!result.trySetAccessible()) {
+            throw new IllegalStateException("Minecraft's Gui field is not reflectively accessible; cannot synchronize Forge HUD layout");
+        }
+        return result;
+    }
+
     private static LayeredDraw.Layer layer(IGuiOverlay overlay) {
         return (graphics, delta) -> {
             Minecraft mc = Minecraft.getInstance();
-            overlay.render(ForgeGui.mcc$instance(), graphics, delta.getGameTimeDeltaPartialTick(false), mc.getWindow().getGuiScaledWidth(), mc.getWindow().getGuiScaledHeight());
+            Gui liveGui = liveGui(mc);
+            ForgeGui.mcc$instance().mcc$renderOverlay(
+                    liveGui,
+                    overlay,
+                    graphics,
+                    delta.getGameTimeDeltaPartialTick(false),
+                    mc.getWindow().getGuiScaledWidth(),
+                    mc.getWindow().getGuiScaledHeight());
         };
     }
 
