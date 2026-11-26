@@ -194,6 +194,20 @@ public final class ClientCompat {
         return "slim".equals(name) ? net.minecraft.client.resources.PlayerSkin.Model.SLIM : net.minecraft.client.resources.PlayerSkin.Model.WIDE;
     }
 
+    /** Converts NeoForge's skin-model value to Forge 1.20.1's legacy name. */
+    public static String skinName(net.minecraft.client.resources.PlayerSkin.Model model) {
+        return model.id();
+    }
+
+    /** {@code EntityRenderersEvent.AddLayers.getSkins()}: retain Forge's {@code Set<String>} contract. */
+    public static java.util.Set<String> getSkins(net.neoforged.neoforge.client.event.EntityRenderersEvent.AddLayers event) {
+        java.util.Set<String> names = new java.util.LinkedHashSet<>();
+        for (net.minecraft.client.resources.PlayerSkin.Model model : event.getSkins()) {
+            names.add(skinName(model));
+        }
+        return names;
+    }
+
     /** {@code EntityRenderersEvent.AddLayers.getSkin("default" | "slim")}: the player renderer of that model. */
     @SuppressWarnings("unchecked")
     public static net.minecraft.client.renderer.entity.LivingEntityRenderer getSkin(net.neoforged.neoforge.client.event.EntityRenderersEvent.AddLayers event, String name) {
