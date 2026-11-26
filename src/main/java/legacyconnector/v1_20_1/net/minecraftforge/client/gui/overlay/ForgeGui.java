@@ -19,6 +19,46 @@ public class ForgeGui extends Gui {
         return mcc$minecraft;
     }
 
+    /**
+     * Render a legacy overlay against the live NeoForge HUD layout.
+     *
+     * <p>NeoForge 1.21.1 moved {@code leftHeight}/{@code rightHeight} onto
+     * {@link Gui}. This Forge facade is a separate Gui instance, so its
+     * counters must be synchronized with the actual game Gui around every
+     * legacy overlay callback. The facade retains its Forge-owned fields for
+     * binary compatibility, while the superclass fields are synchronized too
+     * for inherited Gui methods that use them.</p>
+     */
+    public void mcc$renderOverlay(
+            Gui liveGui,
+            IGuiOverlay overlay,
+            net.minecraft.client.gui.GuiGraphics graphics,
+            float partialTick,
+            int screenWidth,
+            int screenHeight
+    ) {
+        int initialLeftHeight = liveGui.leftHeight;
+        int initialRightHeight = liveGui.rightHeight;
+
+        this.leftHeight = initialLeftHeight;
+        this.rightHeight = initialRightHeight;
+        super.leftHeight = initialLeftHeight;
+        super.rightHeight = initialRightHeight;
+
+        try {
+            overlay.render(this, graphics, partialTick, screenWidth, screenHeight);
+        } finally {
+            liveGui.leftHeight = changedLegacyValue(initialLeftHeight, this.leftHeight, super.leftHeight);
+            liveGui.rightHeight = changedLegacyValue(initialRightHeight, this.rightHeight, super.rightHeight);
+        }
+    }
+
+    private static int changedLegacyValue(int initialValue, int forgeField, int guiField) {
+        if (forgeField != initialValue) return forgeField;
+        if (guiField != initialValue) return guiField;
+        return initialValue;
+    }
+
     public boolean shouldDrawSurvivalElements() {
         return mcc$minecraft.gameMode != null && mcc$minecraft.gameMode.canHurtPlayer() && mcc$minecraft.getCameraEntity() instanceof net.minecraft.world.entity.player.Player;
     }
