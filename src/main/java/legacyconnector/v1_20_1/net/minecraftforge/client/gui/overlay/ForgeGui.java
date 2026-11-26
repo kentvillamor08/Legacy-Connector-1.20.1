@@ -29,6 +29,38 @@ public class ForgeGui extends Gui {
      * binary compatibility, while the superclass fields are synchronized too
      * for inherited Gui methods that use them.</p>
      */
+    private static int mcc$vehicleHealthRightHeightBefore;
+    private static boolean mcc$vehicleHealthLayerStarted;
+    private static volatile int mcc$vehicleHealthRightHeightDelta;
+
+    /** Called from RenderFrameEvent.Pre so a cancelled/missing layer cannot reuse the previous frame's offset. */
+    public static void mcc$resetVehicleHealthHeightDelta() {
+        mcc$vehicleHealthLayerStarted = false;
+        mcc$vehicleHealthRightHeightDelta = 0;
+    }
+
+    /** Snapshot the live counter immediately before NeoForge draws its vehicle-health layer. */
+    public static void mcc$beginVehicleHealthLayer(int rightHeight) {
+        mcc$vehicleHealthRightHeightBefore = rightHeight;
+        mcc$vehicleHealthLayerStarted = true;
+        mcc$vehicleHealthRightHeightDelta = 0;
+    }
+
+    /** Record the exact counter increment after the vehicle-health layer has run. */
+    public static void mcc$endVehicleHealthLayer(int rightHeight) {
+        if (mcc$vehicleHealthLayerStarted) {
+            mcc$vehicleHealthRightHeightDelta = Math.max(0, rightHeight - mcc$vehicleHealthRightHeightBefore);
+        } else {
+            mcc$vehicleHealthRightHeightDelta = 0;
+        }
+        mcc$vehicleHealthLayerStarted = false;
+    }
+
+    /** Height contributed by NeoForge's earlier vehicle-health layer in the current HUD frame. */
+    public static int mcc$vehicleHealthRightHeightDelta() {
+        return mcc$vehicleHealthRightHeightDelta;
+    }
+
     public void mcc$renderOverlay(
             Gui liveGui,
             IGuiOverlay overlay,
@@ -37,19 +69,39 @@ public class ForgeGui extends Gui {
             int screenWidth,
             int screenHeight
     ) {
+        mcc$renderOverlay(liveGui, overlay, graphics, partialTick, screenWidth, screenHeight, 0);
+    }
+
+    /**
+     * Render a legacy overlay while presenting the layout value it would have seen
+     * at its original Forge ordering point. The target Gui keeps its real counters:
+     * only the callback's view is adjusted, and callback changes are applied as a
+     * delta over the live value.
+     */
+    public void mcc$renderOverlay(
+            Gui liveGui,
+            IGuiOverlay overlay,
+            net.minecraft.client.gui.GuiGraphics graphics,
+            float partialTick,
+            int screenWidth,
+            int screenHeight,
+            int legacyRightHeightAdjustment
+    ) {
         int initialLeftHeight = liveGui.leftHeight;
         int initialRightHeight = liveGui.rightHeight;
+        int exposedRightHeight = initialRightHeight - Math.max(0, legacyRightHeightAdjustment);
 
         this.leftHeight = initialLeftHeight;
-        this.rightHeight = initialRightHeight;
+        this.rightHeight = exposedRightHeight;
         super.leftHeight = initialLeftHeight;
-        super.rightHeight = initialRightHeight;
+        super.rightHeight = exposedRightHeight;
 
         try {
             overlay.render(this, graphics, partialTick, screenWidth, screenHeight);
         } finally {
             liveGui.leftHeight = changedLegacyValue(initialLeftHeight, this.leftHeight, super.leftHeight);
-            liveGui.rightHeight = changedLegacyValue(initialRightHeight, this.rightHeight, super.rightHeight);
+            liveGui.rightHeight = initialRightHeight
+                    + changedLegacyDelta(exposedRightHeight, this.rightHeight, super.rightHeight);
         }
     }
 
@@ -57,6 +109,12 @@ public class ForgeGui extends Gui {
         if (forgeField != initialValue) return forgeField;
         if (guiField != initialValue) return guiField;
         return initialValue;
+    }
+
+    private static int changedLegacyDelta(int initialValue, int forgeField, int guiField) {
+        if (forgeField != initialValue) return forgeField - initialValue;
+        if (guiField != initialValue) return guiField - initialValue;
+        return 0;
     }
 
     public boolean shouldDrawSurvivalElements() {
