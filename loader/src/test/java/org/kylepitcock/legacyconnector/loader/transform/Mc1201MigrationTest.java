@@ -944,6 +944,46 @@ class Mc1201MigrationTest implements Opcodes {
     }
 
     @Test
+    void addLayersSkinCallsAreRewrittenToLegacyStringHelpers() {
+        String addLayers = "net/neoforged/neoforge/client/event/EntityRenderersEvent$AddLayers";
+        String renderer = "net/minecraft/client/renderer/entity/LivingEntityRenderer";
+        ClassNode c = cls("test/AddLayersHook", "java/lang/Object");
+
+        MethodNode skins = method(c, ACC_PUBLIC, "skinNames",
+                "(L" + addLayers + ";)Ljava/util/Set;");
+        skins.instructions.add(new VarInsnNode(ALOAD, 1));
+        skins.instructions.add(new MethodInsnNode(INVOKEVIRTUAL, addLayers,
+                "getSkins", "()Ljava/util/Set;", false));
+        skins.instructions.add(new InsnNode(ARETURN));
+        skins.maxStack = 1;
+        skins.maxLocals = 2;
+
+        MethodNode skin = method(c, ACC_PUBLIC, "skinRenderer",
+                "(L" + addLayers + ";Ljava/lang/String;)L" + renderer + ";");
+        skin.instructions.add(new VarInsnNode(ALOAD, 1));
+        skin.instructions.add(new VarInsnNode(ALOAD, 2));
+        skin.instructions.add(new MethodInsnNode(INVOKEVIRTUAL, addLayers,
+                "getSkin", "(Ljava/lang/String;)L" + renderer + ";", false));
+        skin.instructions.add(new InsnNode(ARETURN));
+        skin.maxStack = 2;
+        skin.maxLocals = 3;
+
+        Mc1201Migration.Counts counts = apply(c);
+        assertEquals(2, counts.calls);
+
+        MethodInsnNode skinsCall = find(skins, MIGRATE + "ClientCompat", "getSkins");
+        assertNotNull(skinsCall, "getSkins must adapt NeoForge model values to legacy String names");
+        assertEquals(INVOKESTATIC, skinsCall.getOpcode());
+        assertEquals("(L" + addLayers + ";)Ljava/util/Set;", skinsCall.desc);
+
+        MethodInsnNode skinCall = find(skin, MIGRATE + "ClientCompat", "getSkin");
+        assertNotNull(skinCall, "getSkin(String) must convert the legacy name back to the target model");
+        assertEquals(INVOKESTATIC, skinCall.getOpcode());
+        assertEquals("(L" + addLayers + ";Ljava/lang/String;)L" + renderer + ";", skinCall.desc);
+        verify(c);
+    }
+
+    @Test
     void migratedClassesStillVerify() {
         ClassNode c = cls("test/MyBE", BE);
         MethodNode load = method(c, ACC_PUBLIC, "load", "(L" + CT + ";)V");
