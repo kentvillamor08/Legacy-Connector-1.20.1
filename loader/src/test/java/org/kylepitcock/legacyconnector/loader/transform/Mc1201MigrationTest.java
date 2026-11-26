@@ -1021,6 +1021,64 @@ class Mc1201MigrationTest implements Opcodes {
     }
 
     @Test
+    void redirectsEntityDimensionsShapeFieldReadsToLegacyAccessors() {
+        String dimensions = "net/minecraft/world/entity/EntityDimensions";
+        ClassNode caller = cls("test/EntityDimensionsShapeCalls", "java/lang/Object");
+
+        MethodNode width = method(caller, ACC_PUBLIC | ACC_STATIC, "width", "(L" + dimensions + ";)F");
+        width.instructions.add(new VarInsnNode(ALOAD, 0));
+        width.instructions.add(new FieldInsnNode(GETFIELD, dimensions, "width", "F"));
+        width.instructions.add(new InsnNode(FRETURN));
+        width.maxStack = 1;
+        width.maxLocals = 1;
+
+        MethodNode height = method(caller, ACC_PUBLIC | ACC_STATIC, "height", "(L" + dimensions + ";)F");
+        height.instructions.add(new VarInsnNode(ALOAD, 0));
+        height.instructions.add(new FieldInsnNode(GETFIELD, dimensions, "height", "F"));
+        height.instructions.add(new InsnNode(FRETURN));
+        height.maxStack = 1;
+        height.maxLocals = 1;
+
+        MethodNode eyeHeight = method(caller, ACC_PUBLIC | ACC_STATIC, "eyeHeight", "(L" + dimensions + ";)F");
+        eyeHeight.instructions.add(new VarInsnNode(ALOAD, 0));
+        eyeHeight.instructions.add(new FieldInsnNode(GETFIELD, dimensions, "eyeHeight", "F"));
+        eyeHeight.instructions.add(new InsnNode(FRETURN));
+        eyeHeight.maxStack = 1;
+        eyeHeight.maxLocals = 1;
+
+        Mc1201Migration.Counts counts = apply(caller);
+        assertEquals(3, counts.fields);
+
+        MethodInsnNode widthAccessor = find(width, MIGRATE + "MiscCompat", "getWidth");
+        assertNotNull(widthAccessor);
+        assertEquals(INVOKESTATIC, widthAccessor.getOpcode());
+        assertEquals("(L" + dimensions + ";)F", widthAccessor.desc);
+
+        MethodInsnNode heightAccessor = find(height, MIGRATE + "MiscCompat", "getHeight");
+        assertNotNull(heightAccessor);
+        assertEquals(INVOKESTATIC, heightAccessor.getOpcode());
+        assertEquals("(L" + dimensions + ";)F", heightAccessor.desc);
+
+        MethodInsnNode eyeHeightAccessor = find(eyeHeight, MIGRATE + "MiscCompat", "getEyeHeight");
+        assertNotNull(eyeHeightAccessor);
+        assertEquals(INVOKESTATIC, eyeHeightAccessor.getOpcode());
+        assertEquals("(L" + dimensions + ";)F", eyeHeightAccessor.desc);
+
+        for (MethodNode method : List.of(width, height, eyeHeight)) {
+            for (AbstractInsnNode instruction : method.instructions) {
+                assertFalse(instruction instanceof FieldInsnNode field
+                                && field.owner.equals(dimensions)
+                                && (field.name.equals("width")
+                                        || field.name.equals("height")
+                                        || field.name.equals("eyeHeight")),
+                        "private target record fields must not remain in transformed bytecode");
+            }
+            verifyMethod(caller, method);
+        }
+        verify(caller);
+    }
+
+    @Test
     void renamesEntityDataAccessorGetIdToRecordAccessor() {
         String accessor = "net/minecraft/network/syncher/EntityDataAccessor";
         ClassNode caller = cls("test/EntityDataAccessorCalls", "java/lang/Object");
