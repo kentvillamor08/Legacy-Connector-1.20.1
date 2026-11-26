@@ -284,6 +284,7 @@ net/minecraft/client/renderer/entity/HumanoidMobRenderer	render	(Lnet/minecraft/
 # --- ATM 9 run, batch 4 (Minecraft side)
 net/minecraft/client/Options	$get$renderDebug	()Z	ClientCompat	getRenderDebug	-
 net/minecraft/client/Options	$set$renderDebug	(Z)V	ClientCompat	setRenderDebug	-
+net/neoforged/neoforge/client/event/EntityRenderersEvent$AddLayers	getSkins	()Ljava/util/Set;	ClientCompat	getSkins	-
 net/neoforged/neoforge/client/event/EntityRenderersEvent$AddLayers	getSkin	(Ljava/lang/String;)Lnet/minecraft/client/renderer/entity/LivingEntityRenderer;	ClientCompat	getSkin	-
 net/minecraft/world/item/crafting/Recipe	getRemainingItems	(Lnet/minecraft/world/Container;)Lnet/minecraft/core/NonNullList;	RecipeCompat	getRemainingItems	-
 net/minecraft/world/item/crafting/Recipe	getRemainingItems	(Lnet/minecraft/world/Container;)Lnet/minecraft/core/NonNullList;@special	=args	BridgeHelpers.input@0	(Lnet/minecraft/world/item/crafting/RecipeInput;)Lnet/minecraft/core/NonNullList;
