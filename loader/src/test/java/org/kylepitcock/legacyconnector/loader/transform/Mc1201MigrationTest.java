@@ -1012,7 +1012,32 @@ class Mc1201MigrationTest implements Opcodes {
         assertNotNull(accessor, "the legacy public field read must be routed through the target record accessor");
         assertEquals(INVOKESTATIC, accessor.getOpcode());
         assertEquals("(L" + dimensions + ";)Z", accessor.desc);
-        assertNull(find(method, dimensions, "fixed"), "the private target field access must not remain");
+        for (AbstractInsnNode instruction : method.instructions) {
+            assertFalse(instruction instanceof FieldInsnNode field
+                            && field.owner.equals(dimensions) && field.name.equals("fixed"),
+                    "the private target field access must not remain");
+        }
+        verify(caller);
+    }
+
+    @Test
+    void renamesEntityDataAccessorGetIdToRecordAccessor() {
+        String accessor = "net/minecraft/network/syncher/EntityDataAccessor";
+        ClassNode caller = cls("test/EntityDataAccessorCalls", "java/lang/Object");
+        MethodNode method = method(caller, ACC_PUBLIC | ACC_STATIC, "accessorId", "(L" + accessor + ";)I");
+        method.instructions.add(new VarInsnNode(ALOAD, 0));
+        method.instructions.add(new MethodInsnNode(INVOKEVIRTUAL, accessor, "getId", "()I", false));
+        method.instructions.add(new InsnNode(IRETURN));
+        method.maxStack = 1;
+        method.maxLocals = 1;
+
+        Mc1201Migration.Counts counts = apply(caller);
+        assertEquals(1, counts.calls);
+        MethodInsnNode id = find(method, accessor, "id");
+        assertNotNull(id, "the Forge-era getter name must be translated to the NeoForge record accessor");
+        assertEquals(INVOKEVIRTUAL, id.getOpcode());
+        assertEquals("()I", id.desc);
+        assertNull(find(method, accessor, "getId"), "the removed getter name must not remain");
         verify(caller);
     }
 
