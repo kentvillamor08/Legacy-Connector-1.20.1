@@ -87,6 +87,24 @@ class ForgeGuiLayoutBridgeTest {
     }
 
     @Test
+    void readingLegacyAdjustedCounterDoesNotLowerTheLiveTargetCounter() throws Exception {
+        Gui liveGui = allocate(Gui.class);
+        ForgeGui forgeGui = allocate(ForgeGui.class);
+        liveGui.rightHeight = 105;
+
+        ForgeGui.mcc$beginVehicleHealthLayer(85);
+        ForgeGui.mcc$endVehicleHealthLayer(105);
+
+        forgeGui.mcc$renderOverlay(
+                liveGui,
+                (gui, graphics, partialTick, width, height) ->
+                        assertEquals(85, gui.rightHeight),
+                null, 0.0F, 0, 0, ForgeGui.mcc$vehicleHealthRightHeightDelta());
+
+        assertEquals(105, liveGui.rightHeight);
+    }
+
+    @Test
     void airAnchoredLegacyOverlaySeesPreVehicleHeightWithoutChangingLiveTargetCounter() throws Exception {
         Gui liveGui = allocate(Gui.class);
         ForgeGui forgeGui = allocate(ForgeGui.class);
