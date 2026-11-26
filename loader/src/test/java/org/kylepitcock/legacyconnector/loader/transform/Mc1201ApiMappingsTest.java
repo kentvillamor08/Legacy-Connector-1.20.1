@@ -10,6 +10,34 @@ import org.objectweb.asm.Opcodes;
 
 final class Mc1201ApiMappingsTest {
     @Test
+    void mapsAddLayersSkinSetAndLookupToLegacyStringContract() {
+        String owner = "net/neoforged/neoforge/client/event/EntityRenderersEvent$AddLayers";
+        String helper = "org/kylepitcock/legacyconnector/v1_20_1/migrate/ClientCompat";
+
+        var skins = Mc1201ApiMappings.callMapping(
+                owner, "getSkins", "()Ljava/util/Set;", Opcodes.INVOKEVIRTUAL);
+        assertNotNull(skins);
+        assertTrue(skins.usesHelper());
+        assertEquals(owner, skins.declaringOwner());
+        assertEquals(helper, skins.helperOwner());
+        assertEquals("getSkins", skins.helperName());
+        assertEquals("(L" + owner + ";)Ljava/util/Set;", skins.helperDescriptor());
+
+        var skin = Mc1201ApiMappings.callMapping(
+                owner, "getSkin",
+                "(Ljava/lang/String;)Lnet/minecraft/client/renderer/entity/LivingEntityRenderer;",
+                Opcodes.INVOKEVIRTUAL);
+        assertNotNull(skin);
+        assertTrue(skin.usesHelper());
+        assertEquals(owner, skin.declaringOwner());
+        assertEquals(helper, skin.helperOwner());
+        assertEquals("getSkin", skin.helperName());
+        assertEquals("(L" + owner + ";Ljava/lang/String;)"
+                + "Lnet/minecraft/client/renderer/entity/LivingEntityRenderer;",
+                skin.helperDescriptor());
+    }
+
+    @Test
     void resolvesInheritedVirtualCallRulesUsingTheTargetHierarchy() {
         var mapping = Mc1201ApiMappings.callMapping(
                 "net/minecraft/client/player/LocalPlayer",
