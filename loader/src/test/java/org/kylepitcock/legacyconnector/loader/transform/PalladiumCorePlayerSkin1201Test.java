@@ -134,8 +134,14 @@ class PalladiumCorePlayerSkin1201Test implements Opcodes {
 
         Mc1201Migration.Counts counts = Mc1201Migration.apply(node, hierarchy);
 
-        assertEquals(1, counts.calls,
-                "the generic migration table redirects the legacy String-based AddLayers.getSkin call");
+        assertEquals(2, counts.calls,
+                "the generic migration rewrites both AddLayers.getSkins() and the legacy String-based getSkin call");
+        MethodNode callback = findMethod(node, "renderLayers", "(L" + EVENT + ";)V");
+        assertNotNull(callback);
+        assertNotNull(findCall(callback,
+                "org/kylepitcock/legacyconnector/v1_20_1/migrate/ClientCompat",
+                "getSkins",
+                "(L" + EVENT + ";)Ljava/util/Set;"));
         MethodNode lambda = findMethod(node, "lambda$renderLayers$0", OLD_LAMBDA_DESC);
         assertNotNull(lambda);
         assertNotNull(findCall(lambda,
@@ -153,8 +159,14 @@ class PalladiumCorePlayerSkin1201Test implements Opcodes {
         hierarchy.add(node);
         Mc1201Migration.Counts counts = Mc1201Migration.apply(node, hierarchy);
 
-        assertEquals(0, counts.calls,
-                "the adapter must change the descriptor before the generic String-getter rewrite runs");
+        assertEquals(1, counts.calls,
+                "the generic pass still adapts getSkins(), while the Palladium adapter keeps getSkin(PlayerSkin.Model) on the target API");
+        MethodNode callback = findMethod(node, "renderLayers", "(L" + EVENT + ";)V");
+        assertNotNull(callback);
+        assertNotNull(findCall(callback,
+                "org/kylepitcock/legacyconnector/v1_20_1/migrate/ClientCompat",
+                "getSkins",
+                "(L" + EVENT + ";)Ljava/util/Set;"));
         MethodNode lambda = findMethod(node, "lambda$renderLayers$0", NEW_LAMBDA_DESC);
         assertNotNull(lambda);
         assertNotNull(findCall(lambda, EVENT, "getSkin", NEW_GET_SKIN));
